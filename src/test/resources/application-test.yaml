@@ -23,3 +23,8 @@ offerforge:
     max-deep-questions: 1
     max-follow-ups: 2
     message-window: 12
+  rate-limit:
+    # 集成测试同用户会连续多场面试，放宽限额避免误伤；限流行为由 RateLimitIntegrationTests 专项验证
+    interview-ask-limit: 1000
+    qa-ask-limit: 1000
+    report-limit: 1000

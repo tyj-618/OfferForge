@@ -12,4 +12,7 @@ public interface InterviewSessionStore {
     Optional<InterviewContext> find(String sessionId);
 
     void remove(String sessionId);
+
+    /** 该用户是否存在未结束的面试会话（限流用：每用户同时只能有 1 场进行中的面试） */
+    boolean hasActiveSession(Long userId);
 }

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { reportApi } from '../api'
+import { classifyError } from '../utils/errors'
 
 const route = useRoute()
 const report = ref(null)
@@ -38,6 +39,14 @@ function formatTime(value) {
 
 function toggle(index) {
   expanded.value[index] = !expanded.value[index]
+}
+
+// 导出 PDF：展开全部逐题点评后走浏览器打印
+function exportPdf() {
+  for (const item of report.value?.questionEvaluations || []) {
+    expanded.value[item.questionIndex] = true
+  }
+  nextTick(() => window.print())
 }
 
 function renderRadar() {
@@ -81,17 +90,21 @@ function renderRadar() {
   })
 }
 
-onMounted(async () => {
+onMounted(load)
+
+async function load() {
+  loading.value = true
+  error.value = ''
   try {
     report.value = await reportApi.get(route.params.interviewId)
     await nextTick()
     renderRadar()
   } catch (e) {
-    error.value = e.message
+    error.value = classifyError(e).message
   } finally {
     loading.value = false
   }
-})
+}
 
 watch(report, async () => {
   await nextTick()
@@ -105,9 +118,25 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page">
-    <h1 class="page-title">面试报告</h1>
-    <p v-if="loading" class="empty">加载中…</p>
-    <p v-else-if="error" class="error-text">{{ error }}</p>
+    <div class="page-head">
+      <h1 class="page-title">面试报告</h1>
+      <button v-if="report" class="secondary print-btn" @click="exportPdf">🖨 导出 PDF</button>
+    </div>
+    <template v-if="loading">
+      <div class="card section">
+        <div class="skeleton skeleton-title"></div>
+        <div class="skeleton skeleton-chart"></div>
+      </div>
+      <div class="card section">
+        <div class="skeleton skeleton-title"></div>
+        <div v-for="i in 4" :key="i" class="skeleton skeleton-text"></div>
+      </div>
+    </template>
+
+    <div v-else-if="error" class="card section error-alert">
+      <p class="error-text">{{ error }}</p>
+      <button class="secondary" @click="load">重试</button>
+    </div>
 
     <template v-else-if="report">
       <!-- 顶部综合评分 -->
@@ -205,6 +234,17 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.page-head .page-title {
+  margin-bottom: 0;
+}
+
 .overview {
   display: grid;
   grid-template-columns: 200px 1fr 340px;
@@ -366,6 +406,31 @@ onBeforeUnmount(() => {
   }
 
   .two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 手机档：雷达图缩小，逐题点评全宽卡片（题目文本独占一行） */
+@media (max-width: 767px) {
+  .radar {
+    height: 200px;
+  }
+
+  .big-score {
+    font-size: 40px;
+  }
+
+  .question-header {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .question-text {
+    flex-basis: 100%;
+    order: 5;
+  }
+
+  .suggestion-grid {
     grid-template-columns: 1fr;
   }
 }

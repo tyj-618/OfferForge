@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import ToastHub from './components/ToastHub.vue'
 import { authApi, clearToken, getToken } from './api'
 
 const route = useRoute()
@@ -31,6 +32,7 @@ async function logout() {
       <button class="ghost" @click="logout">退出登录</button>
     </header>
     <RouterView />
+    <ToastHub />
   </div>
 </template>
 
@@ -65,5 +67,20 @@ async function logout() {
 
 .nav a.router-link-active {
   color: var(--primary);
+}
+
+@media (max-width: 767px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    padding: 10px 16px;
+  }
+
+  .nav {
+    gap: 14px;
+    font-size: 13px;
+    order: 3;
+    flex-basis: 100%;
+  }
 }
 </style>

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { resumeApi } from '../api'
+import { classifyError, notifyError } from '../utils/errors'
 
 const resumes = ref([])
 const currentId = ref(null)
@@ -62,7 +63,7 @@ async function refreshList() {
   try {
     resumes.value = await resumeApi.list()
   } catch (e) {
-    error.value = e.message
+    error.value = classifyError(e).message
   }
 }
 
@@ -123,7 +124,7 @@ async function parseRawText() {
     }
     notice.value = '解析完成，已回填到下方表单，请核对后保存'
   } catch (e) {
-    error.value = e.message
+    notifyError(e, parseRawText)
   } finally {
     parsing.value = false
   }
@@ -152,7 +153,7 @@ async function save() {
     await refreshList()
     notice.value = '保存成功'
   } catch (e) {
-    error.value = e.message
+    notifyError(e, save)
   } finally {
     saving.value = false
   }
@@ -174,7 +175,7 @@ async function removeResume(resumeId) {
       await loadResume(resumes.value[0].id)
     }
   } catch (e) {
-    error.value = e.message
+    notifyError(e, () => removeResume(resumeId))
   }
 }
 </script>
@@ -421,5 +422,18 @@ h4 {
 .success-text {
   color: var(--success);
   font-size: 13px;
+}
+
+/* 平板/手机档：列表与编辑区改为单列 */
+@media (max-width: 1199px) {
+  .resume-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

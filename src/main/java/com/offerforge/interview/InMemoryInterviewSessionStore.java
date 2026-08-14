@@ -27,4 +27,10 @@ public class InMemoryInterviewSessionStore implements InterviewSessionStore {
     public void remove(String sessionId) {
         sessions.remove(sessionId);
     }
+
+    @Override
+    public boolean hasActiveSession(Long userId) {
+        return sessions.values().stream()
+                .anyMatch(context -> context.getUserId() == userId && !context.getState().terminal());
+    }
 }

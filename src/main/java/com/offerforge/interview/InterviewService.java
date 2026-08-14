@@ -35,6 +35,8 @@ public class InterviewService {
     private static final int LOCK_CLEANUP_INTERVAL = 512;
     private static final String OPENING_TEXT = "你好！我是 OfferForge 的 AI 面试官。本次模拟面试分为四个环节："
             + "基础考察、项目经历、深度追问与收尾总结。请先做一个简短的自我介绍（可包含项目经历与熟悉的技术栈），完成后我们正式开始。";
+    /** 日志中用户回答预览的最大长度（脱敏：不打印全文） */
+    private static final int ANSWER_LOG_PREVIEW_LENGTH = 100;
     /** 面试岗位方向缺省值 */
     public static final String DEFAULT_POSITION = "Java 后端工程师";
 
@@ -88,6 +90,9 @@ public class InterviewService {
      * 开始面试：resumeId 可空；非空时校验归属，PROJECT/DEEP 阶段将基于该简历出题。
      */
     public InterviewStartResponse start(Long userId, String position, Long resumeId) {
+        if (sessionStore.hasActiveSession(userId)) {
+            throw new BusinessException(ErrorCode.CONFLICT, "已有一场面试正在进行，请先结束后再开始新面试");
+        }
         if (resumeId != null) {
             // 校验简历存在且属于当前用户（不存在/非本人均 NOT_FOUND）
             resumeService.getOwned(userId, resumeId);
@@ -116,6 +121,8 @@ public class InterviewService {
                 if (context.getState().terminal()) {
                     throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，请勿继续作答");
                 }
+                log.info("interview answer received sessionId={} phase={} length={} preview={}",
+                        sessionId, context.getState(), userMessage.length(), preview(userMessage));
                 messageStore.append(sessionId, List.of(ChatMessage.user(userMessage)));
 
                 InterviewTurnResult result;
@@ -162,6 +169,54 @@ public class InterviewService {
     public InterviewStatusResponse status(Long userId, String sessionId) {
         synchronized (lockFor(sessionId)) {
             return statusView(requireOwnedSession(userId, sessionId));
+        }
+    }
+
+    /**
+     * 跳过当前题：记 0 分（与答错同等对待，防止靠跳过规避难题），然后推进到下一题或下一阶段。
+     * 仅出题阶段（BASICS/PROJECT/DEEP）可用；开场/收尾阶段无需跳过。
+     */
+    public InterviewTurnResult skip(Long userId, String sessionId, AiStreamChunkConsumer chunkConsumer)
+            throws IOException {
+        Object lock = lockFor(sessionId);
+        try {
+            synchronized (lock) {
+                InterviewContext context = requireOwnedSession(userId, sessionId);
+                if (context.getState().terminal()) {
+                    throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，无需跳过");
+                }
+                InterviewState phase = context.getState();
+                if (phase == InterviewState.OPENING || phase == InterviewState.CLOSING) {
+                    throw new BusinessException(ErrorCode.CONFLICT, "当前环节无需跳题，直接回复即可");
+                }
+                log.info("interview sessionId={} phase={} question skipped", sessionId, phase);
+                messageStore.append(sessionId, List.of(ChatMessage.user("（跳过此题）")));
+
+                // 记 0 分并纳入平均分，连续低分连击照常累计（可能触发降难度）
+                AnswerEvaluation skipped = new AnswerEvaluation(
+                        0, 0, 0, 0, 0, List.of(), List.of(), List.of(), "候选人跳过了该题");
+                context.recordAnswer(context.getCurrentQuestion(), "", skipped);
+                updateScoreStreaks(context, 0);
+                if (context.getConsecutiveLowScores() >= 2 && context.getCurrentDifficulty() != Difficulty.EASY) {
+                    context.setCurrentDifficulty(context.getCurrentDifficulty().lower());
+                    context.setConsecutiveLowScores(0);
+                    log.info("interview sessionId={} difficulty lowered to {}", sessionId, context.getCurrentDifficulty());
+                }
+
+                StateTransitionStrategy.Action action;
+                if (context.questionsInPhase(phase) >= properties.maxQuestionsFor(phase)) {
+                    // 本阶段题量已满，跳过后直接进入下一阶段
+                    action = StateTransitionStrategy.Action.ADVANCE;
+                    advance(context, sessionId, chunkConsumer);
+                } else {
+                    action = StateTransitionStrategy.Action.NEW_QUESTION;
+                    askNextQuestion(context, sessionId, phase, chunkConsumer);
+                }
+                sessionStore.save(context);
+                return new InterviewTurnResult(0.0, "已跳过该题，计 0 分", action, statusView(context));
+            }
+        } finally {
+            releaseLockIfTerminal(sessionId, lock);
         }
     }
 
@@ -270,6 +325,9 @@ public class InterviewService {
         context.setCurrentQuestionFollowUp(false);
         context.setCurrentFollowUpCount(0);
         context.recordQuestionAsked(phase);
+        log.info("interview question asked sessionId={} phase={} difficulty={} followUp={} question={}",
+                sessionId, phase, context.getCurrentDifficulty(), context.isCurrentQuestionFollowUp(),
+                preview(question.question()));
         List<ChatMessage> messages = promptBuilder.buildInterviewerMessages(
                 messageStore.list(sessionId), phase, question.question());
         streamAndRecord(sessionId, messages, chunkConsumer);
@@ -352,6 +410,14 @@ public class InterviewService {
             asked.add(context.getCurrentQuestion());
         }
         return asked;
+    }
+
+    /** 日志脱敏：用户回答只保留前 100 字符预览，不打印全文 */
+    private static String preview(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= ANSWER_LOG_PREVIEW_LENGTH ? value : value.substring(0, ANSWER_LOG_PREVIEW_LENGTH) + "…";
     }
 
     private InterviewContext requireOwnedSession(Long userId, String sessionId) {

@@ -51,4 +51,16 @@ public interface AiModelClient {
      * 解析失败时返回 null，由调用方降级到知识库出题。
      */
     AiGeneratedQuestion generateDeepQuestion(String prompt);
+
+    /**
+     * 健康探测：发起一次最小生成请求验证模型链路可用；异常视为不可用。
+     */
+    default boolean healthProbe() {
+        try {
+            generateText(List.of(ChatMessage.user("ping")));
+            return true;
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
 }

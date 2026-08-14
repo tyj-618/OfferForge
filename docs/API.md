@@ -1,0 +1,320 @@
+# OfferForge API 文档
+
+Base URL：`/api`（开发环境 `http://localhost:8081`，Docker 部署经 nginx 反代 `http://localhost/api`）
+
+## 通用约定
+
+### 鉴权
+
+除 `/api/auth/register`、`/api/auth/login`、`/api/health` 外，所有接口需携带：
+
+```
+Authorization: Bearer <token>
+```
+
+token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/api/auth/refresh` 静默续期。
+
+### 统一响应体
+
+```json
+{ "code": 0, "message": "ok", "data": { } }
+```
+
+| code | 含义 |
+| --- | --- |
+| 0 | 成功 |
+| 40000 | 请求参数错误（message 指明具体参数） |
+| 40001 | 用户名或密码错误 |
+| 40100 | token 失效 |
+| 40400 | 资源不存在 |
+| 40900 | 资源状态冲突（如已有一场进行中的面试、开场/收尾环节不可跳过） |
+| 42900 | 请求过于频繁（触发限流） |
+| 50000 | 系统内部错误（不暴露技术细节） |
+| 50300 | AI 服务暂时不可用 / LLM 超时 |
+| 50301 | 服务暂时不可用（如数据库故障） |
+
+### 限流（每用户滑动窗口，1 分钟）
+
+| 路由 | 限额 |
+| --- | --- |
+| `POST /api/interview/{sessionId}/ask` | 10 次 |
+| `POST /api/qa/ask` | 5 次 |
+| `GET /api/report/**` | 3 次 |
+
+超限返回 HTTP 429；SSE 路由以 `event:error` 帧返回 `{"code":42900,...}`。
+
+---
+
+## 认证 `/api/auth`
+
+### POST /auth/register
+
+注册账号（不直接下发 token，需随后调用 login）。
+
+请求：`{ "username": "alice", "password": "123456" }`（密码至少 6 位）
+
+响应 data：`{ "id": 1, "username": "alice", "nickname": "alice" }`
+
+### POST /auth/login
+
+请求：同 register。响应 data：
+
+```json
+{ "token": "eyJ...", "expiresIn": 7200, "refreshToken": "...", "refreshExpiresIn": 604800, "user": { } }
+```
+
+同时下发 httpOnly refresh cookie（路径 `/api/auth`）。
+
+### POST /auth/refresh
+
+无请求体，凭 refresh cookie 换取新 token。响应 data：`{ "token": "..." }`
+
+### POST /auth/logout
+
+清除 refresh cookie。
+
+---
+
+## 知识库 `/api/knowledge`
+
+### POST /knowledge/import
+
+将内置 Java 后端题库导入当前用户知识库（幂等，已存在条目跳过）。
+
+响应 data：`{ "total": 60, "inserted": 60, "skipped": 0 }`
+
+---
+
+## 问答 `/api/qa`
+
+### POST /qa/ask
+
+请求：`{ "question": "HashMap 的底层原理？" }`
+
+响应 data：`{ "answer": "...", "referencedKnowledgeIds": [1, 3] }`
+
+---
+
+## 模拟面试 `/api/interview`
+
+### POST /interview/start
+
+开始一场面试。每用户同时仅允许一场进行中面试（否则 40900）。
+
+请求：
+
+```json
+{ "position": "Java 后端工程师", "resumeId": 1 }
+```
+
+`position` 可空（默认通用方向）；`resumeId` 可空（不关联简历则使用通用项目题）。
+
+响应 data：
+
+```json
+{
+  "sessionId": "uuid",
+  "openingMessage": "你好，我是今天的面试官……请先做个自我介绍",
+  "status": { "...": "见 status 结构" }
+}
+```
+
+### status 结构（公共）
+
+```json
+{
+  "state": "BASICS",
+  "phaseLabel": "基础考察",
+  "difficultyLabel": "中等",
+  "askedCount": 2,
+  "plannedTotal": 8,
+  "currentQuestion": "……",
+  "currentQuestionFollowUp": false,
+  "followUpsUsed": 0,
+  "followUpLimit": 2,
+  "averageScore": 6.5
+}
+```
+
+`state` 枚举：`OPENING | BASICS | PROJECT | DEEP | CLOSING | FINISHED`
+
+### POST /interview/{sessionId}/ask （SSE）
+
+提交回答，`Content-Type: application/json`，`Accept: text/event-stream`。
+
+请求：`{ "message": "我的回答……" }`
+
+事件流：
+
+```
+event:message
+data:面试官的下一段话（分块多次下发）
+
+event:done
+data:{"score":7,"evaluationComment":"……","status":{...},"action":"CONTINUE"}
+```
+
+`action` 为 `CONTINUE` 或 `FINISH`（`status.state=FINISHED` 时前端跳转报告）。
+
+错误帧：
+
+```
+event:error
+data:{"code":40900,"message":"面试尚未开始"}
+```
+
+### POST /interview/{sessionId}/skip （SSE）
+
+跳过当前题（计 0 分并推进状态机），无请求体，事件流契约与 ask 一致。
+仅 `BASICS/PROJECT/DEEP` 环节可用，开场/收尾环节返回 40900。
+
+### POST /interview/{sessionId}/finish
+
+结束面试：归档成绩、生成报告。响应 data 为最终 status。
+
+### GET /interview/{sessionId}/status
+
+查询当前状态（页面刷新恢复用）。响应 data 为 status 结构。
+
+---
+
+## 简历 `/api/resume`
+
+### POST /resume
+
+创建或更新（带 `id` 为更新）。结构化字段全空且携带 `rawText` 时由后端 LLM 解析回填。
+
+请求：
+
+```json
+{
+  "id": null,
+  "name": "张三",
+  "education": "……",
+  "skills": "Java、Spring Boot……",
+  "internships": "……",
+  "selfIntroduction": "……",
+  "projects": [
+    {
+      "projectName": "电商平台",
+      "role": "后端负责人",
+      "duration": "2025.03 - 2025.08",
+      "description": "……",
+      "techStack": "Spring Boot、Redis",
+      "highlights": "……",
+      "challenges": "……"
+    }
+  ],
+  "rawText": "可选：简历原文"
+}
+```
+
+响应 data：完整简历（含 `id`、`updatedAt`）。
+
+### POST /resume/parse
+
+纯文本解析预览（不落库）。请求 `{ "rawText": "……" }`，响应 data 为结构化字段。
+
+### GET /resume/list
+
+当前用户全部简历（按更新时间倒序）。响应 data：`[{ "id": 1, "name": "张三", "updatedAt": "..." }]`
+
+### GET /resume/detail/{resumeId}
+
+简历详情（仅本人）。
+
+### GET /resume/{userId}
+
+获取该用户最近更新的一份简历。
+
+### GET /resume/{userId}/section/{section}
+
+获取简历某部分纯文本，`section ∈ education | skills | projects | internships | selfIntroduction | all`。
+
+### DELETE /resume/{id}
+
+删除简历（仅本人）。
+
+---
+
+## 报告 `/api/report`
+
+> 注意：该组接口每用户每分钟限 3 次。
+
+### GET /report/{interviewId}
+
+完整面试报告。响应 data：
+
+```json
+{
+  "position": "Java 后端工程师",
+  "interviewTime": "2026-08-14T10:00:00",
+  "overallScore": 72.5,
+  "rating": "良好",
+  "totalQuestions": 8,
+  "totalFollowUps": 3,
+  "durationMinutes": 25,
+  "basicsScore": 7.1,
+  "projectScore": 6.8,
+  "deepScore": 7.5,
+  "avgAccuracy": 7.2,
+  "avgCompleteness": 6.9,
+  "avgClarity": 7.4,
+  "avgDepth": 6.8,
+  "strengths": ["……"],
+  "weaknesses": ["……"],
+  "suggestions": ["……"],
+  "recommendedMaterials": [
+    { "topic": "JVM GC", "reason": "……", "suggestedQuestion": "……" }
+  ],
+  "questionEvaluations": [
+    {
+      "questionIndex": 1,
+      "question": "……",
+      "userAnswer": "……",
+      "score": 7.0,
+      "feedback": "……",
+      "followUp": false
+    }
+  ]
+}
+```
+
+### GET /report/history?page=0&size=10
+
+分页历史记录。响应 data：
+
+```json
+{
+  "content": [
+    { "interviewId": 12, "interviewTime": "...", "position": "...", "overallScore": 72.5, "status": "FINISHED" }
+  ],
+  "totalElements": 5
+}
+```
+
+### GET /report/progress?limit=10
+
+最近 N 次综合评分（进步曲线）。响应 data：`[{ "overallScore": 68.0 }, ...]`
+
+---
+
+## 健康检查 `/api/health`
+
+### GET /health（免鉴权）
+
+```json
+{
+  "status": "UP",
+  "components": {
+    "mysql": { "status": "UP", "latencyMs": 5 },
+    "redis": { "status": "UP", "latencyMs": 2 },
+    "elasticsearch": { "status": "DISABLED" },
+    "llm": { "status": "UP", "latencyMs": 320 }
+  }
+}
+```
+
+- 核心组件（MySQL、LLM）任一 DOWN → 整体 `DOWN`
+- 非核心组件（Redis、ES）DOWN → 整体 `DEGRADED`（自动降级内存/SQL）
+- 未启用的组件为 `DISABLED`，不影响整体状态

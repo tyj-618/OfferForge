@@ -1,0 +1,9 @@
+.git/
+.qoder/
+.idea/
+target/
+frontend/node_modules/
+frontend/dist/
+data/
+.env
+*.log

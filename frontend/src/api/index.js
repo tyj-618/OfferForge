@@ -34,7 +34,9 @@ http.interceptors.response.use(
   (response) => unwrap(response, false),
   async (error) => {
     if (!error.response) {
-      throw new Error('网络异常，请检查后端服务是否启动')
+      const networkError = new Error('网络连接失败，请检查网络后重试')
+      networkError.isNetwork = true
+      throw networkError
     }
     return unwrap(error.response, true)
   }
@@ -114,21 +116,38 @@ export const resumeApi = {
 }
 
 /**
- * SSE 问答：POST + text/event-stream，逐块回调 onMessage，
+ * SSE 通用请求：POST + text/event-stream，逐块回调 onMessage，
  * done 事件（评分/动作/进度）回调 onDone，error 事件回调 onError。
+ * 非 2xx 响应按状态码分类：429 限流、503 AI 服务不可用；401 静默续期后重连一次。
  */
-export async function askStream(sessionId, message, { onMessage, onDone, onError }) {
-  const response = await fetch(`/api/interview/${sessionId}/ask`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-      Authorization: `Bearer ${getToken()}`
-    },
-    body: JSON.stringify({ message })
-  })
+async function sseRequest(url, body, callbacks, retried = false) {
+  let response
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        Accept: 'text/event-stream',
+        Authorization: `Bearer ${getToken()}`
+      },
+      body: body ? JSON.stringify(body) : null
+    })
+  } catch {
+    const networkError = new Error('网络连接失败，请检查网络后重试')
+    networkError.isNetwork = true
+    throw networkError
+  }
+  if (response.status === 401 && !retried) {
+    try {
+      await refreshTokenOnce()
+      return await sseRequest(url, body, callbacks, true)
+    } catch {
+      clearToken()
+      window.location.href = '/login'
+    }
+  }
   if (!response.ok || !response.body) {
-    throw new Error('面试对话连接失败，请稍后重试')
+    throw classifySseStatus(response.status)
   }
   const reader = response.body.getReader()
   const decoder = new TextDecoder('utf-8')
@@ -143,9 +162,33 @@ export async function askStream(sessionId, message, { onMessage, onDone, onError
     while ((separator = buffer.indexOf('\n\n')) >= 0) {
       const frame = buffer.slice(0, separator)
       buffer = buffer.slice(separator + 2)
-      dispatchSseFrame(frame, { onMessage, onDone, onError })
+      dispatchSseFrame(frame, callbacks)
     }
   }
+}
+
+function classifySseStatus(status) {
+  let code = -1
+  let message = '面试对话连接失败，请稍后重试'
+  if (status === 429) {
+    code = 42900
+    message = '请求过于频繁，请稍后再试'
+  } else if (status === 503) {
+    code = 50300
+    message = 'AI 响应超时，请重试'
+  }
+  const error = new Error(message)
+  error.code = code
+  return error
+}
+
+export function askStream(sessionId, message, callbacks) {
+  return sseRequest(`/api/interview/${sessionId}/ask`, { message }, callbacks)
+}
+
+// 跳过当前题：无请求体，SSE 契约与 ask 一致（计 0 分后推进状态机）
+export function skipStream(sessionId, callbacks) {
+  return sseRequest(`/api/interview/${sessionId}/skip`, null, callbacks)
 }
 
 function dispatchSseFrame(frame, { onMessage, onDone, onError }) {
@@ -167,8 +210,10 @@ function dispatchSseFrame(frame, { onMessage, onDone, onError }) {
   } else if (eventName === 'done') {
     onDone?.(JSON.parse(payload))
   } else if (eventName === 'error') {
-    const error = JSON.parse(payload)
-    onError?.(new Error(error.message || '面试对话异常'))
+    const parsed = JSON.parse(payload)
+    const error = new Error(parsed.message || '面试对话异常')
+    error.code = parsed.code
+    onError?.(error)
   }
 }
 

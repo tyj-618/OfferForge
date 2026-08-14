@@ -3,6 +3,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { reportApi } from '../api'
+import { classifyError } from '../utils/errors'
 
 const router = useRouter()
 const loading = ref(true)
@@ -60,7 +61,11 @@ function renderTrend() {
   })
 }
 
-onMounted(async () => {
+onMounted(load)
+
+async function load() {
+  loading.value = true
+  error.value = ''
   try {
     const [history, progress] = await Promise.all([
       reportApi.history(0, 10),
@@ -72,11 +77,11 @@ onMounted(async () => {
     await nextTick()
     renderTrend()
   } catch (e) {
-    error.value = e.message
+    error.value = classifyError(e).message
   } finally {
     loading.value = false
   }
-})
+}
 
 onBeforeUnmount(() => {
   trendChart?.dispose()
@@ -86,8 +91,21 @@ onBeforeUnmount(() => {
 <template>
   <div class="page">
     <h1 class="page-title">历史报告</h1>
-    <p v-if="loading" class="empty">加载中…</p>
-    <p v-else-if="error" class="error-text">{{ error }}</p>
+    <template v-if="loading">
+      <div class="card section">
+        <div class="skeleton skeleton-title"></div>
+        <div class="skeleton skeleton-chart"></div>
+      </div>
+      <div class="card section">
+        <div class="skeleton skeleton-title"></div>
+        <div v-for="i in 4" :key="i" class="skeleton skeleton-row"></div>
+      </div>
+    </template>
+
+    <div v-else-if="error" class="card section error-alert">
+      <p class="error-text">{{ error }}</p>
+      <button class="secondary" @click="load">重试</button>
+    </div>
 
     <template v-else>
       <div class="card section">
@@ -98,7 +116,8 @@ onBeforeUnmount(() => {
 
       <div class="card section">
         <h2>面试记录（共 {{ totalElements }} 次）</h2>
-        <table v-if="historyItems.length" class="history-table">
+        <div v-if="historyItems.length" class="table-wrap">
+          <table class="history-table">
           <thead>
             <tr>
               <th>面试时间</th>
@@ -121,8 +140,9 @@ onBeforeUnmount(() => {
               </td>
             </tr>
           </tbody>
-        </table>
-        <p v-else class="empty">暂无面试记录</p>
+          </table>
+        </div>
+        <p v-if="!historyItems.length" class="empty">暂无面试记录</p>
       </div>
     </template>
   </div>
@@ -142,8 +162,13 @@ onBeforeUnmount(() => {
   height: 260px;
 }
 
+.table-wrap {
+  overflow-x: auto;
+}
+
 .history-table {
   width: 100%;
+  min-width: 640px;
   border-collapse: collapse;
 }
 

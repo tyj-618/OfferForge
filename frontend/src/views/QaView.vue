@@ -1,35 +1,32 @@
 <script setup>
 import { ref } from 'vue'
 import { knowledgeApi, qaApi } from '../api'
+import { notifyError } from '../utils/errors'
 
 const importSummary = ref(null)
 const importing = ref(false)
-const importError = ref('')
 
 const question = ref('')
 const asking = ref(false)
-const askError = ref('')
 const conversations = ref([])
 
 async function importKnowledge() {
   importing.value = true
-  importError.value = ''
   try {
     importSummary.value = await knowledgeApi.importBuiltin()
   } catch (e) {
-    importError.value = e.message
+    notifyError(e, importKnowledge)
   } finally {
     importing.value = false
   }
 }
 
-async function ask() {
-  const text = question.value.trim()
+async function ask(textOverride) {
+  const text = (textOverride ?? question.value).trim()
   if (!text || asking.value) {
     return
   }
   asking.value = true
-  askError.value = ''
   conversations.value.push({ role: 'user', content: text })
   question.value = ''
   try {
@@ -40,8 +37,8 @@ async function ask() {
       refs: data.referencedKnowledgeIds || []
     })
   } catch (e) {
-    askError.value = e.message
     conversations.value.pop()
+    notifyError(e, () => ask(text))
   } finally {
     asking.value = false
   }
@@ -66,7 +63,6 @@ async function ask() {
         ✅ 导入完成：共 {{ importSummary.total }} 条，新增 {{ importSummary.inserted }} 条，跳过
         {{ importSummary.skipped }} 条（已存在）
       </p>
-      <p v-if="importError" class="error-text">{{ importError }}</p>
     </div>
 
     <div class="card qa-card">
@@ -81,9 +77,13 @@ async function ask() {
           </div>
         </div>
       </div>
-      <p v-if="askError" class="error-text">{{ askError }}</p>
+      <div v-if="asking" class="bubble-row assistant">
+        <div class="bubble typing-bubble" aria-label="AI 教练思考中">
+          <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+        </div>
+      </div>
 
-      <form class="ask-row" @submit.prevent="ask">
+      <form class="ask-row" @submit.prevent="ask()">
         <input v-model="question" placeholder="例如：HashMap 的底层原理是什么？" :disabled="asking" />
         <button type="submit" :disabled="asking || !question.trim()">
           {{ asking ? '思考中…' : '提问' }}

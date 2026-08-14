@@ -28,6 +28,12 @@ server:
       enabled: true
       force-response: true
 
+# 统一日志格式：[requestId] [userId] [interviewId] [level] message（requestId/userId 由 RequestIdFilter 写入 MDC）
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{requestId:-}] [%X{userId:-}] [%X{interviewId:-}] %logger{36} : %msg%n"
+    level: "%5p"
+
 management:
   endpoints:
     web:

@@ -8,6 +8,7 @@ import com.offerforge.report.InterviewReport;
 import com.offerforge.report.ReportService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,6 +28,8 @@ import java.util.concurrent.Executor;
 public class InterviewController {
 
     private static final Logger log = LoggerFactory.getLogger(InterviewController.class);
+    /** MDC key：与日志模式中的 interviewId 占位对应 */
+    private static final String INTERVIEW_ID_KEY = "interviewId";
     /** 需覆盖最坏上游耗时：评分重试（30s×2）+ 退避 + 流式读超时（60s），120s 预算过紧 */
     private static final long STREAM_TIMEOUT_MILLIS = 180_000L;
 
@@ -78,19 +81,44 @@ public class InterviewController {
     public ApiResponse<InterviewReport> finish(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @PathVariable String sessionId) {
-        Long userId = currentUserService.requireUserId(authorization);
-        return ApiResponse.success(reportService.finishAndArchive(userId, sessionId));
+        MDC.put(INTERVIEW_ID_KEY, sessionId);
+        try {
+            Long userId = currentUserService.requireUserId(authorization);
+            return ApiResponse.success(reportService.finishAndArchive(userId, sessionId));
+        } finally {
+            MDC.remove(INTERVIEW_ID_KEY);
+        }
+    }
+
+    /**
+     * 跳过当前题（计 0 分）：事件结构与 ask 一致，message 事件为下一题话术，done 携带进度视图。
+     */
+    @PostMapping(value = "/{sessionId}/skip", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter skip(@RequestHeader(value = "Authorization", required = false) String authorization,
+                           @PathVariable String sessionId) {
+        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
+        emitter.onTimeout(emitter::complete);
+        emitter.onError(throwable -> emitter.complete());
+        interviewStreamExecutor.execute(() -> writeSkipTurn(emitter, authorization, sessionId));
+        return emitter;
     }
 
     @GetMapping("/{sessionId}/status")
     public ApiResponse<InterviewStatusResponse> status(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @PathVariable String sessionId) {
-        Long userId = currentUserService.requireUserId(authorization);
-        return ApiResponse.success(interviewService.status(userId, sessionId));
+        MDC.put(INTERVIEW_ID_KEY, sessionId);
+        try {
+            Long userId = currentUserService.requireUserId(authorization);
+            return ApiResponse.success(interviewService.status(userId, sessionId));
+        } finally {
+            MDC.remove(INTERVIEW_ID_KEY);
+        }
     }
 
     private void writeTurn(SseEmitter emitter, String authorization, String sessionId, String message) {
+        // SSE 在独立线程执行，过滤器 MDC 不会传播，此处重新写入 interviewId
+        MDC.put(INTERVIEW_ID_KEY, sessionId);
         try {
             Long userId = currentUserService.requireUserId(authorization);
             validateMessage(message);
@@ -109,6 +137,30 @@ public class InterviewController {
             // 兜底：模型评分解析、Redis 访问等运行时异常也必须以 error 事件收尾，否则连接会悬挂到超时
             log.error("interview stream unexpected error sessionId={}", sessionId, exception);
             completeWithReadableError(emitter, ErrorCode.INTERNAL_ERROR.code(), "系统内部错误，请稍后重试。");
+        } finally {
+            MDC.remove(INTERVIEW_ID_KEY);
+        }
+    }
+
+    private void writeSkipTurn(SseEmitter emitter, String authorization, String sessionId) {
+        MDC.put(INTERVIEW_ID_KEY, sessionId);
+        try {
+            Long userId = currentUserService.requireUserId(authorization);
+            InterviewTurnResult result = interviewService.skip(
+                    userId,
+                    sessionId,
+                    chunk -> emitter.send(SseEmitter.event().name("message").data(chunk)));
+            emitter.send(SseEmitter.event().name("done").data(result));
+            emitter.complete();
+        } catch (BusinessException exception) {
+            completeWithReadableError(emitter, exception.errorCode().code(), exception.getMessage());
+        } catch (IOException exception) {
+            completeWithReadableError(emitter, ErrorCode.INTERNAL_ERROR.code(), "面试对话流已中断，请稍后重试。");
+        } catch (Exception exception) {
+            log.error("interview skip unexpected error sessionId={}", sessionId, exception);
+            completeWithReadableError(emitter, ErrorCode.INTERNAL_ERROR.code(), "系统内部错误，请稍后重试。");
+        } finally {
+            MDC.remove(INTERVIEW_ID_KEY);
         }
     }
 

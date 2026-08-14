@@ -518,7 +518,7 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
     }
 
     private BusinessException unavailable() {
-        return new BusinessException(ErrorCode.INTERNAL_ERROR, "智能问答服务暂不可用，请稍后再试");
+        return new BusinessException(ErrorCode.AI_UNAVAILABLE, "AI 响应超时，请重试");
     }
 
     private boolean isBlank(String value) {
