@@ -51,7 +51,8 @@ public class InterviewController {
             @RequestBody(required = false) InterviewStartRequest request) {
         Long userId = currentUserService.requireUserId(authorization);
         String position = request == null ? null : request.position();
-        return ApiResponse.success(interviewService.start(userId, position));
+        Long resumeId = request == null ? null : request.resumeId();
+        return ApiResponse.success(interviewService.start(userId, position, resumeId));
     }
 
     /**

@@ -7,6 +7,7 @@ import com.offerforge.ai.ChatMessage;
 import com.offerforge.common.ErrorCode;
 import com.offerforge.exception.BusinessException;
 import com.offerforge.knowledge.Difficulty;
+import com.offerforge.resume.ResumeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -45,6 +46,8 @@ public class InterviewService {
     private final AiModelClient aiModelClient;
     private final EvaluationService evaluationService;
     private final FollowUpStrategy followUpStrategy;
+    private final ResumeService resumeService;
+    private final ProjectQuestionGenerator projectQuestionGenerator;
     private final InterviewProperties properties;
     /** 会话级互斥锁条目（锁对象 + 最近使用时间），中途放弃的会话靠惰性清理避免无界增长 */
     private final Map<String, LockEntry> sessionLocks = new ConcurrentHashMap<>();
@@ -61,6 +64,8 @@ public class InterviewService {
                             AiModelClient aiModelClient,
                             EvaluationService evaluationService,
                             FollowUpStrategy followUpStrategy,
+                            ResumeService resumeService,
+                            ProjectQuestionGenerator projectQuestionGenerator,
                             InterviewProperties properties) {
         this.sessionStore = sessionStore;
         this.messageStore = messageStore;
@@ -70,20 +75,35 @@ public class InterviewService {
         this.aiModelClient = aiModelClient;
         this.evaluationService = evaluationService;
         this.followUpStrategy = followUpStrategy;
+        this.resumeService = resumeService;
+        this.projectQuestionGenerator = projectQuestionGenerator;
         this.properties = properties;
     }
 
     public InterviewStartResponse start(Long userId, String position) {
+        return start(userId, position, null);
+    }
+
+    /**
+     * 开始面试：resumeId 可空；非空时校验归属，PROJECT/DEEP 阶段将基于该简历出题。
+     */
+    public InterviewStartResponse start(Long userId, String position, Long resumeId) {
+        if (resumeId != null) {
+            // 校验简历存在且属于当前用户（不存在/非本人均 NOT_FOUND）
+            resumeService.getOwned(userId, resumeId);
+        }
         String sessionId = UUID.randomUUID().toString().replace("-", "");
         InterviewContext context = new InterviewContext();
         context.setSessionId(sessionId);
         context.setUserId(userId);
         context.setPosition(position == null || position.isBlank() ? DEFAULT_POSITION : position.trim());
+        context.setResumeId(resumeId);
         context.setState(InterviewState.OPENING);
         context.setCreatedAtEpochMillis(System.currentTimeMillis());
         sessionStore.save(context);
         messageStore.append(sessionId, List.of(ChatMessage.assistant(OPENING_TEXT)));
-        log.info("interview started sessionId={} userId={} position={}", sessionId, userId, context.getPosition());
+        log.info("interview started sessionId={} userId={} position={} resumeId={}",
+                sessionId, userId, context.getPosition(), resumeId);
         return new InterviewStartResponse(sessionId, OPENING_TEXT, InterviewStatusResponse.from(context, properties));
     }
 
@@ -165,7 +185,8 @@ public class InterviewService {
             log.info("interview sessionId={} difficulty lowered to {}", sessionId, context.getCurrentDifficulty());
         }
 
-        boolean poolExhausted = questionBank.nextQuestion(phase, askedSet(context), context.getCurrentDifficulty()).isEmpty();
+        boolean poolExhausted = questionBank.nextQuestion(phase, askedSet(context), context.getCurrentDifficulty()).isEmpty()
+                && context.getPreparedQuestions().isEmpty();
         StateTransitionStrategy.DecisionInput input = new StateTransitionStrategy.DecisionInput(
                 phase, overall, context.getCurrentFollowUpCount(), context.questionsInPhase(phase), poolExhausted, canRaise);
         StateTransitionStrategy.Action action = strategy.decide(input);
@@ -236,13 +257,12 @@ public class InterviewService {
 
     private void askNextQuestion(InterviewContext context, String sessionId, InterviewState phase,
                                  AiStreamChunkConsumer chunkConsumer) throws IOException {
-        var next = questionBank.nextQuestion(phase, askedSet(context), context.getCurrentDifficulty());
-        if (next.isEmpty()) {
-            // 该阶段题库耗尽，直接推进
+        InterviewQuestionBank.InterviewQuestion question = nextPreparedOrBank(context, phase);
+        if (question == null) {
+            // 该阶段备选队列与题库均耗尽，直接推进
             advance(context, sessionId, chunkConsumer);
             return;
         }
-        InterviewQuestionBank.InterviewQuestion question = next.get();
         context.setCurrentQuestion(question.question());
         context.setCurrentCandidateAnswer(question.candidateAnswer());
         context.setCurrentQuestionPhase(phase);
@@ -253,6 +273,47 @@ public class InterviewService {
         List<ChatMessage> messages = promptBuilder.buildInterviewerMessages(
                 messageStore.list(sessionId), phase, question.question());
         streamAndRecord(sessionId, messages, chunkConsumer);
+    }
+
+    /**
+     * 取下一题：优先消费基于简历生成的备选队列，队列耗尽后回退通用题库。
+     */
+    private InterviewQuestionBank.InterviewQuestion nextPreparedOrBank(InterviewContext context, InterviewState phase) {
+        ensurePreparedQuestions(context, phase);
+        if (!context.getPreparedQuestions().isEmpty()) {
+            return context.getPreparedQuestions().remove(0);
+        }
+        return questionBank.nextQuestion(phase, askedSet(context), context.getCurrentDifficulty()).orElse(null);
+    }
+
+    /**
+     * 惰性生成备选队列（每阶段只触发一次）：
+     * PROJECT 需关联简历；DEEP 基于 PROJECT 阶段作答记录（低分优先）。生成异常降级到通用题库。
+     */
+    private void ensurePreparedQuestions(InterviewContext context, InterviewState phase) {
+        if (phase == InterviewState.PROJECT && !context.isProjectQuestionsGenerated()) {
+            context.setProjectQuestionsGenerated(true);
+            if (context.getResumeId() != null) {
+                try {
+                    context.getPreparedQuestions().addAll(projectQuestionGenerator.generateProjectQuestions(
+                            context.getUserId(), context.getResumeId()));
+                } catch (RuntimeException exception) {
+                    log.warn("project question generation failed, fallback to generic bank sessionId={}",
+                            context.getSessionId(), exception);
+                }
+            }
+        } else if (phase == InterviewState.DEEP && !context.isDeepQuestionsGenerated()) {
+            context.setDeepQuestionsGenerated(true);
+            // 上一阶段的剩余备选题不再使用
+            context.getPreparedQuestions().clear();
+            try {
+                context.getPreparedQuestions().addAll(projectQuestionGenerator.generateDeepQuestions(
+                        context, properties.maxQuestionsFor(InterviewState.DEEP)));
+            } catch (RuntimeException exception) {
+                log.warn("deep question generation failed, fallback to knowledge bank sessionId={}",
+                        context.getSessionId(), exception);
+            }
+        }
     }
 
     /**

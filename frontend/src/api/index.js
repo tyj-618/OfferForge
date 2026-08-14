@@ -99,9 +99,18 @@ export const qaApi = {
 
 // ---------- 面试 ----------
 export const interviewApi = {
-  start: (position) => http.post('/interview/start', { position }),
+  start: (position, resumeId = null) => http.post('/interview/start', { position, resumeId }),
   status: (sessionId) => http.get(`/interview/${sessionId}/status`),
   finish: (sessionId) => http.post(`/interview/${sessionId}/finish`, null)
+}
+
+// ---------- 简历 ----------
+export const resumeApi = {
+  save: (resume) => http.post('/resume', resume),
+  parse: (rawText) => http.post('/resume/parse', { rawText }),
+  list: () => http.get('/resume/list'),
+  detail: (resumeId) => http.get(`/resume/detail/${resumeId}`),
+  remove: (id) => http.delete(`/resume/${id}`)
 }
 
 /**

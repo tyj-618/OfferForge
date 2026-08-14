@@ -18,6 +18,8 @@ public class InterviewContext {
     private long userId;
     /** 面试岗位方向，用于报告展示 */
     private String position;
+    /** 关联简历 id（可空）：PROJECT 阶段基于简历生成项目题 */
+    private Long resumeId;
     private InterviewState state = InterviewState.OPENING;
     private String currentQuestion;
     private String currentCandidateAnswer;
@@ -33,6 +35,12 @@ public class InterviewContext {
     /** 当前出题难度，随连续答题表现动态调整 */
     private Difficulty currentDifficulty = Difficulty.MEDIUM;
     private Map<String, Integer> phaseQuestionCounts = new HashMap<>();
+    /** 基于简历生成的备选题队列（PROJECT 项目题 / DEEP 深挖题），优先于通用题库消费 */
+    private List<InterviewQuestionBank.InterviewQuestion> preparedQuestions = new ArrayList<>();
+    /** 项目题是否已尝试生成（无论成败只触发一次，避免重复调 LLM） */
+    private boolean projectQuestionsGenerated;
+    /** 深挖题是否已尝试生成 */
+    private boolean deepQuestionsGenerated;
     /** 工作记忆：每道题（含追问）的提问内容、回答、评分快照 */
     private List<QuestionRecord> questionHistory = new ArrayList<>();
     private long createdAtEpochMillis;
@@ -59,6 +67,14 @@ public class InterviewContext {
 
     public void setPosition(String position) {
         this.position = position;
+    }
+
+    public Long getResumeId() {
+        return resumeId;
+    }
+
+    public void setResumeId(Long resumeId) {
+        this.resumeId = resumeId;
     }
 
     public InterviewState getState() {
@@ -147,6 +163,30 @@ public class InterviewContext {
 
     public void setPhaseQuestionCounts(Map<String, Integer> phaseQuestionCounts) {
         this.phaseQuestionCounts = phaseQuestionCounts;
+    }
+
+    public List<InterviewQuestionBank.InterviewQuestion> getPreparedQuestions() {
+        return preparedQuestions;
+    }
+
+    public void setPreparedQuestions(List<InterviewQuestionBank.InterviewQuestion> preparedQuestions) {
+        this.preparedQuestions = preparedQuestions;
+    }
+
+    public boolean isProjectQuestionsGenerated() {
+        return projectQuestionsGenerated;
+    }
+
+    public void setProjectQuestionsGenerated(boolean projectQuestionsGenerated) {
+        this.projectQuestionsGenerated = projectQuestionsGenerated;
+    }
+
+    public boolean isDeepQuestionsGenerated() {
+        return deepQuestionsGenerated;
+    }
+
+    public void setDeepQuestionsGenerated(boolean deepQuestionsGenerated) {
+        this.deepQuestionsGenerated = deepQuestionsGenerated;
     }
 
     public List<QuestionRecord> getQuestionHistory() {

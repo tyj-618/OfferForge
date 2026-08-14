@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { askStream, interviewApi } from '../api'
+import { askStream, interviewApi, resumeApi } from '../api'
 
 const router = useRouter()
 const SESSION_KEY = 'offerforge_session'
@@ -14,6 +14,9 @@ const messages = ref([])
 const answer = ref('')
 const sending = ref(false)
 const error = ref('')
+
+const resumes = ref([])
+const selectedResumeId = ref(null)
 
 const chatBox = ref(null)
 
@@ -40,6 +43,15 @@ function scoreClass(score) {
 }
 
 onMounted(async () => {
+  // 开始卡片展示简历选择：一份自动选中，多份下拉选择
+  try {
+    resumes.value = await resumeApi.list()
+    if (resumes.value.length === 1) {
+      selectedResumeId.value = resumes.value[0].id
+    }
+  } catch {
+    // 简历列表加载失败不阻断面试开始（后端会降级为通用项目题）
+  }
   // 刷新页面后恢复进行中的会话（状态栏与当前题；历史消息不回放）
   const saved = sessionStorage.getItem(SESSION_KEY)
   if (!saved) {
@@ -67,7 +79,7 @@ async function startInterview() {
   sending.value = true
   error.value = ''
   try {
-    const data = await interviewApi.start(position.value.trim())
+    const data = await interviewApi.start(position.value.trim(), selectedResumeId.value || null)
     sessionId.value = data.sessionId
     status.value = data.status
     sessionStorage.setItem(SESSION_KEY, data.sessionId)
@@ -167,6 +179,24 @@ function scrollDown() {
         <input v-model="position" placeholder="面试岗位方向，如：Java 后端工程师（可留空）" :disabled="sending" />
         <button type="submit" :disabled="sending">{{ sending ? '准备中…' : '开始面试' }}</button>
       </form>
+      <div class="resume-row">
+        <template v-if="resumes.length > 1">
+          <label class="muted" for="resume-select">选择本次面试使用的简历：</label>
+          <select id="resume-select" v-model="selectedResumeId" :disabled="sending">
+            <option :value="null">不使用简历（通用项目题）</option>
+            <option v-for="item in resumes" :key="item.id" :value="item.id">
+              {{ item.name || '未命名候选人' }}
+            </option>
+          </select>
+        </template>
+        <template v-else-if="resumes.length === 1">
+          <span class="muted">已自动关联简历：</span>
+          <span class="badge">{{ resumes[0].name || '未命名候选人' }}</span>
+        </template>
+        <template v-else>
+          <span class="muted">暂无简历，面试将使用通用项目题；可先去 <RouterLink to="/resume">简历管理</RouterLink> 创建</span>
+        </template>
+      </div>
       <p v-if="error" class="error-text">{{ error }}</p>
     </div>
 
@@ -226,6 +256,23 @@ function scrollDown() {
   display: flex;
   gap: 10px;
   margin-top: 16px;
+}
+
+.resume-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.resume-row select {
+  width: auto;
+  min-width: 220px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  background: #fff;
 }
 
 .status-bar {

@@ -25,6 +25,7 @@ async function logout() {
       <nav class="nav">
         <RouterLink to="/">问答练习</RouterLink>
         <RouterLink to="/interview">模拟面试</RouterLink>
+        <RouterLink to="/resume">简历管理</RouterLink>
         <RouterLink to="/history">历史报告</RouterLink>
       </nav>
       <button class="ghost" @click="logout">退出登录</button>

@@ -33,4 +33,22 @@ public interface AiModelClient {
      * 评分与统计始终由服务端计算，本方法只产出文字总结；解析失败时返回 null 由调用方兜底。
      */
     ReportSummary generateReportSummary(String prompt);
+
+    /**
+     * 简历纯文本解析：将简历原文结构化为 JSON（字段同简历创建请求）。
+     * 解析失败时返回 null，由调用方兜底（仅保存原文）。
+     */
+    String parseResume(String rawText);
+
+    /**
+     * 基于简历项目经历生成 2-3 个面试问题：解析 {questions:[...]} JSON。
+     * 解析失败时返回空列表，由调用方降级到通用项目题。
+     */
+    List<AiGeneratedQuestion> generateProjectQuestions(String prompt);
+
+    /**
+     * 基于 PROJECT 阶段的问题与回答生成一道深挖题：解析单对象 JSON。
+     * 解析失败时返回 null，由调用方降级到知识库出题。
+     */
+    AiGeneratedQuestion generateDeepQuestion(String prompt);
 }

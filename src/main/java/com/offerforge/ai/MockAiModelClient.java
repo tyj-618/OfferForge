@@ -3,9 +3,14 @@ package com.offerforge.ai;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
@@ -19,7 +24,14 @@ public class MockAiModelClient implements AiModelClient {
     private static final Pattern FOLLOW_UP_SOURCE_PATTERN = Pattern.compile("对问题「(.*?)」的回答不够理想", Pattern.DOTALL);
     private static final Pattern REPORT_SCORE_PATTERN = Pattern.compile("「(.*?)」得分([0-9.]+)", Pattern.DOTALL);
     private static final Pattern REF_PATTERN = Pattern.compile("\\[ref: (\\d+)]");
+    private static final Pattern RESUME_NAME_PATTERN = Pattern.compile("姓名[:：]\\s*([^\\s，,。;；]+)");
+    private static final Pattern RESUME_PROJECT_PATTERN = Pattern.compile("项目名称[:：]\\s*(.+)");
+    private static final Pattern RESUME_TECH_PATTERN = Pattern.compile("技术栈[:：]\\s*(.+)");
+    private static final Pattern PROJECT_NAME_PATTERN = Pattern.compile("项目名称[:：]\\s*(.+)");
+    private static final Pattern DEEP_QUESTION_PATTERN = Pattern.compile("问题[:：]\\s*(.+)");
     private static final int STREAM_CHUNK_SIZE = 8;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final AtomicReference<List<ChatMessage>> lastGeneratedMessages = new AtomicReference<>(List.of());
 
@@ -115,6 +127,77 @@ public class MockAiModelClient implements AiModelClient {
                 List.of("「" + questions.get(best) + "」回答较好（得分" + scores.get(best) + "），要点覆盖完整"),
                 List.of("「" + questions.get(worst) + "」回答薄弱（得分" + scores.get(worst) + "），需重点复习"),
                 List.of("针对薄弱知识点做专题练习，并结合实际场景举例说明"));
+    }
+
+    @Override
+    public String parseResume(String rawText) {
+        // 确定性解析：按“姓名/项目名称/技术栈”标记行提取，便于测试断言
+        if (rawText == null || rawText.isBlank()) {
+            return null;
+        }
+        Matcher nameMatcher = RESUME_NAME_PATTERN.matcher(rawText);
+        String name = nameMatcher.find() ? nameMatcher.group(1).trim() : null;
+        List<Map<String, Object>> projects = new ArrayList<>();
+        Matcher projectMatcher = RESUME_PROJECT_PATTERN.matcher(rawText);
+        Matcher techMatcher = RESUME_TECH_PATTERN.matcher(rawText);
+        while (projectMatcher.find()) {
+            Map<String, Object> project = new LinkedHashMap<>();
+            project.put("projectName", projectMatcher.group(1).trim());
+            project.put("techStack", techMatcher.find() ? techMatcher.group(1).trim() : "");
+            projects.add(project);
+        }
+        if (name == null && projects.isEmpty()) {
+            return null;
+        }
+        Map<String, Object> parsed = new LinkedHashMap<>();
+        parsed.put("name", name == null ? "未命名候选人" : name);
+        parsed.put("projects", projects);
+        try {
+            return objectMapper.writeValueAsString(parsed);
+        } catch (JsonProcessingException exception) {
+            return null;
+        }
+    }
+
+    @Override
+    public List<AiGeneratedQuestion> generateProjectQuestions(String prompt) {
+        // 确定性生成：题面携带项目名，便于集成测试断言项目题基于简历内容
+        Matcher matcher = PROJECT_NAME_PATTERN.matcher(prompt);
+        if (!matcher.find()) {
+            return List.of();
+        }
+        String projectName = matcher.group(1).trim();
+        return List.of(
+                new AiGeneratedQuestion(
+                        "请介绍一下「" + projectName + "」的整体架构和设计思路",
+                        "项目架构",
+                        List.of("整体架构与模块划分", "核心技术选型及理由", "关键数据流转链路"),
+                        "MEDIUM"),
+                new AiGeneratedQuestion(
+                        "在「" + projectName + "」中，你遇到的最大技术难点是什么，如何解决的？",
+                        "技术难点",
+                        List.of("难点背景与影响", "方案对比与权衡", "落地效果与验证"),
+                        "HARD"),
+                new AiGeneratedQuestion(
+                        "如果重做「" + projectName + "」，你会在哪些方面做优化？",
+                        "反思与成长",
+                        List.of("架构层面的改进", "技术选型的反思", "可维护性提升"),
+                        "EASY"));
+    }
+
+    @Override
+    public AiGeneratedQuestion generateDeepQuestion(String prompt) {
+        // 确定性生成：深挖题引用原项目问题，便于集成测试断言深挖基于项目回答
+        Matcher matcher = DEEP_QUESTION_PATTERN.matcher(prompt);
+        if (!matcher.find()) {
+            return null;
+        }
+        String sourceQuestion = matcher.group(1).trim();
+        return new AiGeneratedQuestion(
+                "深挖追问：关于「" + sourceQuestion + "」，请展开讲讲具体实现细节与设计权衡",
+                "项目深挖",
+                List.of("具体实现细节", "设计权衡的理由", "性能与边界情况处理"),
+                "HARD");
     }
 
     private String mockAnswer(String userPrompt) {

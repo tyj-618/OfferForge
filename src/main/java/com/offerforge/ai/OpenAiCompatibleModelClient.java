@@ -264,6 +264,60 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
         return parsed;
     }
 
+    @Override
+    public String parseResume(String rawText) {
+        if (rawText == null || rawText.isBlank()) {
+            return null;
+        }
+        String prompt = """
+                你是简历解析器。请将以下简历纯文本结构化，返回 JSON：
+                {
+                  "name": "姓名",
+                  "education": "教育经历文本",
+                  "skills": "技能清单文本",
+                  "projects": [
+                    {"projectName": "项目名称", "role": "角色", "duration": "时间段",
+                     "description": "项目描述", "techStack": "技术栈",
+                     "highlights": "亮点成果", "challenges": "遇到的挑战"}
+                  ],
+                  "internships": "实习经历文本",
+                  "selfIntroduction": "自我介绍"
+                }
+                无法识别的字段置为空字符串或空数组；只输出 JSON 本身。
+                简历原文：
+                %s
+                """.formatted(rawText);
+        AiTextResult result = generateText(List.of(ChatMessage.user(prompt)));
+        String json = extractJsonObject(result.content() == null ? "" : result.content());
+        if (json == null) {
+            log.warn("qa stage=llm mode=resume-parse status=unparsable model={} requestId={}",
+                    properties.getModel(), result.requestId());
+        }
+        return json;
+    }
+
+    @Override
+    public List<AiGeneratedQuestion> generateProjectQuestions(String prompt) {
+        AiTextResult result = generateText(List.of(ChatMessage.user(prompt)));
+        List<AiGeneratedQuestion> parsed = parseGeneratedQuestions(result.content());
+        if (parsed.isEmpty()) {
+            log.warn("qa stage=llm mode=project-questions status=unparsable model={} requestId={}",
+                    properties.getModel(), result.requestId());
+        }
+        return parsed;
+    }
+
+    @Override
+    public AiGeneratedQuestion generateDeepQuestion(String prompt) {
+        AiTextResult result = generateText(List.of(ChatMessage.user(prompt)));
+        AiGeneratedQuestion parsed = parseGeneratedQuestion(result.content());
+        if (parsed == null) {
+            log.warn("qa stage=llm mode=deep-question status=unparsable model={} requestId={}",
+                    properties.getModel(), result.requestId());
+        }
+        return parsed;
+    }
+
     private String referenceText(String candidateAnswer) {
         return candidateAnswer == null || candidateAnswer.isBlank()
                 ? "（无标准答案，按项目经验与表达评估）" : candidateAnswer;
@@ -321,6 +375,64 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
         } catch (JsonProcessingException exception) {
             return null;
         }
+    }
+
+    /**
+     * 解析项目题生成结果：{questions:[...]}；题面为空则丢弃，非法 JSON 返回空列表。
+     */
+    List<AiGeneratedQuestion> parseGeneratedQuestions(String content) {
+        if (content == null || content.isBlank()) {
+            return List.of();
+        }
+        String json = extractJsonObject(content);
+        if (json == null) {
+            return List.of();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            JsonNode questions = node.path("questions");
+            if (!questions.isArray()) {
+                return List.of();
+            }
+            List<AiGeneratedQuestion> parsed = new ArrayList<>();
+            for (JsonNode item : questions) {
+                AiGeneratedQuestion question = toGeneratedQuestion(item);
+                if (question != null) {
+                    parsed.add(question);
+                }
+            }
+            return parsed;
+        } catch (JsonProcessingException exception) {
+            return List.of();
+        }
+    }
+
+    /**
+     * 解析单对象深挖题生成结果；题面为空或非法 JSON 返回 null。
+     */
+    AiGeneratedQuestion parseGeneratedQuestion(String content) {
+        if (content == null || content.isBlank()) {
+            return null;
+        }
+        String json = extractJsonObject(content);
+        if (json == null) {
+            return null;
+        }
+        try {
+            return toGeneratedQuestion(objectMapper.readTree(json));
+        } catch (JsonProcessingException exception) {
+            return null;
+        }
+    }
+
+    private AiGeneratedQuestion toGeneratedQuestion(JsonNode node) {
+        String question = node.path("question").asText("").trim();
+        if (question.isEmpty()) {
+            return null;
+        }
+        String knowledgePoint = node.path("knowledgePoint").asText("").trim();
+        String difficulty = node.path("difficulty").asText("").trim().toUpperCase();
+        return new AiGeneratedQuestion(question, knowledgePoint, readPoints(node, "referenceAnswer", 8), difficulty);
     }
 
     private String extractJsonObject(String content) {

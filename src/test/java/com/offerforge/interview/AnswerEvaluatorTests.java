@@ -1,6 +1,7 @@
 package com.offerforge.interview;
 
 import com.offerforge.ai.AiEvaluation;
+import com.offerforge.ai.AiGeneratedQuestion;
 import com.offerforge.ai.AiModelClient;
 import com.offerforge.ai.AiStreamChunkConsumer;
 import com.offerforge.ai.AiTextResult;
@@ -88,6 +89,21 @@ class AnswerEvaluatorTests {
 
         @Override
         public ReportSummary generateReportSummary(String prompt) {
+            return null;
+        }
+
+        @Override
+        public String parseResume(String rawText) {
+            return null;
+        }
+
+        @Override
+        public List<AiGeneratedQuestion> generateProjectQuestions(String prompt) {
+            return List.of();
+        }
+
+        @Override
+        public AiGeneratedQuestion generateDeepQuestion(String prompt) {
             return null;
         }
     }
