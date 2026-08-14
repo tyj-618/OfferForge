@@ -1,5 +1,6 @@
 package com.offerforge.interview;
 
+import com.offerforge.ai.AnswerEvaluation;
 import com.offerforge.knowledge.Difficulty;
 
 import java.util.ArrayList;
@@ -15,6 +16,8 @@ public class InterviewContext {
 
     private String sessionId;
     private long userId;
+    /** 面试岗位方向，用于报告展示 */
+    private String position;
     private InterviewState state = InterviewState.OPENING;
     private String currentQuestion;
     private String currentCandidateAnswer;
@@ -48,6 +51,14 @@ public class InterviewContext {
 
     public void setUserId(long userId) {
         this.userId = userId;
+    }
+
+    public String getPosition() {
+        return position;
+    }
+
+    public void setPosition(String position) {
+        this.position = position;
     }
 
     public InterviewState getState() {
@@ -166,12 +177,12 @@ public class InterviewContext {
     }
 
     /**
-     * 记录一次作答评分：主问题记原知识点，追问沿用当前知识点。
+     * 记录一次作答评估：主问题记原知识点，追问沿用当前知识点。
      */
-    public void recordAnswer(String question, String userAnswer, double score) {
+    public void recordAnswer(String question, String userAnswer, AnswerEvaluation evaluation) {
         String knowledgePoint = currentKnowledgePoint == null ? "" : currentKnowledgePoint;
         questionHistory.add(new QuestionRecord(
-                question, userAnswer, score, knowledgePoint, currentQuestionFollowUp, currentQuestionPhase));
+                question, userAnswer, evaluation, knowledgePoint, currentQuestionFollowUp, currentQuestionPhase));
     }
 
     /**

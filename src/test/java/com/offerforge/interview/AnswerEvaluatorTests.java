@@ -7,6 +7,7 @@ import com.offerforge.ai.AiTextResult;
 import com.offerforge.ai.AnswerEvaluation;
 import com.offerforge.ai.ChatMessage;
 import com.offerforge.ai.MockAiModelClient;
+import com.offerforge.ai.ReportSummary;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -75,13 +76,19 @@ class AnswerEvaluatorTests {
         }
 
         @Override
-        public AnswerEvaluation evaluateAnswerDetail(String question, String candidateAnswer, String userAnswer) {
+        public AnswerEvaluation evaluateAnswerDetail(String question, String knowledgePoint,
+                                                     String candidateAnswer, String userAnswer) {
             return detail;
         }
 
         @Override
         public String generateFollowUpQuestion(String prompt) {
             return "";
+        }
+
+        @Override
+        public ReportSummary generateReportSummary(String prompt) {
+            return null;
         }
     }
 }

@@ -26,22 +26,25 @@ class MockAiModelClientInterviewTests {
 
     @Test
     void evaluateDetailScoresByAnswerLengthWithFindings() {
-        AnswerEvaluation blank = client.evaluateAnswerDetail("q", null, "  ");
+        AnswerEvaluation blank = client.evaluateAnswerDetail("q", null, null, "  ");
         assertThat(blank.overall()).isZero();
         assertThat(blank.missedPoints()).isNotEmpty();
 
-        AnswerEvaluation poor = client.evaluateAnswerDetail("q", null, "嗯。");
+        AnswerEvaluation poor = client.evaluateAnswerDetail("q", null, null, "嗯。");
         assertThat(poor.overall()).isEqualTo(3.0);
         assertThat(poor.missedPoints()).isNotEmpty();
 
-        AnswerEvaluation mid = client.evaluateAnswerDetail("q", null, "这个回答长度在十到二十九个字符之间哦");
+        AnswerEvaluation mid = client.evaluateAnswerDetail("q", null, null, "这个回答长度在十到二十九个字符之间哦");
         assertThat(mid.overall()).isEqualTo(5.0);
 
-        AnswerEvaluation strong = client.evaluateAnswerDetail("q", null,
+        AnswerEvaluation strong = client.evaluateAnswerDetail("q", null, null,
                 "这是一个足够长的回答，覆盖了主要知识点，并且展开了具体细节说明，长度超过三十个字符。");
         assertThat(strong.overall()).isEqualTo(8.0);
         assertThat(strong.missedPoints()).isEmpty();
         assertThat(strong.wrongPoints()).isEmpty();
+        // 四维度分与加权综合分一致（Mock 各维度同分）
+        assertThat(strong.accuracy()).isEqualTo(8.0);
+        assertThat(strong.depth()).isEqualTo(8.0);
     }
 
     @Test

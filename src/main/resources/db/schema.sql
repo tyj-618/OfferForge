@@ -30,3 +30,19 @@ CREATE TABLE IF NOT EXISTS knowledge_item (
 -- 存量库升级（Phase 3 新增难度字段）：
 -- ALTER TABLE knowledge_item ADD COLUMN difficulty VARCHAR(16) NOT NULL DEFAULT 'MEDIUM' AFTER category;
 -- ALTER TABLE knowledge_item ADD KEY idx_knowledge_category_difficulty (category, difficulty);
+
+CREATE TABLE IF NOT EXISTS interview_session (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id       BIGINT       NOT NULL,
+    session_id    VARCHAR(64)  NOT NULL,
+    position      VARCHAR(64)  NOT NULL,
+    start_time    DATETIME(3)  NOT NULL,
+    end_time      DATETIME(3)  NOT NULL,
+    status        VARCHAR(32)  NOT NULL,
+    overall_score DOUBLE       NOT NULL,
+    report_json   LONGTEXT     NOT NULL,
+    UNIQUE KEY uk_interview_session_session_id (session_id),
+    KEY idx_interview_session_user_time (user_id, start_time)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;

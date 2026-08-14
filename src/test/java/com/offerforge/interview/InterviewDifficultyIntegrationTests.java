@@ -74,12 +74,12 @@ class InterviewDifficultyIntegrationTests {
         String sse4 = ask(sessionId, token, LONG_ANSWER);
         assertThat(sse4).contains("\"action\":\"ADVANCE\"").contains("\"state\":\"CLOSING\"").contains("考察环节已结束");
 
-        // 收尾后结束会话；主问题共 4 题（BASICS 1 + PROJECT 1 + DEEP 2），平均 8 分
+        // 收尾后结束会话；主问题共 4 题（BASICS 1 + PROJECT 1 + DEEP 2），平均 8 分 → 综合分 80
         ask(sessionId, token, "谢谢面试官。");
-        JsonNode end = post("/api/interview/" + sessionId + "/end", token, Map.of());
-        assertCode(end, 0);
-        assertThat(end.at("/data/askedCount").asInt()).isEqualTo(4);
-        assertThat(end.at("/data/averageScore").asDouble()).isEqualTo(8.0);
+        JsonNode finish = post("/api/interview/" + sessionId + "/finish", token, Map.of());
+        assertCode(finish, 0);
+        assertThat(finish.at("/data/totalQuestions").asInt()).isEqualTo(4);
+        assertThat(finish.at("/data/overallScore").asDouble()).isEqualTo(80.0);
     }
 
     private String newUser() throws Exception {

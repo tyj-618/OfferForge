@@ -34,6 +34,8 @@ public class InterviewService {
     private static final int LOCK_CLEANUP_INTERVAL = 512;
     private static final String OPENING_TEXT = "你好！我是 OfferForge 的 AI 面试官。本次模拟面试分为四个环节："
             + "基础考察、项目经历、深度追问与收尾总结。请先做一个简短的自我介绍（可包含项目经历与熟悉的技术栈），完成后我们正式开始。";
+    /** 面试岗位方向缺省值 */
+    public static final String DEFAULT_POSITION = "Java 后端工程师";
 
     private final InterviewSessionStore sessionStore;
     private final InterviewMessageStore messageStore;
@@ -41,7 +43,7 @@ public class InterviewService {
     private final StateTransitionStrategy strategy;
     private final InterviewPromptBuilder promptBuilder;
     private final AiModelClient aiModelClient;
-    private final AnswerEvaluator answerEvaluator;
+    private final EvaluationService evaluationService;
     private final FollowUpStrategy followUpStrategy;
     private final InterviewProperties properties;
     /** 会话级互斥锁条目（锁对象 + 最近使用时间），中途放弃的会话靠惰性清理避免无界增长 */
@@ -57,7 +59,7 @@ public class InterviewService {
                             StateTransitionStrategy strategy,
                             InterviewPromptBuilder promptBuilder,
                             AiModelClient aiModelClient,
-                            AnswerEvaluator answerEvaluator,
+                            EvaluationService evaluationService,
                             FollowUpStrategy followUpStrategy,
                             InterviewProperties properties) {
         this.sessionStore = sessionStore;
@@ -66,21 +68,22 @@ public class InterviewService {
         this.strategy = strategy;
         this.promptBuilder = promptBuilder;
         this.aiModelClient = aiModelClient;
-        this.answerEvaluator = answerEvaluator;
+        this.evaluationService = evaluationService;
         this.followUpStrategy = followUpStrategy;
         this.properties = properties;
     }
 
-    public InterviewStartResponse start(Long userId) {
+    public InterviewStartResponse start(Long userId, String position) {
         String sessionId = UUID.randomUUID().toString().replace("-", "");
         InterviewContext context = new InterviewContext();
         context.setSessionId(sessionId);
         context.setUserId(userId);
+        context.setPosition(position == null || position.isBlank() ? DEFAULT_POSITION : position.trim());
         context.setState(InterviewState.OPENING);
         context.setCreatedAtEpochMillis(System.currentTimeMillis());
         sessionStore.save(context);
         messageStore.append(sessionId, List.of(ChatMessage.assistant(OPENING_TEXT)));
-        log.info("interview started sessionId={} userId={}", sessionId, userId);
+        log.info("interview started sessionId={} userId={} position={}", sessionId, userId, context.getPosition());
         return new InterviewStartResponse(sessionId, OPENING_TEXT, InterviewStatusResponse.from(context, properties));
     }
 
@@ -114,23 +117,22 @@ public class InterviewService {
         }
     }
 
-    public InterviewEndResponse end(Long userId, String sessionId) {
+    /**
+     * 结束面试并返回工作记忆上下文：置终态、清理对话消息，供报告生成与归档使用。
+     * 已结束的会话幂等返回当前上下文。
+     */
+    public InterviewContext finishInterview(Long userId, String sessionId) {
         Object lock = lockFor(sessionId);
         try {
             synchronized (lock) {
                 InterviewContext context = requireOwnedSession(userId, sessionId);
-                InterviewEndResponse response = new InterviewEndResponse(
-                        sessionId,
-                        context.totalQuestionsAsked(),
-                        context.averageScore(),
-                        List.copyOf(context.getQuestionHistory()));
                 if (!context.getState().terminal()) {
                     finish(context, sessionId);
                     sessionStore.save(context);
                 }
-                log.info("interview ended sessionId={} userId={} asked={} averageScore={}",
-                        sessionId, userId, response.askedCount(), response.averageScore());
-                return response;
+                log.info("interview finished sessionId={} userId={} asked={}",
+                        sessionId, userId, context.totalQuestionsAsked());
+                return context;
             }
         } finally {
             releaseLockIfTerminal(sessionId, lock);
@@ -147,10 +149,11 @@ public class InterviewService {
                                                       String userMessage, AiStreamChunkConsumer chunkConsumer)
             throws IOException {
         InterviewState phase = context.getState();
-        AnswerEvaluation evaluation = answerEvaluator.evaluate(
-                context.getCurrentQuestion(), context.getCurrentCandidateAnswer(), userMessage);
+        AnswerEvaluation evaluation = evaluationService.evaluate(
+                context.getCurrentQuestion(), context.getCurrentKnowledgePoint(),
+                context.getCurrentCandidateAnswer(), userMessage);
         double overall = evaluation.overall();
-        context.recordAnswer(context.getCurrentQuestion(), userMessage, overall);
+        context.recordAnswer(context.getCurrentQuestion(), userMessage, evaluation);
         updateScoreStreaks(context, overall);
 
         // 难度调整：连续低分立即降档；连续高分在确认留阶段换题时才升档（见下方 NEW_QUESTION 分支）
@@ -199,10 +202,10 @@ public class InterviewService {
      * 更新连续高/低分连击：高分（>=7）累加 high 并重置 low，低分（<4）反之，中间分两者都重置。
      */
     private void updateScoreStreaks(InterviewContext context, double overall) {
-        if (answerEvaluator.isStrong(overall)) {
+        if (evaluationService.isStrong(overall)) {
             context.setConsecutiveHighScores(context.getConsecutiveHighScores() + 1);
             context.setConsecutiveLowScores(0);
-        } else if (answerEvaluator.isPoor(overall)) {
+        } else if (evaluationService.isPoor(overall)) {
             context.setConsecutiveLowScores(context.getConsecutiveLowScores() + 1);
             context.setConsecutiveHighScores(0);
         } else {

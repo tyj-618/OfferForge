@@ -4,6 +4,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -16,6 +17,7 @@ public class MockAiModelClient implements AiModelClient {
 
     private static final Pattern QUESTION_PATTERN = Pattern.compile("<question>\\s*(.*?)\\s*</question>", Pattern.DOTALL);
     private static final Pattern FOLLOW_UP_SOURCE_PATTERN = Pattern.compile("对问题「(.*?)」的回答不够理想", Pattern.DOTALL);
+    private static final Pattern REPORT_SCORE_PATTERN = Pattern.compile("「(.*?)」得分([0-9.]+)", Pattern.DOTALL);
     private static final Pattern REF_PATTERN = Pattern.compile("\\[ref: (\\d+)]");
     private static final int STREAM_CHUNK_SIZE = 8;
 
@@ -56,23 +58,23 @@ public class MockAiModelClient implements AiModelClient {
     }
 
     @Override
-    public AnswerEvaluation evaluateAnswerDetail(String question, String candidateAnswer, String userAnswer) {
-        // 确定性分档与 evaluateAnswer 一致，三维度同值，便于测试按回答长度控制状态机分支
+    public AnswerEvaluation evaluateAnswerDetail(String question, String knowledgePoint, String candidateAnswer, String userAnswer) {
+        // 确定性分档与 evaluateAnswer 一致，四维度同值（加权后 overall 不变），便于测试按回答长度控制状态机分支
         if (userAnswer == null || userAnswer.isBlank()) {
-            return new AnswerEvaluation(0, 0, 0, 0,
-                    List.of("未提供有效回答"), List.of(), "未作答");
+            return new AnswerEvaluation(0, 0, 0, 0, 0,
+                    List.of(), List.of("未提供有效回答"), List.of(), "未作答");
         }
         int length = userAnswer.trim().length();
         if (length < 10) {
-            return new AnswerEvaluation(3, 2, 3, 3,
-                    List.of("关键要点展开不足"), List.of(), "回答过于简短，需要展开说明");
+            return new AnswerEvaluation(3, 3, 3, 3, 3,
+                    List.of("核心原理与关键要点"), List.of("关键要点展开不足"), List.of(), "回答过于简短，需要展开说明");
         }
         if (length < 30) {
-            return new AnswerEvaluation(5, 4, 5, 5,
-                    List.of("部分关键要点未覆盖"), List.of(), "回答覆盖部分要点，但不够完整");
+            return new AnswerEvaluation(5, 5, 5, 5, 5,
+                    List.of("核心原理与关键要点"), List.of("部分关键要点未覆盖"), List.of(), "回答覆盖部分要点，但不够完整");
         }
-        return new AnswerEvaluation(8, 8, 8, 8,
-                List.of(), List.of(), "回答覆盖主要要点，表达清晰");
+        return new AnswerEvaluation(8, 8, 8, 8, 8,
+                List.of("核心原理与关键要点"), List.of(), List.of(), "回答覆盖主要要点，表达清晰");
     }
 
     @Override
@@ -80,6 +82,39 @@ public class MockAiModelClient implements AiModelClient {
         Matcher matcher = FOLLOW_UP_SOURCE_PATTERN.matcher(prompt);
         String source = matcher.find() ? matcher.group(1).trim() : "原问题";
         return "关于「" + source + "」，换个角度：你能结合实际场景举个例子说明吗？";
+    }
+
+    @Override
+    public ReportSummary generateReportSummary(String prompt) {
+        // 确定性摘要：从逐题评估记录中提取最高/最低分题，生成可断言的文本总结
+        List<String> questions = new ArrayList<>();
+        List<Double> scores = new ArrayList<>();
+        Matcher matcher = REPORT_SCORE_PATTERN.matcher(prompt);
+        while (matcher.find() && questions.size() < 20) {
+            questions.add(matcher.group(1).trim());
+            try {
+                scores.add(Double.parseDouble(matcher.group(2)));
+            } catch (NumberFormatException exception) {
+                scores.add(0.0);
+            }
+        }
+        if (questions.isEmpty()) {
+            return new ReportSummary(List.of("完成了全部面试环节"), List.of(), List.of("建议持续系统化复习"));
+        }
+        int best = 0;
+        int worst = 0;
+        for (int index = 1; index < scores.size(); index++) {
+            if (scores.get(index) > scores.get(best)) {
+                best = index;
+            }
+            if (scores.get(index) < scores.get(worst)) {
+                worst = index;
+            }
+        }
+        return new ReportSummary(
+                List.of("「" + questions.get(best) + "」回答较好（得分" + scores.get(best) + "），要点覆盖完整"),
+                List.of("「" + questions.get(worst) + "」回答薄弱（得分" + scores.get(worst) + "），需重点复习"),
+                List.of("针对薄弱知识点做专题练习，并结合实际场景举例说明"));
     }
 
     private String mockAnswer(String userPrompt) {
@@ -93,6 +128,12 @@ public class MockAiModelClient implements AiModelClient {
         }
         if (userPrompt.contains("<task>followup-gen</task>")) {
             return generateFollowUpQuestion(userPrompt);
+        }
+        if (userPrompt.contains("<task>report-summary</task>")) {
+            ReportSummary summary = generateReportSummary(userPrompt);
+            return "亮点：" + String.join("；", summary.strengths())
+                    + "\n薄弱点：" + String.join("；", summary.weaknesses())
+                    + "\n建议：" + String.join("；", summary.suggestions());
         }
 
         Matcher refMatcher = REF_PATTERN.matcher(userPrompt);

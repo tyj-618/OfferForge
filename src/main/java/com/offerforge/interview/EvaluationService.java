@@ -4,35 +4,36 @@ import com.offerforge.ai.AiModelClient;
 import com.offerforge.ai.AnswerEvaluation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 /**
- * 回答质量评估：每次作答后调用 LLM 快速评估。
- * 评估 Prompt 与 JSON 解析由模型客户端实现；本组件负责兜底校验，
+ * 单题评估整合服务：四维度（准确性 0.35 / 完整性 0.25 / 清晰度 0.20 / 深度 0.20）结构化评估。
+ * 评估 Prompt 与 JSON 解析由模型客户端实现；本服务负责兜底校验，
  * 保证返回值合法（分值 0-10、列表非 null），模型故障时返回中间档不阻断面试。
  */
-@Component
-public class AnswerEvaluator {
+@Service
+public class EvaluationService {
 
-    private static final Logger log = LoggerFactory.getLogger(AnswerEvaluator.class);
+    private static final Logger log = LoggerFactory.getLogger(EvaluationService.class);
     private static final double FOLLOW_UP_THRESHOLD = 4.0;
     private static final double ADVANCE_THRESHOLD = 7.0;
 
     private final AiModelClient aiModelClient;
 
-    public AnswerEvaluator(AiModelClient aiModelClient) {
+    public EvaluationService(AiModelClient aiModelClient) {
         this.aiModelClient = aiModelClient;
     }
 
     /**
-     * 评估一次作答；candidateAnswer 为服务端参考答案（项目类问题可为 null）。
-     * Phase 4 起由 {@link EvaluationService} 统一提供带知识点的评估，此处保留便捷入口。
+     * 评估一次作答；knowledgePoint/candidateAnswer 可为 null（项目类问题无标准答案）。
      */
-    public AnswerEvaluation evaluate(String question, String candidateAnswer, String userAnswer) {
-        AnswerEvaluation evaluation = aiModelClient.evaluateAnswerDetail(question, null, candidateAnswer, userAnswer);
+    public AnswerEvaluation evaluate(String question, String knowledgePoint, String candidateAnswer, String userAnswer) {
+        AnswerEvaluation evaluation = aiModelClient.evaluateAnswerDetail(question, knowledgePoint, candidateAnswer, userAnswer);
         if (evaluation == null) {
             log.warn("interview evaluate fallback question={}", question);
-            return new AnswerEvaluation(5, 5, 5, 5, 5, java.util.List.of(), java.util.List.of(), java.util.List.of(), "评估服务异常，按中等处理");
+            return new AnswerEvaluation(5, 5, 5, 5, 5, List.of(), List.of(), List.of(), "评估服务异常，按中等处理");
         }
         return evaluation;
     }

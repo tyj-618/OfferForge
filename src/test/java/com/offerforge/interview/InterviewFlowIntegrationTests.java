@@ -83,12 +83,18 @@ class InterviewFlowIntegrationTests {
         String sse6 = ask(sessionId, token, "还能继续吗？");
         assertThat(sse6).contains("event:error").contains("面试已结束");
 
-        // end：返回作答统计
-        JsonNode end = post("/api/interview/" + sessionId + "/end", token, Map.of());
-        assertCode(end, 0);
-        assertThat(end.at("/data/askedCount").asInt()).isEqualTo(3);
-        assertThat(end.at("/data/averageScore").asDouble()).isEqualTo(8.0);
-        assertThat(end.at("/data/questions").size()).isEqualTo(3);
+        // finish：结束面试并返回综合反馈报告（3 题均 8 分 → 综合分 80）
+        JsonNode finish = post("/api/interview/" + sessionId + "/finish", token, Map.of());
+        assertCode(finish, 0);
+        assertThat(finish.at("/data/totalQuestions").asInt()).isEqualTo(3);
+        assertThat(finish.at("/data/overallScore").asDouble()).isEqualTo(80.0);
+        assertThat(finish.at("/data/questionEvaluations").size()).isEqualTo(3);
+
+        // 报告可通过 GET 重复查询，且重复 finish 幂等
+        JsonNode report = get("/api/report/" + sessionId, token);
+        assertCode(report, 0);
+        assertThat(report.at("/data/interviewId").asText()).isEqualTo(sessionId);
+        assertCode(post("/api/interview/" + sessionId + "/finish", token, Map.of()), 0);
     }
 
     @Test
@@ -137,7 +143,7 @@ class InterviewFlowIntegrationTests {
         // 其他用户访问他人会话 → 40300
         String tokenB = newUser();
         assertCode(get("/api/interview/" + sessionId + "/status", tokenB), 40300);
-        assertCode(post("/api/interview/" + sessionId + "/end", tokenB, Map.of()), 40300);
+        assertCode(post("/api/interview/" + sessionId + "/finish", tokenB, Map.of()), 40300);
 
         // 会话不存在 → 40400
         assertCode(get("/api/interview/missing-session/status", tokenA), 40400);

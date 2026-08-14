@@ -203,37 +203,45 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
     }
 
     @Override
-    public AnswerEvaluation evaluateAnswerDetail(String question, String candidateAnswer, String userAnswer) {
+    public AnswerEvaluation evaluateAnswerDetail(String question, String knowledgePoint, String candidateAnswer, String userAnswer) {
         String prompt = """
-                你是一个技术面试官。请评估候选人对以下问题的回答质量。
+                你是一个资深技术面试官，正在评估候选人的回答。
 
                 问题：%s
+                考察知识点：%s
                 标准答案要点：%s
                 候选人回答：%s
 
                 请从以下维度评分（0-10）：
-                1. 准确性：回答中的技术事实是否正确
-                2. 完整性：是否覆盖了标准答案的关键要点
-                3. 表达清晰度：回答是否条理清晰
+                1. 准确性（accuracy）：回答中的技术事实是否正确，有无明显错误
+                2. 完整性（completeness）：是否覆盖了标准答案中的关键要点
+                3. 表达清晰度（clarity）：回答是否条理清晰、逻辑连贯
+                4. 深度（depth）：是否有深入分析、原理剖析或延伸思考，而非仅停留在表面
 
                 请返回 JSON 格式：
                 {
                   "accuracy": 数字,
                   "completeness": 数字,
                   "clarity": 数字,
+                  "depth": 数字,
                   "overall": 数字,
-                  "missedPoints": ["遗漏的要点1", "遗漏的要点2"],
+                  "keyPoints": ["应覆盖的关键要点1"],
+                  "missedPoints": ["遗漏的要点1"],
                   "wrongPoints": ["错误的说法1"],
-                  "feedback": "一句话点评"
+                  "feedback": "2-3句话的综合点评，指出亮点和不足"
                 }
                 只输出 JSON 本身，不要输出其他内容。
-                """.formatted(question, referenceText(candidateAnswer), userAnswer == null ? "" : userAnswer);
+                """.formatted(
+                question,
+                knowledgePoint == null || knowledgePoint.isBlank() ? "（未指定）" : knowledgePoint,
+                referenceText(candidateAnswer),
+                userAnswer == null ? "" : userAnswer);
         AiTextResult result = generateText(List.of(ChatMessage.user(prompt)));
         AnswerEvaluation parsed = parseAnswerEvaluation(result.content());
         if (parsed == null) {
             log.warn("qa stage=llm mode=evaluate-detail status=unparsable model={} requestId={}",
                     properties.getModel(), result.requestId());
-            return new AnswerEvaluation(5, 5, 5, 5, List.of(), List.of(), "评估结果解析失败，按中等处理");
+            return new AnswerEvaluation(5, 5, 5, 5, 5, List.of(), List.of(), List.of(), "评估结果解析失败，按中等处理");
         }
         return parsed;
     }
@@ -245,13 +253,24 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
         return content.isEmpty() ? "你能针对这个知识点再展开讲讲吗？" : content;
     }
 
+    @Override
+    public ReportSummary generateReportSummary(String prompt) {
+        AiTextResult result = generateText(List.of(ChatMessage.user(prompt)));
+        ReportSummary parsed = parseReportSummary(result.content());
+        if (parsed == null) {
+            log.warn("qa stage=llm mode=report-summary status=unparsable model={} requestId={}",
+                    properties.getModel(), result.requestId());
+        }
+        return parsed;
+    }
+
     private String referenceText(String candidateAnswer) {
         return candidateAnswer == null || candidateAnswer.isBlank()
                 ? "（无标准答案，按项目经验与表达评估）" : candidateAnswer;
     }
 
     /**
-     * 解析评估 JSON：三维度钳制 0-10，overall 由服务端按权重 0.4/0.35/0.25 重算（不信任模型自报值）。
+     * 解析评估 JSON：四维度钳制 0-10，overall 由服务端按权重 0.35/0.25/0.20/0.20 重算（不信任模型自报值）。
      * 解析失败返回 null，由调用方兜底。
      */
     AnswerEvaluation parseAnswerEvaluation(String content) {
@@ -267,11 +286,38 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
             double accuracy = clampScore(node, "accuracy");
             double completeness = clampScore(node, "completeness");
             double clarity = clampScore(node, "clarity");
-            double overall = Math.round((accuracy * 0.4 + completeness * 0.35 + clarity * 0.25) * 10.0) / 10.0;
+            double depth = clampScore(node, "depth");
+            double overall = Math.round(
+                    (accuracy * 0.35 + completeness * 0.25 + clarity * 0.20 + depth * 0.20) * 10.0) / 10.0;
             String feedback = node.path("feedback").asText("");
-            return new AnswerEvaluation(accuracy, completeness, clarity, overall,
-                    readPoints(node, "missedPoints"), readPoints(node, "wrongPoints"),
+            return new AnswerEvaluation(accuracy, completeness, clarity, depth, overall,
+                    readPoints(node, "keyPoints"), readPoints(node, "missedPoints"), readPoints(node, "wrongPoints"),
                     feedback.isBlank() ? "评估完成" : feedback);
+        } catch (JsonProcessingException exception) {
+            return null;
+        }
+    }
+
+    /**
+     * 解析报告摘要 JSON：只取文本清单（每类最多 5 条）；格式非法或三类全空返回 null，由调用方兜底。
+     */
+    ReportSummary parseReportSummary(String content) {
+        if (content == null || content.isBlank()) {
+            return null;
+        }
+        String json = extractJsonObject(content);
+        if (json == null) {
+            return null;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            List<String> strengths = readPoints(node, "strengths", 5);
+            List<String> weaknesses = readPoints(node, "weaknesses", 5);
+            List<String> suggestions = readPoints(node, "suggestions", 5);
+            if (strengths.isEmpty() && weaknesses.isEmpty() && suggestions.isEmpty()) {
+                return null;
+            }
+            return new ReportSummary(strengths, weaknesses, suggestions);
         } catch (JsonProcessingException exception) {
             return null;
         }
@@ -289,12 +335,16 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
     }
 
     private List<String> readPoints(JsonNode node, String field) {
+        return readPoints(node, field, 10);
+    }
+
+    private List<String> readPoints(JsonNode node, String field, int limit) {
         List<String> points = new ArrayList<>();
         JsonNode array = node.path(field);
         if (array.isArray()) {
             for (JsonNode item : array) {
                 String text = item.asText("").trim();
-                if (!text.isEmpty() && points.size() < 10) {
+                if (!text.isEmpty() && points.size() < limit) {
                     points.add(text);
                 }
             }

@@ -7,6 +7,7 @@ import com.offerforge.ai.AiTextResult;
 import com.offerforge.ai.AnswerEvaluation;
 import com.offerforge.ai.ChatMessage;
 import com.offerforge.ai.MockAiModelClient;
+import com.offerforge.ai.ReportSummary;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -87,13 +88,19 @@ class FollowUpStrategyTests {
         }
 
         @Override
-        public AnswerEvaluation evaluateAnswerDetail(String question, String candidateAnswer, String userAnswer) {
-            return new AnswerEvaluation(5, 5, 5, 5, List.of(), List.of(), "stub");
+        public AnswerEvaluation evaluateAnswerDetail(String question, String knowledgePoint,
+                                                     String candidateAnswer, String userAnswer) {
+            return new AnswerEvaluation(5, 5, 5, 5, 5, List.of(), List.of(), List.of(), "stub");
         }
 
         @Override
         public String generateFollowUpQuestion(String prompt) {
             return "  ";
+        }
+
+        @Override
+        public ReportSummary generateReportSummary(String prompt) {
+            return null;
         }
     }
 }

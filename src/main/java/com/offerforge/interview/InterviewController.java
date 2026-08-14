@@ -4,6 +4,8 @@ import com.offerforge.auth.CurrentUserService;
 import com.offerforge.common.ApiResponse;
 import com.offerforge.common.ErrorCode;
 import com.offerforge.exception.BusinessException;
+import com.offerforge.report.InterviewReport;
+import com.offerforge.report.ReportService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -29,22 +31,27 @@ public class InterviewController {
     private static final long STREAM_TIMEOUT_MILLIS = 180_000L;
 
     private final InterviewService interviewService;
+    private final ReportService reportService;
     private final CurrentUserService currentUserService;
     private final Executor interviewStreamExecutor;
 
     public InterviewController(InterviewService interviewService,
+                               ReportService reportService,
                                CurrentUserService currentUserService,
                                @Qualifier("interviewStreamExecutor") Executor interviewStreamExecutor) {
         this.interviewService = interviewService;
+        this.reportService = reportService;
         this.currentUserService = currentUserService;
         this.interviewStreamExecutor = interviewStreamExecutor;
     }
 
     @PostMapping("/start")
     public ApiResponse<InterviewStartResponse> start(
-            @RequestHeader(value = "Authorization", required = false) String authorization) {
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody(required = false) InterviewStartRequest request) {
         Long userId = currentUserService.requireUserId(authorization);
-        return ApiResponse.success(interviewService.start(userId));
+        String position = request == null ? null : request.position();
+        return ApiResponse.success(interviewService.start(userId, position));
     }
 
     /**
@@ -63,12 +70,15 @@ public class InterviewController {
         return emitter;
     }
 
-    @PostMapping("/{sessionId}/end")
-    public ApiResponse<InterviewEndResponse> end(
+    /**
+     * 结束面试：置终态 + 生成综合反馈报告 + 归档；幂等，重复调用返回既有报告。
+     */
+    @PostMapping("/{sessionId}/finish")
+    public ApiResponse<InterviewReport> finish(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @PathVariable String sessionId) {
         Long userId = currentUserService.requireUserId(authorization);
-        return ApiResponse.success(interviewService.end(userId, sessionId));
+        return ApiResponse.success(reportService.finishAndArchive(userId, sessionId));
     }
 
     @GetMapping("/{sessionId}/status")
