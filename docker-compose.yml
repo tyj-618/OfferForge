@@ -1,0 +1,62 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: offerforge-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${OFFERFORGE_DB_PASSWORD:-offerforge_dev_pwd}
+      MYSQL_DATABASE: offerforge
+      TZ: Asia/Shanghai
+    ports:
+      - "${OFFERFORGE_BIND_ADDRESS:-127.0.0.1}:${OFFERFORGE_MYSQL_PORT:-3308}:3306"
+    volumes:
+      - offerforge-mysql-data:/var/lib/mysql
+      - ./src/main/resources/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: offerforge-redis
+    restart: unless-stopped
+    ports:
+      - "${OFFERFORGE_BIND_ADDRESS:-127.0.0.1}:${OFFERFORGE_REDIS_PORT:-6380}:6379"
+    volumes:
+      - offerforge-redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  elasticsearch:
+    profiles:
+      - search
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.8
+    container_name: offerforge-elasticsearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.security.enrollment.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "${OFFERFORGE_BIND_ADDRESS:-127.0.0.1}:${OFFERFORGE_ES_PORT:-9201}:9200"
+    volumes:
+      - offerforge-elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health?wait_for_status=yellow\\&timeout=1s >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+
+volumes:
+  offerforge-mysql-data:
+  offerforge-redis-data:
+  offerforge-elasticsearch-data:

@@ -1,0 +1,352 @@
+[
+  {
+    "question": "== 和 equals() 的区别是什么？",
+    "category": "Java基础",
+    "difficulty": "EASY",
+    "tags": ["equals", "hashCode", "对象比较"],
+    "answer": "== 比较的是值：基本类型比较数值，引用类型比较的是引用地址（是否为同一对象）。equals() 默认行为继承自 Object，等价于 ==；但 String、Integer 等类重写后用于比较内容相等。重写 equals() 必须同时重写 hashCode()，保证 equals 相等的对象 hashCode 一致，否则在 HashMap/HashSet 中会出现逻辑相等的对象被存成两份的问题。"
+  },
+  {
+    "question": "String 为什么设计成不可变的？",
+    "category": "Java基础",
+    "difficulty": "EASY",
+    "tags": ["String", "不可变", "字符串常量池"],
+    "answer": "String 内部由 final char[]/byte[] 持有且类本身为 final，保证不可变与不可继承。好处：1) 字符串常量池可以安全复用，节省内存；2) 天然线程安全；3) hashCode 可缓存，适合作为 HashMap 的 key；4) 安全性，作为网络连接、类加载、文件路径参数时不会被篡改。代价是拼接产生大量中间对象，高频拼接应使用 StringBuilder。"
+  },
+  {
+    "question": "HashMap 的底层实现原理（JDK 1.8）？",
+    "category": "Java集合",
+    "difficulty": "MEDIUM",
+    "tags": ["HashMap", "数组链表红黑树", "扩容"],
+    "answer": "JDK 1.8 的 HashMap 采用数组 + 链表 + 红黑树结构。put 时根据 key 的 hashCode 高 16 位异或扰动后与 (n-1) 相与定位桶下标；桶为空直接放入，冲突则尾插链表；当链表长度超过 8 且数组长度达到 64 时转为红黑树，查找从 O(n) 优化到 O(logn)。元素数量超过 容量 × 负载因子（默认 0.75）时扩容为 2 倍，扩容后元素要么留在原下标、要么移动到 原下标+旧容量 位置。HashMap 非线程安全。"
+  },
+  {
+    "question": "HashMap 和 ConcurrentHashMap 有什么区别？",
+    "category": "Java集合",
+    "difficulty": "HARD",
+    "tags": ["ConcurrentHashMap", "线程安全", "CAS"],
+    "answer": "HashMap 非线程安全，并发 put 可能丢数据；ConcurrentHashMap 是线程安全的并发容器。JDK 1.7 用分段锁 Segment；JDK 1.8 放弃分段锁，采用 Node 数组 + 链表/红黑树，通过 CAS 处理空桶插入，非空桶只 synchronized 锁住桶头节点，锁粒度更细。size() 采用 baseCount + CounterCell 数组分散计数（类似 LongAdder 思想）。不允许 null key/value，避免并发下的二义性。"
+  },
+  {
+    "question": "ArrayList 和 LinkedList 的区别及使用场景？",
+    "category": "Java集合",
+    "difficulty": "EASY",
+    "tags": ["ArrayList", "LinkedList", "数据结构"],
+    "answer": "ArrayList 基于动态数组，随机访问 O(1)，尾部增删均摊 O(1)，中间增删需要移动元素为 O(n)；扩容为原容量 1.5 倍。LinkedList 基于双向链表，随机访问 O(n)，已知节点位置时增删 O(1)，且每个节点额外存储前后指针，内存开销更大。实际开发绝大多数场景 ArrayList 更优（CPU 缓存友好），只有频繁在头尾操作的队列/双端队列场景考虑 LinkedList 或 ArrayDeque。"
+  },
+  {
+    "question": "HashSet 是如何保证元素唯一性的？",
+    "category": "Java集合",
+    "difficulty": "MEDIUM",
+    "tags": ["HashSet", "HashMap", "去重"],
+    "answer": "HashSet 底层由 HashMap 实现，元素作为 HashMap 的 key 存入，value 统一为一个静态 PRESENT 对象。添加元素时先算 hashCode 定位桶，再用 equals 与桶内已有 key 逐一比较：hashCode 不同直接放入，hashCode 相同且 equals 相等则判定重复、添加失败。因此自定义对象放入 HashSet 必须正确重写 hashCode() 和 equals()，且两者判断依据保持一致。"
+  },
+  {
+    "question": "hashCode() 的作用是什么？为什么重写 equals 必须重写 hashCode？",
+    "category": "Java基础",
+    "difficulty": "MEDIUM",
+    "tags": ["hashCode", "equals", "散列表"],
+    "answer": "hashCode() 返回对象的散列值，用于在 HashMap、HashSet 等散列表中快速定位存储桶，把查找从全量比较优化为桶内比较。约定：equals 相等的对象 hashCode 必须相等，反之不要求。若只重写 equals 不重写 hashCode，两个逻辑相等的对象可能落在不同桶中，导致 HashSet 去重失效、HashMap 中同一 key 存入多份，破坏散列表契约。"
+  },
+  {
+    "question": "Java 泛型的类型擦除是怎么回事？",
+    "category": "Java基础",
+    "difficulty": "HARD",
+    "tags": ["泛型", "类型擦除", "编译期"],
+    "answer": "Java 泛型是编译期特性，编译后泛型信息被擦除：List<String> 和 List<Integer> 在字节码层面都是 List，类型参数替换为上界（默认 Object）。擦除带来两点影响：1) 运行时无法通过 instanceof 判断泛型具体类型、不能 new T()；2) 为兼容旧代码，编译器自动生成桥接方法和强制类型转换（checkcast）。通配符 ? extends 限定上界（只读）、? super 限定下界（只写），即 PECS 原则。"
+  },
+  {
+    "question": "Java 线程有哪几种状态？如何转换？",
+    "category": "Java并发",
+    "difficulty": "EASY",
+    "tags": ["线程状态", "生命周期", "阻塞"],
+    "answer": "Thread.State 定义了 6 种状态：NEW（创建未启动）、RUNNABLE（调用 start 后，含就绪与运行）、BLOCKED（等待 synchronized 锁）、WAITING（wait/join/park 无限等待）、TIMED_WAITING（带超时的等待，如 sleep）、TERMINATED（执行结束）。典型转换：start 后进入 RUNNABLE；等待锁进入 BLOCKED；wait 进入 WAITING，被 notify 后回到 BLOCKED/RUNNABLE 竞争锁。"
+  },
+  {
+    "question": "synchronized 和 ReentrantLock 的区别？",
+    "category": "Java并发",
+    "difficulty": "EASY",
+    "tags": ["synchronized", "ReentrantLock", "AQS"],
+    "answer": "synchronized 是 JVM 内置关键字，自动加锁释放，经历偏向锁→轻量级锁→重量级锁的优化演进；ReentrantLock 是 JDK 基于 AQS 实现的显式锁。ReentrantLock 额外提供：可中断获取锁（lockInterruptibly）、超时获取（tryLock）、公平锁选项、多 Condition 条件队列实现精准唤醒。使用 ReentrantLock 必须在 finally 中 unlock，否则异常时会死锁。简单同步优先 synchronized，需要高级特性时用 ReentrantLock。"
+  },
+  {
+    "question": "volatile 关键字的作用和实现原理？",
+    "category": "Java并发",
+    "difficulty": "MEDIUM",
+    "tags": ["volatile", "可见性", "禁止指令重排"],
+    "answer": "volatile 保证两件事：1) 可见性——对 volatile 变量的写会立即刷新到主内存，读时强制从主内存加载，通过内存屏障实现；2) 禁止指令重排序——编译器和 CPU 不会把 volatile 读写前后的操作越过屏障重排，经典应用是双重检查锁单例中防止对象半初始化。注意 volatile 不保证原子性，count++ 这类复合操作仍需 AtomicInteger 或加锁。"
+  },
+  {
+    "question": "说说你对 Java 内存模型（JMM）和 happens-before 的理解？",
+    "category": "Java并发",
+    "difficulty": "HARD",
+    "tags": ["JMM", "happens-before", "内存屏障"],
+    "answer": "JMM 定义了线程与主内存之间的抽象关系：每个线程有工作内存，共享变量的读写在工作内存进行，再同步回主内存，由此产生可见性、有序性问题。happens-before 是 JMM 对程序员的可见性承诺：若操作 A happens-before 操作 B，则 A 的结果对 B 可见。核心规则包括：程序顺序规则、监视器锁规则（unlock 后的 lock 可见）、volatile 规则、线程启动/终止/中断规则、传递性规则。"
+  },
+  {
+    "question": "线程池的核心参数有哪些？任务提交后的处理流程？",
+    "category": "Java并发",
+    "difficulty": "MEDIUM",
+    "tags": ["线程池", "ThreadPoolExecutor", "拒绝策略"],
+    "answer": "ThreadPoolExecutor 七大参数：corePoolSize 核心线程数、maximumPoolSize 最大线程数、keepAliveTime 与 unit 非核心线程空闲存活时间、workQueue 任务队列、threadFactory 线程工厂、handler 拒绝策略。流程：任务提交后，线程数小于 core 则创建核心线程执行；核心满则入队；队列满且线程数小于 max 则创建非核心线程；都满则执行拒绝策略（AbortPolicy 抛异常、CallerRunsPolicy 调用者执行、DiscardPolicy/DiscardOldestPolicy 静默丢弃）。"
+  },
+  {
+    "question": "ThreadLocal 的实现原理？为什么会内存泄漏？",
+    "category": "Java并发",
+    "difficulty": "HARD",
+    "tags": ["ThreadLocal", "内存泄漏", "弱引用"],
+    "answer": "每个 Thread 内部持有一个 ThreadLocalMap，key 是 ThreadLocal 对象（弱引用），value 是存储的值。调用 get/set 时以当前 ThreadLocal 为 key 操作当前线程的 map，实现线程隔离。内存泄漏原因：key 是弱引用会被 GC 回收变成 null，但 value 是强引用仍挂在线程的 map 上；线程池场景线程长期存活，这些 key 为 null 的 value 永远无法访问也无法回收。规避方式：使用完毕后务必调用 remove()。"
+  },
+  {
+    "question": "CAS 的原理是什么？有什么缺陷？",
+    "category": "Java并发",
+    "difficulty": "MEDIUM",
+    "tags": ["CAS", "ABA问题", "无锁"],
+    "answer": "CAS（Compare And Swap）是一条 CPU 原子指令，比较内存值与预期值，相等才更新为新值，失败则重试，是无锁并发（AtomicInteger、AQS 的 CLH 入队）的基础。缺陷：1) ABA 问题——值从 A 变 B 再变回 A，CAS 认为没变过，可用 AtomicStampedReference 加版本号解决；2) 自旋开销——竞争激烈时长期 CAS 失败会空转消耗 CPU；3) 只能保证单个变量的原子性。"
+  },
+  {
+    "question": "wait/notify 如何使用？为什么必须在 synchronized 块中调用？",
+    "category": "Java并发",
+    "difficulty": "HARD",
+    "tags": ["wait", "notify", "管程"],
+    "answer": "wait() 让当前线程释放对象锁并进入对象的等待队列，notify()/notifyAll() 随机/全部唤醒等待线程，被唤醒线程需重新竞争锁。三者都是 Object 的方法，必须在 synchronized 块中调用，否则会抛 IllegalMonitorStateException：因为 wait 需要先持有锁才能释放锁，notify 也依赖对象的等待队列，而等待队列归管程（monitor）管理，只有持锁线程才有权操作。典型应用是生产者-消费者模式，且 wait 应放在 while 循环中防止虚假唤醒。"
+  },
+  {
+    "question": "JVM 的内存结构（运行时数据区）是怎样的？",
+    "category": "JVM",
+    "difficulty": "MEDIUM",
+    "tags": ["运行时数据区", "堆", "栈", "方法区"],
+    "answer": "线程私有：程序计数器（记录当前执行的字节码行号，唯一不会 OOM 的区域）、虚拟机栈（每个方法一个栈帧，存局部变量表、操作数栈、返回地址）、本地方法栈。线程共享：堆（对象实例与数组，GC 主战场，分新生代/老年代）、方法区（JDK 8 后由元空间 Metaspace 实现，使用直接内存，存类信息、常量、静态变量）。字符串常量池 JDK 7 起移入堆中。"
+  },
+  {
+    "question": "常见的垃圾回收算法和分代收集理论？",
+    "category": "JVM",
+    "difficulty": "HARD",
+    "tags": ["GC", "标记清除", "分代收集"],
+    "answer": "基础算法：标记-清除（简单但产生碎片）、标记-复制（无碎片但浪费空间，适合存活率低的新生代，Eden:S0:S1=8:1:1）、标记-整理（无碎片且省空间，移动成本高，适合老年代）。分代收集理论基于两个假说：绝大多数对象朝生夕死、熬过越多次 GC 的对象越难死，因此新生代用复制算法（Minor GC 频繁但快），老年代用标记-清除或标记-整理（Major/Full GC）。现代收集器如 G1、ZGC 在 Region 化内存上进一步弱化分代边界。"
+  },
+  {
+    "question": "JVM 如何判断对象是否存活？",
+    "category": "JVM",
+    "difficulty": "MEDIUM",
+    "tags": ["可达性分析", "GC Roots", "引用类型"],
+    "answer": "引用计数法因无法解决循环引用而未被主流 JVM 采用。HotSpot 使用可达性分析：以 GC Roots 为起点向下搜索引用链，不可达的对象判定为可回收。GC Roots 包括：虚拟机栈中引用的对象、方法区静态属性与常量引用、本地方法栈 JNI 引用、同步锁持有的对象等。即使不可达也并非立即回收，还需经历至少两次标记且对象未重写 finalize 或 finalize 已执行过。此外引用分强软弱虚四级，弱引用与软引用常用于缓存场景。"
+  },
+  {
+    "question": "类加载的过程和双亲委派模型？",
+    "category": "JVM",
+    "difficulty": "HARD",
+    "tags": ["类加载", "双亲委派", "ClassLoader"],
+    "answer": "类加载全过程：加载→验证→准备（为静态变量分配内存并赋零值）→解析（符号引用转直接引用）→初始化（执行 clinit，赋真实值）。双亲委派模型：类加载请求先逐级委托给父加载器（Bootstrap→Ext/Platform→App ClassLoader），父加载器无法完成时才由子类加载器自行加载。好处：保证核心类库安全与唯一性（自己写的 java.lang.String 永远不会被加载）、避免重复加载。破坏双亲委派的典型场景：SPI（线程上下文类加载器）、Tomcat 的 Web 应用隔离、OSGi 与热部署。"
+  },
+  {
+    "question": "常见的 OOM 场景及排查思路？",
+    "category": "JVM",
+    "difficulty": "HARD",
+    "tags": ["OOM", "内存泄漏", "jstack"],
+    "answer": "常见场景：1) 堆溢出 Java heap space——对象过多或内存泄漏，用 -XX:+HeapDumpOnOutOfMemoryError 留现场，MAT 分析支配树找大对象与泄漏链；2) 元空间溢出 Metaspace——动态生成类过多（CGLIB 代理、反射）；3) 栈溢出 StackOverflowError——递归过深；4) 直接内存溢出——NIO Buffer 使用不当。排查套路：jstat 看 GC 频率与各区占用，jmap dump 堆快照，MAT/jhat 分析，jstack 看线程状态与死锁，结合监控平台看增长趋势定位泄漏点。"
+  },
+  {
+    "question": "常用的 JVM 调优参数和工具有哪些？",
+    "category": "JVM",
+    "difficulty": "MEDIUM",
+    "tags": ["JVM调优", "GC日志", "jcmd"],
+    "answer": "常用参数：-Xms/-Xmx 设置堆初始/最大值（建议设相等避免动态扩缩）、-Xmn 新生代大小、-XX:MetaspaceSize、-XX:+UseG1GC 选择收集器、-XX:MaxGCPauseMillis 目标停顿、-XX:+PrintGCDetails 输出 GC 日志、-XX:+HeapDumpOnOutOfMemoryError 异常时自动 dump。常用工具：jps 看进程、jstat 看统计、jinfo 看改参数、jmap 导出堆快照、jstack 打印线程栈、jcmd 多功能入口；图形化有 JConsole、VisualVM、Arthas（线上诊断神器，支持 watch/trace/反编译）。"
+  },
+  {
+    "question": "MySQL InnoDB 为什么使用 B+ 树作为索引结构？",
+    "category": "MySQL",
+    "difficulty": "MEDIUM",
+    "tags": ["B+树", "索引", "InnoDB"],
+    "answer": "对比其他结构：哈希索引只支持等值查询无法范围扫描；二叉树/红黑树树高太大导致磁盘 IO 次数多；B 树非叶子节点也存数据，单页能放的 key 更少、树更高。B+ 树的优势：1) 非叶子节点只存索引，一个 16KB 页能容纳更多 key，树高通常 3-4 层即可存千万级数据，每次查询 3-4 次磁盘 IO；2) 叶子节点通过双向链表连接，范围查询与排序高效；3) 查询路径长度稳定，性能可预期。"
+  },
+  {
+    "question": "事务的 ACID 特性与隔离级别？",
+    "category": "MySQL",
+    "difficulty": "MEDIUM",
+    "tags": ["事务", "ACID", "隔离级别"],
+    "answer": "ACID：原子性（undo log 回滚保证）、一致性（其他三者共同达成的结果）、隔离性（锁 + MVCC 保证）、持久性（redo log 落盘保证）。四个隔离级别从低到高：读未提交（存在脏读）、读已提交（解决脏读，存在不可重复读，Oracle 默认）、可重复读（解决不可重复读，InnoDB 默认，通过间隙锁大幅避免幻读）、串行化（完全串行，性能最差）。级别越高并发度越低，需在一致性与性能间权衡。"
+  },
+  {
+    "question": "MySQL 的 MVCC 是如何实现的？",
+    "category": "MySQL",
+    "difficulty": "HARD",
+    "tags": ["MVCC", "ReadView", "undo log"],
+    "answer": "MVCC（多版本并发控制）让读写互不阻塞。实现依赖三点：1) 每行数据有隐藏列 trx_id（最近修改的事务 id）和 roll_pointer（指向 undo log 历史版本链）；2) 事务执行快照读时生成 ReadView，记录当前活跃事务 id 列表；3) 可见性判断：trx_id 小于最小活跃事务 id 则可见，大于最大事务 id 或在活跃列表中则不可见，沿版本链找第一个可见版本。RC 级别每次快照读都新建 ReadView，RR 级别只在第一次快照读时创建，因此 RR 能实现可重复读。"
+  },
+  {
+    "question": "redo log、undo log、binlog 的区别和作用？",
+    "category": "MySQL",
+    "difficulty": "HARD",
+    "tags": ["redo log", "undo log", "binlog", "WAL"],
+    "answer": "redo log 是 InnoDB 引擎层的物理日志，记录页的修改，循环写，用于崩溃恢复（crash-safe），配合 WAL 先写日志再写数据页提升性能。undo log 是逻辑日志，记录反向操作，用于事务回滚，同时支撑 MVCC 的版本链。binlog 是 Server 层的逻辑日志，追加写，记录所有变更，用于主从复制和数据恢复。两阶段提交：先写 redo log（prepare）→ 写 binlog → redo log（commit），保证两份日志一致，避免主从不一致。"
+  },
+  {
+    "question": "MySQL 死锁是如何产生的？如何避免？",
+    "category": "MySQL",
+    "difficulty": "HARD",
+    "tags": ["死锁", "锁顺序", "间隙锁"],
+    "answer": "死锁是两个以上事务互相持有对方等待的锁形成环路，典型场景：两个事务以相反顺序更新相同记录；RR 级别下间隙锁与记录锁组合互锁。InnoDB 有死锁检测（innodb_deadlock_detect），发现后回滚代价小的事务。避免手段：1) 固定顺序访问表和行；2) 大事务拆小、缩短持锁时间；3) 合理使用索引，避免无索引导致的全表锁升级；4) 降低隔离级别（RC 没有间隙锁）；5) 设置锁等待超时 innodb_lock_wait_timeout。"
+  },
+  {
+    "question": "聚簇索引和非聚簇索引的区别？什么是覆盖索引和索引下推？",
+    "category": "MySQL",
+    "difficulty": "MEDIUM",
+    "tags": ["聚簇索引", "回表", "覆盖索引", "索引下推"],
+    "answer": "聚簇索引叶子节点存储完整行数据，InnoDB 主键索引即聚簇索引，一张表只有一个；非聚簇索引（二级索引）叶子节点存索引列值 + 主键值，查询非索引列需要拿主键回表查聚簇索引。覆盖索引：查询列全部包含在索引中，无需回表，explain 显示 Using index。索引下推（ICP，5.6+）：联合索引中不满足最左前缀的条件也下推到存储引擎层过滤，减少回表次数，explain 显示 Using index condition。"
+  },
+  {
+    "question": "一条 SQL 执行很慢，你如何排查和优化？",
+    "category": "MySQL",
+    "difficulty": "HARD",
+    "tags": ["慢SQL", "explain", "索引优化"],
+    "answer": "步骤：1) 开启慢查询日志定位目标 SQL；2) explain 分析执行计划，重点看 type（至少 range，争取 ref/const）、key（是否走预期索引）、rows（扫描行数）、Extra（Using filesort/Using temporary 是危险信号）；3) 常见优化：为 where/order by/group by 列建合适索引，遵循最左前缀；避免在索引列上做函数运算和隐式类型转换；深分页用游标分页替代 limit 大 offset；小表驱动大表，子查询改 join；4) 必要时看 show profile 分析耗时分布，或调整表结构/分库分表。"
+  },
+  {
+    "question": "MySQL 深分页为什么慢？如何优化？",
+    "category": "MySQL",
+    "difficulty": "MEDIUM",
+    "tags": ["分页", "游标分页", "limit"],
+    "answer": "limit 1000000, 10 需要存储引擎扫描并回表 100 万 + 10 行，然后 Server 层丢弃前 100 万行，代价全在无效扫描上。优化方案：1) 游标分页（推荐）：记住上一页最大 id，where id > 上次值 limit 10，利用主键索引直接定位；2) 延迟关联：先在覆盖索引上分页取出主键，再 join 回原表取整行，减少回表次数；3) 业务限制：只允许访问有限页数，或改走搜索引擎 ES 分页。"
+  },
+  {
+    "question": "Redis 有哪些数据类型？各自的应用场景？",
+    "category": "Redis",
+    "difficulty": "EASY",
+    "tags": ["数据结构", "String", "ZSet"],
+    "answer": "五种基础类型：String（缓存、计数器、分布式锁）、Hash（对象属性存储，如用户信息）、List（消息队列、最新动态）、Set（去重、共同好友、抽奖）、ZSet（排行榜、延迟队列，score 排序）。高级类型：Bitmap（签到、活跃统计）、HyperLogLog（UV 统计，误差 0.81%）、Geo（附近的人）、Stream（5.0+ 支持消费者组的消息队列）。底层编码会按数据规模自动转换，如 ziplist/quicklist/skiplist/intset 等，兼顾内存与性能。"
+  },
+  {
+    "question": "Redis 为什么这么快？单线程模型如何理解？",
+    "category": "Redis",
+    "difficulty": "MEDIUM",
+    "tags": ["单线程", "IO多路复用", "epoll"],
+    "answer": "核心原因：1) 纯内存操作，数据结构专门优化；2) 单线程处理命令，无锁无上下文切换，避免并发竞争；3) IO 多路复用（epoll）同时监听海量连接，事件驱动。注意单线程指命令执行单线程，6.0 引入多线程处理网络读写（IO 线程），命令执行仍是单线程；此外持久化、惰性删除等由后台线程完成。单线程下耗时命令（keys *、大 key 删除）会阻塞整个实例，需要用 scan 替代、异步删除（unlink）。"
+  },
+  {
+    "question": "Redis 的 RDB 和 AOF 持久化有什么区别？",
+    "category": "Redis",
+    "difficulty": "MEDIUM",
+    "tags": ["RDB", "AOF", "持久化"],
+    "answer": "RDB 是某个时间点的全量内存快照（fork 子进程 + COW 写入），文件紧凑恢复快，适合备份与灾难恢复，但两次快照间的数据可能丢失，fork 在大内存实例上有抖动。AOF 追加记录每条写命令，有 always/everysec/no 三种刷盘策略，最多丢一秒数据，文件大恢复慢，通过 rewrite 压缩。4.0 提供混合持久化：AOF rewrite 时先写 RDB 格式全量再追加增量命令，兼顾恢复速度与数据安全。生产一般开 AOF（everysec）+ 定期 RDB 备份。"
+  },
+  {
+    "question": "什么是缓存穿透、缓存击穿、缓存雪崩？如何解决？",
+    "category": "Redis",
+    "difficulty": "MEDIUM",
+    "tags": ["缓存穿透", "缓存击穿", "缓存雪崩"],
+    "answer": "穿透：查询不存在的数据，缓存无、DB 也无，请求全部打到 DB。方案：布隆过滤器拦截、缓存空值设短 TTL、参数合法性校验。击穿：某个热点 key 过期瞬间大量并发直查 DB。方案：互斥锁/逻辑过期重建缓存、热点 key 永不过期 + 异步更新。雪崩：大量 key 同时过期或 Redis 宕机，流量瞬时压向 DB。方案：过期时间加随机抖动、多级缓存、Redis 高可用集群、限流降级兜底。三者本质都是缓存失效后流量打到数据库，按失效范围区分。"
+  },
+  {
+    "question": "如何用 Redis 实现分布式锁？有哪些坑？",
+    "category": "Redis",
+    "difficulty": "HARD",
+    "tags": ["分布式锁", "SETNX", "Redisson"],
+    "answer": "基础实现：SET key uuid NX PX 30000 原子加锁，value 存唯一标识防止误删他人锁，释放时用 Lua 脚本比对 value 再删除保证原子性。坑与对策：1) 锁过期但业务未完成——Redisson 看门狗机制自动续期；2) 主从切换锁丢失——RedLock 向多数独立节点加锁（仍有争议）；3) 不可重入——Redisson 用 hash 结构记录重入次数。生产中优先使用 Redisson 的 RLock，它封装了续期、可重入、公平锁等细节。"
+  },
+  {
+    "question": "Redis 的过期删除策略和内存淘汰策略？",
+    "category": "Redis",
+    "difficulty": "HARD",
+    "tags": ["过期策略", "内存淘汰", "LRU"],
+    "answer": "过期删除采用惰性删除 + 定期删除组合：访问 key 时检查是否过期；后台周期性随机抽取一批设置了过期时间的 key 删除过期者，控制单次耗时。内存达到 maxmemory 上限时按淘汰策略处理：noeviction（默认，写入报错）、allkeys-lru/lfu/random（全部 key 中淘汰）、volatile-lru/lfu/random/ttl（只在设置了过期时间的 key 中淘汰）。Redis 的 LRU 是近似实现（采样后淘汰最旧），4.0 新增 LFU 按访问频率淘汰，更适合热点数据场景。"
+  },
+  {
+    "question": "如何保证缓存与数据库的一致性？",
+    "category": "Redis",
+    "difficulty": "HARD",
+    "tags": ["缓存一致性", "延迟双删", "binlog"],
+    "answer": "先更新 DB 再删除缓存（Cache Aside）是主流方案，并发下仍有极小概率不一致（读请求把旧值回填）。加固手段：1) 删除缓存失败用重试机制（消息队列重试删除）；2) 延迟双删：删缓存→更新 DB→延迟再删一次，防旧值回填；3) 订阅 binlog（Canal）异步删除缓存，业务代码无侵入。追求强一致则给缓存设置较短 TTL 兜底，或读写都走缓存由缓存负责写 DB。本质：缓存与 DB 是两个系统，只能做到最终一致，按业务容忍度选择方案。"
+  },
+  {
+    "question": "TCP 三次握手的过程？为什么不是两次？",
+    "category": "计算机网络",
+    "difficulty": "EASY",
+    "tags": ["TCP", "三次握手", "连接建立"],
+    "answer": "三次握手：1) 客户端发送 SYN(seq=x) 进入 SYN_SENT；2) 服务端回 SYN+ACK(seq=y, ack=x+1) 进入 SYN_RCVD；3) 客户端回 ACK(ack=y+1)，双方进入 ESTABLISHED。不能两次的原因：双方都需确认自己和对方的收发能力正常——第三次握手让服务端确认客户端的接收能力；同时防止历史连接（网络滞留的旧 SYN）到达服务端后建立无效连接浪费资源。SYN 洪泛攻击正是利用半连接队列，可用 SYN Cookie 防御。"
+  },
+  {
+    "question": "TCP 四次挥手的过程？为什么会有 TIME_WAIT？",
+    "category": "计算机网络",
+    "difficulty": "MEDIUM",
+    "tags": ["四次挥手", "TIME_WAIT", "2MSL"],
+    "answer": "四次挥手：主动方发 FIN 进入 FIN_WAIT_1；被动方回 ACK 进入 CLOSE_WAIT（此时被动方可能还有数据要发）；被动方数据发完后发 FIN 进入 LAST_ACK；主动方回 ACK 进入 TIME_WAIT，等待 2MSL 后关闭。TIME_WAIT 的意义：1) 保证最后一个 ACK 能到达被动方，丢失时被动方重发 FIN 还能再响应；2) 让本次连接的旧报文在网络中消失，避免与新连接的相同四元组报文混淆。大量 TIME_WAIT 常见于短连接高并发场景，可用连接池或调优内核参数缓解。"
+  },
+  {
+    "question": "HTTP 和 HTTPS 的区别？TLS 握手大致过程？",
+    "category": "计算机网络",
+    "difficulty": "MEDIUM",
+    "tags": ["HTTPS", "TLS", "证书"],
+    "answer": "HTTPS = HTTP + TLS，在传输层之上加密，默认端口 443，解决 HTTP 明文传输的窃听、篡改、冒充问题。TLS 1.2 握手：1) ClientHello 交换支持的加密套件与随机数；2) ServerHello + 证书（含公钥）+ 随机数；3) 客户端验证证书链（CA 背书防中间人），生成预主密钥用服务端公钥加密传输（ECDHE 方案则交换参数派生会话密钥）；4) 双方用三个随机数生成对称会话密钥，后续用对称加密通信。核心思想：非对称加密安全交换密钥，对称加密高效传输数据。"
+  },
+  {
+    "question": "HTTP/1.1 与 HTTP/2 的主要区别？",
+    "category": "计算机网络",
+    "difficulty": "MEDIUM",
+    "tags": ["HTTP2", "多路复用", "头部压缩"],
+    "answer": "HTTP/1.1 基于文本，队头阻塞明显（管线化实际未普及），靠多个 TCP 连接并发。HTTP/2 改进：1) 二进制分帧，拆分为帧与流；2) 多路复用，同一 TCP 连接上并行收发多个请求响应，解决应用层队头阻塞；3) 头部压缩 HPACK，维护头部索引表减少重复传输；4) 服务器推送。但 TCP 层丢包仍会阻塞所有流，HTTP/3 改用基于 UDP 的 QUIC 解决该问题并支持连接迁移。"
+  },
+  {
+    "question": "Cookie、Session、Token（JWT）有什么区别？",
+    "category": "计算机网络",
+    "difficulty": "EASY",
+    "tags": ["Cookie", "Session", "JWT"],
+    "answer": "Cookie 是浏览器端存储，随同源请求自动携带，受同源限制，常用于保存会话凭证。Session 是服务端有状态方案，服务端保存用户信息并下发 sessionId（常放 Cookie），扩容需要会话共享（如 Redis）。JWT 是无状态 Token，由 header.payload.signature 组成，签名防篡改，服务端不存状态，天然适合分布式与跨域，但签发后无法主动失效（需配合黑名单或短有效期 + 刷新机制）。三者不是并列关系：Cookie 是载体，Session/JWT 是会话管理方案。"
+  },
+  {
+    "question": "GET 和 POST 的区别？HTTP 常见状态码有哪些？",
+    "category": "计算机网络",
+    "difficulty": "EASY",
+    "tags": ["HTTP方法", "状态码", "幂等"],
+    "answer": "GET 语义为获取资源，参数在 URL，应幂等且可缓存，长度受浏览器/服务器限制；POST 语义为提交资源，参数在请求体，非幂等。本质差异在语义与规范约定，而非单纯参数位置。常见状态码：200 成功、201 已创建、204 无内容、301 永久重定向、302 临时重定向、304 协商缓存命中、400 参数错误、401 未认证、403 无权限、404 不存在、409 冲突、429 限流、500 服务内部错误、502 网关错误、503 服务不可用、504 网关超时。"
+  },
+  {
+    "question": "谈谈你对 Spring IoC 和 DI 的理解？",
+    "category": "Spring",
+    "difficulty": "MEDIUM",
+    "tags": ["IoC", "依赖注入", "容器"],
+    "answer": "IoC（控制反转）把对象的创建与依赖管理权从代码交给容器：对象不再自己 new 依赖，而是由 Spring 容器创建并注入，降低耦合、便于替换实现与测试。DI（依赖注入）是 IoC 的实现手段，通过构造器、Setter 或字段注入依赖，推荐构造器注入（不可变、利于发现循环依赖）。容器核心是 BeanFactory/ApplicationContext，Bean 定义（@Component/@Bean 等）经扫描注册为 BeanDefinition，再由容器实例化、装配、初始化并管理生命周期。"
+  },
+  {
+    "question": "Spring Bean 的生命周期是怎样的？",
+    "category": "Spring",
+    "difficulty": "MEDIUM",
+    "tags": ["Bean生命周期", "BeanPostProcessor", "初始化"],
+    "answer": "主流程：1) 实例化（反射创建对象）；2) 属性填充（依赖注入）；3) Aware 接口回调（BeanNameAware、ApplicationContextAware 等）；4) BeanPostProcessor 前置处理 postProcessBeforeInitialization；5) 初始化（@PostConstruct → InitializingBean.afterPropertiesSet → 自定义 init-method）；6) BeanPostProcessor 后置处理（AOP 代理在此生成）；7) 就绪使用；8) 容器关闭时销毁（@PreDestroy → DisposableBean.destroy）。BeanPostProcessor 是 Spring 扩展点，AOP、@Async 等能力都基于它实现。"
+  },
+  {
+    "question": "Spring AOP 的实现原理？JDK 动态代理和 CGLIB 的区别？",
+    "category": "Spring",
+    "difficulty": "HARD",
+    "tags": ["AOP", "动态代理", "CGLIB"],
+    "answer": "AOP 通过代理在不改源码的前提下织入横切逻辑（事务、日志、权限）。Spring 默认规则：目标类实现了接口用 JDK 动态代理（基于 Proxy + InvocationHandler，面向接口）；没有接口用 CGLIB（运行时生成目标类的子类，重写方法，final 类/方法无法代理）。Spring Boot 2.x 起默认统一使用 CGLIB。注意代理失效场景：同类内部方法直接调用（this 调用绕过代理），可通过注入自身或 AopContext.currentProxy() 解决。"
+  },
+  {
+    "question": "Spring 事务的传播行为有哪些？哪些情况事务会失效？",
+    "category": "Spring",
+    "difficulty": "HARD",
+    "tags": ["事务传播", "@Transactional", "事务失效"],
+    "answer": "七种传播行为，常用三种：REQUIRED（默认，有事务则加入，无则新建）、REQUIRES_NEW（挂起当前事务，独立新开）、NESTED（嵌套事务，savepoint 回滚点）；其余：SUPPORTS、NOT_SUPPORTED、MANDATORY、NEVER。常见失效场景：1) 方法非 public；2) 同类自调用绕过代理；3) 异常被 catch 吞掉未抛出；4) 默认只回滚 RuntimeException/Error，受检异常需 rollbackFor=Exception.class；5) 数据库引擎不支持事务（MyISAM）；6) 未被 Spring 管理的类。"
+  },
+  {
+    "question": "Spring 是如何解决循环依赖的？为什么需要三级缓存？",
+    "category": "Spring",
+    "difficulty": "HARD",
+    "tags": ["循环依赖", "三级缓存", "单例"],
+    "answer": "三级缓存：singletonObjects（一级，成品）、earlySingletonObjects（二级，提前曝光的半成品）、singletonFactories（三级，ObjectFactory 工厂）。以 A 依赖 B、B 依赖 A 为例：A 实例化后把工厂放入三级缓存，填充属性发现需要 B → 创建 B，B 填充属性需要 A → 从三级缓存取 A 的工厂（若需 AOP 则此时提前生成代理）放入二级缓存，B 完成创建，A 拿到 B 完成创建。三级而非二级缓存的意义：延迟决定是否生成代理对象，保证代理只在必要时创建且只创建一次。构造器注入的循环依赖无法解决（实例化阶段拿不到对象）。"
+  },
+  {
+    "question": "单例模式的双重检查锁为什么需要 volatile？",
+    "category": "设计模式",
+    "difficulty": "HARD",
+    "tags": ["单例", "双重检查锁", "volatile"],
+    "answer": "双重检查锁：先判空再加锁，锁内二次判空后创建实例，兼顾懒加载与性能。new 操作分三步：分配内存→初始化对象→引用赋值，指令重排可能变成 分配→赋值→初始化，此时另一线程第一次判空看到非 null 直接返回尚未初始化的对象，导致空指针等不可预期行为。volatile 禁止重排序，保证对象完整初始化后才可见。替代方案：静态内部类（利用类加载机制天然线程安全）或枚举单例（防反射与反序列化破坏）。"
+  },
+  {
+    "question": "你在项目中用过哪些设计模式？举例说明应用场景。",
+    "category": "设计模式",
+    "difficulty": "MEDIUM",
+    "tags": ["工厂模式", "策略模式", "模板方法", "观察者"],
+    "answer": "常见落地：1) 工厂模式——Spring BeanFactory，或根据支付渠道类型创建对应支付处理器，消除 if-else；2) 策略模式——多种排序/计价/风控算法实现同一接口，运行时按配置切换；3) 模板方法——AbstractQueuedSynchronizer、JdbcTemplate，固定流程骨架，子类实现差异步骤；4) 观察者——Spring 事件机制 ApplicationEvent，业务解耦（注册成功后发邮件/发券）；5) 装饰器——Java IO 流、MyBatis Cache；6) 代理——Spring AOP、MyBatis Mapper。回答要点：说清模式解决什么问题、项目中具体位置与收益。"
+  }
+]

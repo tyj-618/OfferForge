@@ -1,0 +1,11 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+.idea/
+.qoder/
+*.iml
+.vscode/
+.env
+node_modules/
+frontend/dist/
+data/
+*.log

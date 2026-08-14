@@ -1,0 +1,71 @@
+spring:
+  application:
+    name: OfferForge
+
+  datasource:
+    url: ${OFFERFORGE_DB_URL:jdbc:mysql://localhost:3308/offerforge?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${OFFERFORGE_DB_USERNAME:root}
+    password: ${OFFERFORGE_DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  data:
+    redis:
+      host: ${OFFERFORGE_REDIS_HOST:localhost}
+      port: ${OFFERFORGE_REDIS_PORT:6380}
+      password: ${OFFERFORGE_REDIS_PASSWORD:}
+      database: ${OFFERFORGE_REDIS_DATABASE:0}
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+server:
+  port: ${SERVER_PORT:8081}
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force-response: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+offerforge:
+  auth:
+    refresh-cookie-secure: ${OFFERFORGE_AUTH_REFRESH_COOKIE_SECURE:false}
+    access-token-ttl-seconds: ${OFFERFORGE_AUTH_ACCESS_TOKEN_TTL_SECONDS:7200}
+    refresh-token-ttl-seconds: ${OFFERFORGE_AUTH_REFRESH_TOKEN_TTL_SECONDS:604800}
+  ai:
+    provider: ${OFFERFORGE_AI_PROVIDER:mock}
+    base-url: ${OFFERFORGE_AI_BASE_URL:}
+    api-key: ${OFFERFORGE_AI_API_KEY:}
+    model: ${OFFERFORGE_AI_MODEL:}
+    timeout-seconds: ${OFFERFORGE_AI_TIMEOUT_SECONDS:30}
+    stream-read-timeout-seconds: ${OFFERFORGE_AI_STREAM_READ_TIMEOUT_SECONDS:60}
+    max-retries: ${OFFERFORGE_AI_MAX_RETRIES:1}
+    max-output-tokens: ${OFFERFORGE_AI_MAX_OUTPUT_TOKENS:1024}
+  search:
+    enabled: ${OFFERFORGE_SEARCH_ENABLED:false}
+    base-url: ${OFFERFORGE_SEARCH_BASE_URL:http://localhost:9201}
+    knowledge-index: ${OFFERFORGE_SEARCH_KNOWLEDGE_INDEX:offerforge-knowledge}
+    request-timeout-seconds: ${OFFERFORGE_SEARCH_REQUEST_TIMEOUT_SECONDS:5}
+    embedding-dimensions: ${OFFERFORGE_SEARCH_EMBEDDING_DIMENSIONS:1024}
+    embedding-provider: ${OFFERFORGE_SEARCH_EMBEDDING_PROVIDER:mock}
+    embedding-base-url: ${OFFERFORGE_SEARCH_EMBEDDING_BASE_URL:}
+    embedding-api-key: ${OFFERFORGE_SEARCH_EMBEDDING_API_KEY:}
+    embedding-model: ${OFFERFORGE_SEARCH_EMBEDDING_MODEL:text-embedding-v4}
+    embedding-timeout-seconds: ${OFFERFORGE_SEARCH_EMBEDDING_TIMEOUT_SECONDS:20}
+  interview:
+    max-follow-ups: ${OFFERFORGE_INTERVIEW_MAX_FOLLOW_UPS:2}
+    max-basics-questions: ${OFFERFORGE_INTERVIEW_MAX_BASICS_QUESTIONS:3}
+    max-project-questions: ${OFFERFORGE_INTERVIEW_MAX_PROJECT_QUESTIONS:2}
+    max-deep-questions: ${OFFERFORGE_INTERVIEW_MAX_DEEP_QUESTIONS:3}
+    message-window: ${OFFERFORGE_INTERVIEW_MESSAGE_WINDOW:12}
+    session-ttl-seconds: ${OFFERFORGE_INTERVIEW_SESSION_TTL_SECONDS:1800}

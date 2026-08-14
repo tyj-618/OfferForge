@@ -1,0 +1,207 @@
+package com.offerforge.interview;
+
+import com.offerforge.knowledge.Difficulty;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 面试会话上下文（工作记忆，可变 POJO，便于 Jackson 序列化到 Redis）。
+ * MySQL 不做持久化，会话生命周期内由 InterviewSessionStore 管理。
+ */
+public class InterviewContext {
+
+    private String sessionId;
+    private long userId;
+    private InterviewState state = InterviewState.OPENING;
+    private String currentQuestion;
+    private String currentCandidateAnswer;
+    private InterviewState currentQuestionPhase;
+    private String currentKnowledgePoint;
+    private boolean currentQuestionFollowUp;
+    /** 当前题目的追问次数（每道题上限 maxFollowUps） */
+    private int currentFollowUpCount;
+    /** 连续高分（>=7）次数，用于难度提升判定 */
+    private int consecutiveHighScores;
+    /** 连续低分（<4）次数，用于难度降低判定 */
+    private int consecutiveLowScores;
+    /** 当前出题难度，随连续答题表现动态调整 */
+    private Difficulty currentDifficulty = Difficulty.MEDIUM;
+    private Map<String, Integer> phaseQuestionCounts = new HashMap<>();
+    /** 工作记忆：每道题（含追问）的提问内容、回答、评分快照 */
+    private List<QuestionRecord> questionHistory = new ArrayList<>();
+    private long createdAtEpochMillis;
+
+    public String getSessionId() {
+        return sessionId;
+    }
+
+    public void setSessionId(String sessionId) {
+        this.sessionId = sessionId;
+    }
+
+    public long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(long userId) {
+        this.userId = userId;
+    }
+
+    public InterviewState getState() {
+        return state;
+    }
+
+    public void setState(InterviewState state) {
+        this.state = state;
+    }
+
+    public String getCurrentQuestion() {
+        return currentQuestion;
+    }
+
+    public void setCurrentQuestion(String currentQuestion) {
+        this.currentQuestion = currentQuestion;
+    }
+
+    public String getCurrentCandidateAnswer() {
+        return currentCandidateAnswer;
+    }
+
+    public void setCurrentCandidateAnswer(String currentCandidateAnswer) {
+        this.currentCandidateAnswer = currentCandidateAnswer;
+    }
+
+    public InterviewState getCurrentQuestionPhase() {
+        return currentQuestionPhase;
+    }
+
+    public void setCurrentQuestionPhase(InterviewState currentQuestionPhase) {
+        this.currentQuestionPhase = currentQuestionPhase;
+    }
+
+    public String getCurrentKnowledgePoint() {
+        return currentKnowledgePoint;
+    }
+
+    public void setCurrentKnowledgePoint(String currentKnowledgePoint) {
+        this.currentKnowledgePoint = currentKnowledgePoint;
+    }
+
+    public boolean isCurrentQuestionFollowUp() {
+        return currentQuestionFollowUp;
+    }
+
+    public void setCurrentQuestionFollowUp(boolean currentQuestionFollowUp) {
+        this.currentQuestionFollowUp = currentQuestionFollowUp;
+    }
+
+    public int getCurrentFollowUpCount() {
+        return currentFollowUpCount;
+    }
+
+    public void setCurrentFollowUpCount(int currentFollowUpCount) {
+        this.currentFollowUpCount = currentFollowUpCount;
+    }
+
+    public int getConsecutiveHighScores() {
+        return consecutiveHighScores;
+    }
+
+    public void setConsecutiveHighScores(int consecutiveHighScores) {
+        this.consecutiveHighScores = consecutiveHighScores;
+    }
+
+    public int getConsecutiveLowScores() {
+        return consecutiveLowScores;
+    }
+
+    public void setConsecutiveLowScores(int consecutiveLowScores) {
+        this.consecutiveLowScores = consecutiveLowScores;
+    }
+
+    public Difficulty getCurrentDifficulty() {
+        return currentDifficulty;
+    }
+
+    public void setCurrentDifficulty(Difficulty currentDifficulty) {
+        this.currentDifficulty = currentDifficulty;
+    }
+
+    public Map<String, Integer> getPhaseQuestionCounts() {
+        return phaseQuestionCounts;
+    }
+
+    public void setPhaseQuestionCounts(Map<String, Integer> phaseQuestionCounts) {
+        this.phaseQuestionCounts = phaseQuestionCounts;
+    }
+
+    public List<QuestionRecord> getQuestionHistory() {
+        return questionHistory;
+    }
+
+    public void setQuestionHistory(List<QuestionRecord> questionHistory) {
+        this.questionHistory = questionHistory;
+    }
+
+    public long getCreatedAtEpochMillis() {
+        return createdAtEpochMillis;
+    }
+
+    public void setCreatedAtEpochMillis(long createdAtEpochMillis) {
+        this.createdAtEpochMillis = createdAtEpochMillis;
+    }
+
+    /**
+     * 当前阶段已出题数（含正在作答的当前题）。
+     */
+    public int questionsInPhase(InterviewState phase) {
+        return phaseQuestionCounts.getOrDefault(phase.name(), 0);
+    }
+
+    public void recordQuestionAsked(InterviewState phase) {
+        phaseQuestionCounts.merge(phase.name(), 1, Integer::sum);
+    }
+
+    /**
+     * 记录一次作答评分：主问题记原知识点，追问沿用当前知识点。
+     */
+    public void recordAnswer(String question, String userAnswer, double score) {
+        String knowledgePoint = currentKnowledgePoint == null ? "" : currentKnowledgePoint;
+        questionHistory.add(new QuestionRecord(
+                question, userAnswer, score, knowledgePoint, currentQuestionFollowUp, currentQuestionPhase));
+    }
+
+    /**
+     * 总共已问的题数（不含追问）。
+     */
+    public int totalQuestionsAsked() {
+        return (int) questionHistory.stream().filter(record -> !record.isFollowUp()).count();
+    }
+
+    /**
+     * 总共使用的追问次数。
+     */
+    public int totalFollowUpsUsed() {
+        return (int) questionHistory.stream().filter(QuestionRecord::isFollowUp).count();
+    }
+
+    /**
+     * 主问题平均分（追问不计入）。
+     */
+    public double averageScore() {
+        return questionHistory.stream()
+                .filter(record -> !record.isFollowUp())
+                .mapToDouble(QuestionRecord::getScore)
+                .average()
+                .orElse(0.0);
+    }
+
+    public Double lastScore() {
+        return questionHistory.isEmpty()
+                ? null
+                : questionHistory.get(questionHistory.size() - 1).getScore();
+    }
+}
