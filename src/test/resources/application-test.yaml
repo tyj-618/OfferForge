@@ -1,6 +1,9 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:offerforge;MODE=MySQL;DATABASE_TO_LOWER=TRUE;NON_KEYWORDS=COMMENT;DB_CLOSE_DELAY=-1
+    # 随机命名内存库：每个 Spring 上下文解析出独立库名（上下文隔离），
+    # 且同一上下文的连接池内所有连接共享同一库（匿名库 jdbc:h2:mem: 是每连接私有，与 Hikari 不兼容）；
+    # 避免多上下文共享命名库时 create-drop 重置自增 ID 与会话存储交叉污染
+    url: jdbc:h2:mem:${random.uuid};MODE=MySQL;DATABASE_TO_LOWER=TRUE;NON_KEYWORDS=COMMENT;DB_CLOSE_DELAY=-1
     username: sa
     password:
     driver-class-name: org.h2.Driver
@@ -28,3 +31,9 @@ offerforge:
     interview-ask-limit: 1000
     qa-ask-limit: 1000
     report-limit: 1000
+  quota:
+    # 存量集成测试不受额度约束；额度行为由 QuotaIntegrationTests 用属性覆盖专项验证
+    enabled: false
+  encryption:
+    # 测试专用固定密钥（32 字节）
+    key: offerforge-test-aes256-gcm-key!!

@@ -62,15 +62,19 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
 
     @Override
     public AiTextResult generateText(List<ChatMessage> messages) {
-        ensureConfigured();
+        LlmCredentials credentials = LlmCallContext.current();
+        String baseUrl = effectiveBaseUrl(credentials);
+        String apiKey = effectiveApiKey(credentials);
+        String model = effectiveModel(credentials);
+        ensureConfigured(baseUrl, apiKey, model);
         long startedAt = System.currentTimeMillis();
         for (int attempt = 0; attempt <= properties.getMaxRetries(); attempt++) {
             try {
                 String responseBody = restClient.post()
-                        .uri("/chat/completions")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.getApiKey())
+                        .uri(stripTrailingSlash(baseUrl) + "/chat/completions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .body(buildRequestBody(messages))
+                        .body(buildRequestBody(messages, model))
                         .retrieve()
                         .body(String.class);
                 ProviderResponse response = parseProviderResponse(responseBody);
@@ -83,9 +87,10 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
                         ? UUID.randomUUID().toString() : response.id();
                 Integer inputTokens = response.usage() == null ? null : response.usage().inputTokens();
                 Integer outputTokens = response.usage() == null ? null : response.usage().outputTokens();
-                log.info("qa stage=llm mode=text providerRequestId={} model={} elapsedMs={} inputTokens={} outputTokens={}",
-                        requestId, properties.getModel(), System.currentTimeMillis() - startedAt,
+                log.info("qa stage=llm mode=text providerRequestId={} model={} keySource={} elapsedMs={} inputTokens={} outputTokens={}",
+                        requestId, model, keySource(credentials), System.currentTimeMillis() - startedAt,
                         inputTokens, outputTokens);
+                LlmCallContext.recordUsage(inputTokens, outputTokens);
                 return new AiTextResult(content == null ? "" : content, requestId, inputTokens, outputTokens);
             } catch (RestClientResponseException exception) {
                 if (isRetryable(exception) && attempt < properties.getMaxRetries()) {
@@ -93,7 +98,7 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
                     continue;
                 }
                 log.warn("qa stage=llm mode=text status=failed model={} httpStatus={} elapsedMs={}",
-                        properties.getModel(), exception.getStatusCode().value(),
+                        model, exception.getStatusCode().value(),
                         System.currentTimeMillis() - startedAt);
                 throw unavailable();
             } catch (ResourceAccessException exception) {
@@ -102,7 +107,7 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
                     continue;
                 }
                 log.warn("qa stage=llm mode=text status=unavailable model={} elapsedMs={}",
-                        properties.getModel(), System.currentTimeMillis() - startedAt);
+                        model, System.currentTimeMillis() - startedAt);
                 throw unavailable();
             }
         }
@@ -110,8 +115,12 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
     }
 
     Map<String, Object> buildRequestBody(List<ChatMessage> messages) {
+        return buildRequestBody(messages, properties.getModel());
+    }
+
+    Map<String, Object> buildRequestBody(List<ChatMessage> messages, String model) {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", properties.getModel());
+        body.put("model", model);
         body.put("messages", messages.stream()
                 .map(message -> Map.of("role", message.providerRole(), "content", message.content()))
                 .toList());
@@ -122,20 +131,24 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
 
     @Override
     public void generateStream(List<ChatMessage> messages, AiStreamChunkConsumer chunkConsumer) throws IOException {
-        ensureConfigured();
+        LlmCredentials credentials = LlmCallContext.current();
+        String baseUrl = effectiveBaseUrl(credentials);
+        String apiKey = effectiveApiKey(credentials);
+        String model = effectiveModel(credentials);
+        ensureConfigured(baseUrl, apiKey, model);
         long startedAt = System.currentTimeMillis();
         HttpURLConnection connection = null;
         try {
-            URI endpoint = URI.create(stripTrailingSlash(properties.getBaseUrl()) + "/chat/completions");
+            URI endpoint = URI.create(stripTrailingSlash(baseUrl) + "/chat/completions");
             connection = (HttpURLConnection) endpoint.toURL().openConnection();
             connection.setRequestMethod("POST");
             connection.setDoOutput(true);
             connection.setConnectTimeout((int) Duration.ofSeconds(properties.getTimeoutSeconds()).toMillis());
             connection.setReadTimeout((int) Duration.ofSeconds(properties.getStreamReadTimeoutSeconds()).toMillis());
-            connection.setRequestProperty(HttpHeaders.AUTHORIZATION, "Bearer " + properties.getApiKey());
+            connection.setRequestProperty(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey);
             connection.setRequestProperty(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE);
             connection.setRequestProperty(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE);
-            byte[] requestBody = objectMapper.writeValueAsBytes(buildStreamRequestBody(messages));
+            byte[] requestBody = objectMapper.writeValueAsBytes(buildStreamRequestBody(messages, model));
             try (var output = connection.getOutputStream()) {
                 output.write(requestBody);
             }
@@ -143,7 +156,7 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
             int status = connection.getResponseCode();
             if (status >= 400) {
                 log.warn("qa stage=llm mode=stream status=failed model={} httpStatus={}",
-                        properties.getModel(), status);
+                        model, status);
                 throw unavailable();
             }
             try (InputStream input = connection.getInputStream();
@@ -155,8 +168,8 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
                     }
                     String data = line.substring("data:".length()).trim();
                     if ("[DONE]".equals(data)) {
-                        log.info("qa stage=llm mode=stream status=completed model={} elapsedMs={}",
-                                properties.getModel(), System.currentTimeMillis() - startedAt);
+                        log.info("qa stage=llm mode=stream status=completed model={} keySource={} elapsedMs={}",
+                                model, keySource(credentials), System.currentTimeMillis() - startedAt);
                         return;
                     }
                     emitDeltaContent(data, chunkConsumer);
@@ -465,14 +478,23 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
     }
 
     Map<String, Object> buildStreamRequestBody(List<ChatMessage> messages) {
-        Map<String, Object> body = buildRequestBody(messages);
+        return buildStreamRequestBody(messages, properties.getModel());
+    }
+
+    Map<String, Object> buildStreamRequestBody(List<ChatMessage> messages, String model) {
+        Map<String, Object> body = buildRequestBody(messages, model);
         body.put("stream", true);
+        // 请求末尾 chunk 携带 usage，用于 token 消耗统计（不支持的实现会忽略该参数）
+        body.put("stream_options", Map.of("include_usage", true));
         return body;
     }
 
     private void emitDeltaContent(String data, AiStreamChunkConsumer chunkConsumer) throws IOException {
         try {
             ProviderStreamChunk chunk = objectMapper.readValue(data, ProviderStreamChunk.class);
+            if (chunk.usage() != null) {
+                LlmCallContext.recordUsage(chunk.usage().inputTokens(), chunk.usage().outputTokens());
+            }
             if (chunk.choices() == null || chunk.choices().isEmpty() || chunk.choices().get(0).delta() == null) {
                 return;
             }
@@ -497,10 +519,27 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
         }
     }
 
-    private void ensureConfigured() {
-        if (isBlank(properties.getBaseUrl()) || isBlank(properties.getApiKey()) || isBlank(properties.getModel())) {
+    private void ensureConfigured(String baseUrl, String apiKey, String model) {
+        if (isBlank(baseUrl) || isBlank(apiKey) || isBlank(model)) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "模型服务未完成配置");
         }
+    }
+
+    /** 凭据优先，缺省回退系统配置 */
+    private String effectiveBaseUrl(LlmCredentials credentials) {
+        return credentials != null && !isBlank(credentials.baseUrl()) ? credentials.baseUrl() : properties.getBaseUrl();
+    }
+
+    private String effectiveApiKey(LlmCredentials credentials) {
+        return credentials != null && !isBlank(credentials.apiKey()) ? credentials.apiKey() : properties.getApiKey();
+    }
+
+    private String effectiveModel(LlmCredentials credentials) {
+        return credentials != null && !isBlank(credentials.model()) ? credentials.model() : properties.getModel();
+    }
+
+    private String keySource(LlmCredentials credentials) {
+        return credentials == null ? "system" : "user";
     }
 
     private boolean isRetryable(RestClientResponseException exception) {
@@ -534,7 +573,7 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
     private record ProviderChoice(ProviderMessage message) {
     }
 
-    private record ProviderStreamChunk(List<ProviderStreamChoice> choices) {
+    private record ProviderStreamChunk(List<ProviderStreamChoice> choices, ProviderUsage usage) {
     }
 
     private record ProviderStreamChoice(ProviderMessage delta) {

@@ -30,6 +30,14 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.fail(exception.errorCode().code(), exception.getMessage()));
     }
 
+    /** 免费额度耗尽：429 + 字符串业务码，前端据此引导配置自带 Key */
+    @ExceptionHandler(QuotaExceededException.class)
+    public ResponseEntity<QuotaExceededBody> handleQuotaExceededException(QuotaExceededException exception) {
+        log.warn("quota exceeded remaining={} message={}", exception.remainingQuota(), exception.getMessage());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(QuotaExceededBody.of(exception.remainingQuota(), exception.getMessage()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ApiResponse<Void> handleValidationException(MethodArgumentNotValidException exception) {
         FieldError fieldError = exception.getBindingResult().getFieldError();

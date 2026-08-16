@@ -1,0 +1,79 @@
+# OfferForge 生产部署 Compose（与现有项目共用 MySQL/Redis/ES）
+# 只部署 OfferForge 独有的服务：Spring Boot 后端 + Nginx 前端
+# 后端加入现有中间件所在的 Docker 网络（MIDDLEWARE_NETWORK），直接用容器名访问；
+# 若中间件直接跑在宿主机上，可将 .env 中各 HOST 改为 host.docker.internal（extra_hosts 已声明）
+# 启动：docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: offerforge-backend
+    restart: unless-stopped
+    # 宿主机 8081 -> 容器 8080（仅绑定本机，由宿主机 Nginx 反代对外）
+    ports:
+      - "127.0.0.1:${OFFERFORGE_BACKEND_PORT:-8081}:8080"
+    extra_hosts:
+      # Linux 上让容器内可用 host.docker.internal 访问宿主机服务（备用）
+      - "host.docker.internal:host-gateway"
+    networks:
+      - offerforge
+      - middleware
+    environment:
+      SERVER_PORT: 8080
+      # redis profile：限流/会话/消息存储使用 Redis 实现
+      SPRING_PROFILES_ACTIVE: redis
+      # MySQL：复用 UniNook 现有实例，数据库为新建的 offerforge_db
+      OFFERFORGE_DB_URL: jdbc:mysql://${OFFERFORGE_MYSQL_HOST:-campuscircle-mysql}:${OFFERFORGE_MYSQL_PORT:-3306}/${OFFERFORGE_MYSQL_DATABASE:-offerforge_db}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      OFFERFORGE_DB_USERNAME: ${OFFERFORGE_DB_USERNAME:-root}
+      OFFERFORGE_DB_PASSWORD: ${OFFERFORGE_DB_PASSWORD:?请在 .env 中设置 OFFERFORGE_DB_PASSWORD}
+      # Redis：复用现有实例
+      OFFERFORGE_REDIS_HOST: ${OFFERFORGE_REDIS_HOST:-campuscircle-redis}
+      OFFERFORGE_REDIS_PORT: ${OFFERFORGE_REDIS_PORT:-6379}
+      OFFERFORGE_REDIS_PASSWORD: ${OFFERFORGE_REDIS_PASSWORD:-}
+      OFFERFORGE_REDIS_DATABASE: ${OFFERFORGE_REDIS_DATABASE:-0}
+      # Elasticsearch：复用现有实例（enabled=false 时走 MySQL 关键词兜底检索）
+      OFFERFORGE_SEARCH_ENABLED: ${OFFERFORGE_SEARCH_ENABLED:-true}
+      OFFERFORGE_SEARCH_BASE_URL: http://${OFFERFORGE_ES_HOST:-campuscircle-elasticsearch}:${OFFERFORGE_ES_PORT:-9200}
+      OFFERFORGE_SEARCH_EMBEDDING_PROVIDER: ${OFFERFORGE_SEARCH_EMBEDDING_PROVIDER:-mock}
+      OFFERFORGE_SEARCH_EMBEDDING_BASE_URL: ${OFFERFORGE_SEARCH_EMBEDDING_BASE_URL:-}
+      OFFERFORGE_SEARCH_EMBEDDING_API_KEY: ${OFFERFORGE_SEARCH_EMBEDDING_API_KEY:-}
+      OFFERFORGE_SEARCH_EMBEDDING_MODEL: ${OFFERFORGE_SEARCH_EMBEDDING_MODEL:-text-embedding-v4}
+      # LLM：默认 mock，生产建议配置真实模型或依赖用户自带 Key
+      OFFERFORGE_AI_PROVIDER: ${OFFERFORGE_AI_PROVIDER:-mock}
+      OFFERFORGE_AI_BASE_URL: ${OFFERFORGE_AI_BASE_URL:-}
+      OFFERFORGE_AI_API_KEY: ${OFFERFORGE_AI_API_KEY:-}
+      OFFERFORGE_AI_MODEL: ${OFFERFORGE_AI_MODEL:-}
+      # 免费额度与用户自带 Key 加密（密钥必须 32 字符，生产必须替换）
+      OFFERFORGE_QUOTA_ENABLED: ${OFFERFORGE_QUOTA_ENABLED:-true}
+      OFFERFORGE_QUOTA_DAILY_LIMIT: ${OFFERFORGE_QUOTA_DAILY_LIMIT:-10}
+      APIKEY_ENCRYPT_KEY: ${APIKEY_ENCRYPT_KEY:?请在 .env 中设置 APIKEY_ENCRYPT_KEY（32 字符）}
+      TZ: Asia/Shanghai
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: offerforge-frontend
+    restart: unless-stopped
+    # 宿主机 8082 -> 容器 Nginx 80（仅绑定本机，由宿主机 Nginx 按域名反代）
+    ports:
+      - "127.0.0.1:${OFFERFORGE_FRONTEND_PORT:-8082}:80"
+    networks:
+      - offerforge
+    depends_on:
+      - backend
+
+networks:
+  offerforge:
+  # 现有中间件所在网络（容器名解析 MySQL/Redis/ES）
+  middleware:
+    external: true
+    name: ${MIDDLEWARE_NETWORK:-campuscircle_default}

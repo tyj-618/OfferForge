@@ -46,3 +46,20 @@ CREATE TABLE IF NOT EXISTS interview_session (
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS api_key (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id       BIGINT       NOT NULL,
+    provider      VARCHAR(32)  NOT NULL,
+    base_url      VARCHAR(255) NOT NULL,
+    model         VARCHAR(64)  NOT NULL,
+    encrypted_key VARCHAR(512) NOT NULL,
+    created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_api_key_user_id (user_id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+
+-- 存量库升级（混合 API 模式新增 api_key 表）：
+-- CREATE TABLE IF NOT EXISTS api_key ( ... 同上定义 ... );

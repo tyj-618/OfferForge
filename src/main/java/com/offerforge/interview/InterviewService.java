@@ -4,9 +4,14 @@ import com.offerforge.ai.AiModelClient;
 import com.offerforge.ai.AiStreamChunkConsumer;
 import com.offerforge.ai.AnswerEvaluation;
 import com.offerforge.ai.ChatMessage;
+import com.offerforge.ai.LlmCallContext;
+import com.offerforge.ai.LlmCredentialResolver;
+import com.offerforge.apikey.ApiKeyService;
 import com.offerforge.common.ErrorCode;
 import com.offerforge.exception.BusinessException;
+import com.offerforge.exception.QuotaExceededException;
 import com.offerforge.knowledge.Difficulty;
+import com.offerforge.quota.QuotaService;
 import com.offerforge.resume.ResumeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +56,9 @@ public class InterviewService {
     private final ResumeService resumeService;
     private final ProjectQuestionGenerator projectQuestionGenerator;
     private final InterviewProperties properties;
+    private final ApiKeyService apiKeyService;
+    private final QuotaService quotaService;
+    private final LlmCredentialResolver credentialResolver;
     /** 会话级互斥锁条目（锁对象 + 最近使用时间），中途放弃的会话靠惰性清理避免无界增长 */
     private final Map<String, LockEntry> sessionLocks = new ConcurrentHashMap<>();
     private final AtomicLong lockAcquisitions = new AtomicLong();
@@ -68,7 +76,10 @@ public class InterviewService {
                             FollowUpStrategy followUpStrategy,
                             ResumeService resumeService,
                             ProjectQuestionGenerator projectQuestionGenerator,
-                            InterviewProperties properties) {
+                            InterviewProperties properties,
+                            ApiKeyService apiKeyService,
+                            QuotaService quotaService,
+                            LlmCredentialResolver credentialResolver) {
         this.sessionStore = sessionStore;
         this.messageStore = messageStore;
         this.questionBank = questionBank;
@@ -80,6 +91,9 @@ public class InterviewService {
         this.resumeService = resumeService;
         this.projectQuestionGenerator = projectQuestionGenerator;
         this.properties = properties;
+        this.apiKeyService = apiKeyService;
+        this.quotaService = quotaService;
+        this.credentialResolver = credentialResolver;
     }
 
     public InterviewStartResponse start(Long userId, String position) {
@@ -88,14 +102,23 @@ public class InterviewService {
 
     /**
      * 开始面试：resumeId 可空；非空时校验归属，PROJECT/DEEP 阶段将基于该简历出题。
+     * 额度策略：有自带 Key 直接开始；无 Key 时扣减一次免费额度，耗尽拒绝。
      */
     public InterviewStartResponse start(Long userId, String position, Long resumeId) {
         if (sessionStore.hasActiveSession(userId)) {
             throw new BusinessException(ErrorCode.CONFLICT, "已有一场面试正在进行，请先结束后再开始新面试");
         }
         if (resumeId != null) {
-            // 校验简历存在且属于当前用户（不存在/非本人均 NOT_FOUND）
+            // 先校验简历归属（不存在/非本人均 NOT_FOUND），避免非法简历白白消耗免费额度
             resumeService.getOwned(userId, resumeId);
+        }
+        String keySource;
+        if (apiKeyService.hasKey(userId)) {
+            keySource = "user";
+        } else if (!quotaService.isEnabled() || quotaService.consumeQuota(userId)) {
+            keySource = "system";
+        } else {
+            throw new QuotaExceededException(quotaService.checkQuota(userId));
         }
         String sessionId = UUID.randomUUID().toString().replace("-", "");
         InterviewContext context = new InterviewContext();
@@ -107,8 +130,8 @@ public class InterviewService {
         context.setCreatedAtEpochMillis(System.currentTimeMillis());
         sessionStore.save(context);
         messageStore.append(sessionId, List.of(ChatMessage.assistant(OPENING_TEXT)));
-        log.info("interview started sessionId={} userId={} position={} resumeId={}",
-                sessionId, userId, context.getPosition(), resumeId);
+        log.info("interview started sessionId={} userId={} position={} resumeId={} keySource={} remainingQuota={}",
+                sessionId, userId, context.getPosition(), resumeId, keySource, quotaService.checkQuota(userId));
         return new InterviewStartResponse(sessionId, OPENING_TEXT, InterviewStatusResponse.from(context, properties));
     }
 
@@ -118,26 +141,33 @@ public class InterviewService {
         try {
             synchronized (lock) {
                 InterviewContext context = requireOwnedSession(userId, sessionId);
-                if (context.getState().terminal()) {
-                    throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，请勿继续作答");
-                }
-                log.info("interview answer received sessionId={} phase={} length={} preview={}",
-                        sessionId, context.getState(), userMessage.length(), preview(userMessage));
-                messageStore.append(sessionId, List.of(ChatMessage.user(userMessage)));
+                // 绑定本场 LLM 凭据（自带 Key 或系统配置）与 token 用量监听；本轮结束清理防线程复用泄漏
+                LlmCallContext.bind(credentialResolver.resolveFor(userId));
+                LlmCallContext.setUsageListener(context::addTokenUsage);
+                try {
+                    if (context.getState().terminal()) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，请勿继续作答");
+                    }
+                    log.info("interview answer received sessionId={} phase={} length={} preview={}",
+                            sessionId, context.getState(), userMessage.length(), preview(userMessage));
+                    messageStore.append(sessionId, List.of(ChatMessage.user(userMessage)));
 
-                InterviewTurnResult result;
-                if (context.getState() == InterviewState.OPENING) {
-                    // 开场后的首次作答（自我介绍）不评分，直接进入基础考察
-                    advance(context, sessionId, chunkConsumer);
-                    result = new InterviewTurnResult(null, null, StateTransitionStrategy.Action.ADVANCE, statusView(context));
-                } else if (context.getState() == InterviewState.CLOSING) {
-                    finish(context, sessionId);
-                    result = new InterviewTurnResult(null, null, StateTransitionStrategy.Action.FINISH, statusView(context));
-                } else {
-                    result = evaluateAndTransition(context, sessionId, userMessage, chunkConsumer);
+                    InterviewTurnResult result;
+                    if (context.getState() == InterviewState.OPENING) {
+                        // 开场后的首次作答（自我介绍）不评分，直接进入基础考察
+                        advance(context, sessionId, chunkConsumer);
+                        result = new InterviewTurnResult(null, null, StateTransitionStrategy.Action.ADVANCE, statusView(context));
+                    } else if (context.getState() == InterviewState.CLOSING) {
+                        finish(context, sessionId);
+                        result = new InterviewTurnResult(null, null, StateTransitionStrategy.Action.FINISH, statusView(context));
+                    } else {
+                        result = evaluateAndTransition(context, sessionId, userMessage, chunkConsumer);
+                    }
+                    sessionStore.save(context);
+                    return result;
+                } finally {
+                    LlmCallContext.clear();
                 }
-                sessionStore.save(context);
-                return result;
             }
         } finally {
             releaseLockIfTerminal(sessionId, lock);
@@ -182,38 +212,44 @@ public class InterviewService {
         try {
             synchronized (lock) {
                 InterviewContext context = requireOwnedSession(userId, sessionId);
-                if (context.getState().terminal()) {
-                    throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，无需跳过");
-                }
-                InterviewState phase = context.getState();
-                if (phase == InterviewState.OPENING || phase == InterviewState.CLOSING) {
-                    throw new BusinessException(ErrorCode.CONFLICT, "当前环节无需跳题，直接回复即可");
-                }
-                log.info("interview sessionId={} phase={} question skipped", sessionId, phase);
-                messageStore.append(sessionId, List.of(ChatMessage.user("（跳过此题）")));
+                LlmCallContext.bind(credentialResolver.resolveFor(userId));
+                LlmCallContext.setUsageListener(context::addTokenUsage);
+                try {
+                    if (context.getState().terminal()) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，无需跳过");
+                    }
+                    InterviewState phase = context.getState();
+                    if (phase == InterviewState.OPENING || phase == InterviewState.CLOSING) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "当前环节无需跳题，直接回复即可");
+                    }
+                    log.info("interview sessionId={} phase={} question skipped", sessionId, phase);
+                    messageStore.append(sessionId, List.of(ChatMessage.user("（跳过此题）")));
 
-                // 记 0 分并纳入平均分，连续低分连击照常累计（可能触发降难度）
-                AnswerEvaluation skipped = new AnswerEvaluation(
-                        0, 0, 0, 0, 0, List.of(), List.of(), List.of(), "候选人跳过了该题");
-                context.recordAnswer(context.getCurrentQuestion(), "", skipped);
-                updateScoreStreaks(context, 0);
-                if (context.getConsecutiveLowScores() >= 2 && context.getCurrentDifficulty() != Difficulty.EASY) {
-                    context.setCurrentDifficulty(context.getCurrentDifficulty().lower());
-                    context.setConsecutiveLowScores(0);
-                    log.info("interview sessionId={} difficulty lowered to {}", sessionId, context.getCurrentDifficulty());
-                }
+                    // 记 0 分并纳入平均分，连续低分连击照常累计（可能触发降难度）
+                    AnswerEvaluation skipped = new AnswerEvaluation(
+                            0, 0, 0, 0, 0, List.of(), List.of(), List.of(), "候选人跳过了该题");
+                    context.recordAnswer(context.getCurrentQuestion(), "", skipped);
+                    updateScoreStreaks(context, 0);
+                    if (context.getConsecutiveLowScores() >= 2 && context.getCurrentDifficulty() != Difficulty.EASY) {
+                        context.setCurrentDifficulty(context.getCurrentDifficulty().lower());
+                        context.setConsecutiveLowScores(0);
+                        log.info("interview sessionId={} difficulty lowered to {}", sessionId, context.getCurrentDifficulty());
+                    }
 
-                StateTransitionStrategy.Action action;
-                if (context.questionsInPhase(phase) >= properties.maxQuestionsFor(phase)) {
-                    // 本阶段题量已满，跳过后直接进入下一阶段
-                    action = StateTransitionStrategy.Action.ADVANCE;
-                    advance(context, sessionId, chunkConsumer);
-                } else {
-                    action = StateTransitionStrategy.Action.NEW_QUESTION;
-                    askNextQuestion(context, sessionId, phase, chunkConsumer);
+                    StateTransitionStrategy.Action action;
+                    if (context.questionsInPhase(phase) >= properties.maxQuestionsFor(phase)) {
+                        // 本阶段题量已满，跳过后直接进入下一阶段
+                        action = StateTransitionStrategy.Action.ADVANCE;
+                        advance(context, sessionId, chunkConsumer);
+                    } else {
+                        action = StateTransitionStrategy.Action.NEW_QUESTION;
+                        askNextQuestion(context, sessionId, phase, chunkConsumer);
+                    }
+                    sessionStore.save(context);
+                    return new InterviewTurnResult(0.0, "已跳过该题，计 0 分", action, statusView(context));
+                } finally {
+                    LlmCallContext.clear();
                 }
-                sessionStore.save(context);
-                return new InterviewTurnResult(0.0, "已跳过该题，计 0 分", action, statusView(context));
             }
         } finally {
             releaseLockIfTerminal(sessionId, lock);
@@ -391,7 +427,8 @@ public class InterviewService {
         context.setState(InterviewState.FINISHED);
         context.setCurrentQuestion(null);
         messageStore.clear(sessionId);
-        log.info("interview finished sessionId={} asked={}", sessionId, context.totalQuestionsAsked());
+        log.info("interview finished sessionId={} asked={} inputTokens={} outputTokens={}",
+                sessionId, context.totalQuestionsAsked(), context.getInputTokens(), context.getOutputTokens());
     }
 
     private String closingText(InterviewContext context) {

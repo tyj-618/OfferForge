@@ -28,6 +28,7 @@ async function logout() {
         <RouterLink to="/interview">模拟面试</RouterLink>
         <RouterLink to="/resume">简历管理</RouterLink>
         <RouterLink to="/history">历史报告</RouterLink>
+        <RouterLink to="/settings">设置</RouterLink>
       </nav>
       <button class="ghost" @click="logout">退出登录</button>
     </header>

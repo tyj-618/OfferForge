@@ -1,8 +1,9 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { askStream, interviewApi, resumeApi, skipStream } from '../api'
+import { askStream, interviewApi, quotaApi, resumeApi, skipStream } from '../api'
 import { classifyError, notifyError } from '../utils/errors'
+import { toast } from '../toast'
 
 const router = useRouter()
 const SESSION_KEY = 'offerforge_session'
@@ -19,6 +20,9 @@ const error = ref('')
 
 const resumes = ref([])
 const selectedResumeId = ref(null)
+
+// 额度横幅三状态：有 Key 无限制 / 无 Key 剩余额度 / 额度用完引导配置
+const quotaInfo = ref(null)
 
 const chatBox = ref(null)
 
@@ -48,6 +52,16 @@ const progressText = computed(() => {
 })
 
 const isFinished = computed(() => status.value?.state === 'FINISHED')
+
+const quotaBannerClass = computed(() => {
+  if (!quotaInfo.value || quotaInfo.value.hasOwnKey) {
+    return 'success'
+  }
+  if (!quotaInfo.value.enabled || quotaInfo.value.remaining > 0) {
+    return ''
+  }
+  return 'danger'
+})
 
 const difficultyClass = computed(() => {
   const label = status.value?.difficultyLabel
@@ -95,6 +109,7 @@ onMounted(async () => {
   } catch {
     // 简历列表加载失败不阻断面试开始（后端会降级为通用项目题）
   }
+  refreshQuota()
   // 刷新页面后恢复进行中的会话（状态栏与当前题；历史消息不回放）
   const saved = sessionStorage.getItem(SESSION_KEY)
   if (!saved) {
@@ -118,6 +133,14 @@ onMounted(async () => {
   }
 })
 
+async function refreshQuota() {
+  try {
+    quotaInfo.value = await quotaApi.get()
+  } catch {
+    // 额度信息加载失败不阻断面试开始（后端仍会校验）
+  }
+}
+
 async function startInterview() {
   sending.value = true
   error.value = ''
@@ -128,8 +151,16 @@ async function startInterview() {
     sessionStorage.setItem(SESSION_KEY, data.sessionId)
     messages.value = [{ role: 'assistant', content: data.openingMessage }]
     phase.value = 'active'
+    // 开始面试会扣减一次额度，刷新横幅显示
+    refreshQuota()
   } catch (e) {
-    error.value = classifyError(e).message
+    if (e.code === 'QUOTA_EXCEEDED') {
+      error.value = '今日免费额度已用完，可前往「设置」配置自己的 API Key 继续使用'
+      toast.error(e.message || '今日免费额度已用完')
+      refreshQuota()
+    } else {
+      error.value = classifyError(e).message
+    }
   } finally {
     sending.value = false
   }
@@ -270,6 +301,21 @@ function scrollDown() {
       <p class="muted">
         面试分为基础考察、项目经历、深度追问三个环节，AI 面试官会根据你的回答动态追问与调整难度，结束后生成详细反馈报告。
       </p>
+      <!-- 额度横幅：有 Key 无限制 / 剩余额度 / 额度用完引导配置 -->
+      <div v-if="quotaInfo" class="quota-banner" :class="quotaBannerClass">
+        <template v-if="quotaInfo.hasOwnKey">
+          <span>🔑 使用自己的 API Key（无限制）</span>
+        </template>
+        <template v-else-if="!quotaInfo.enabled || quotaInfo.remaining > 0">
+          <span>🎁 今日剩余免费次数：{{ quotaInfo.remaining }}/{{ quotaInfo.dailyLimit }}</span>
+        </template>
+        <template v-else>
+          <span>⚠️ 今日免费额度已用完</span>
+          <button type="button" class="ghost quota-config-btn" @click="router.push('/settings')">
+            配置 API Key
+          </button>
+        </template>
+      </div>
       <form class="start-row" @submit.prevent="startInterview">
         <input v-model="position" placeholder="面试岗位方向，如：Java 后端工程师（可留空）" :disabled="sending" />
         <button type="submit" :disabled="sending">{{ sending ? '准备中…' : '开始面试' }}</button>
@@ -500,6 +546,34 @@ function scrollDown() {
   padding: 8px 12px;
   font-size: 14px;
   background: #fff;
+}
+
+.quota-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #eef3ff;
+  border: 1px solid #d5e0ff;
+  color: var(--text);
+}
+
+.quota-banner.success {
+  background: #ecfbf2;
+  border-color: #b9ecd0;
+}
+
+.quota-banner.danger {
+  background: #fff1f0;
+  border-color: #ffd0cd;
+}
+
+.quota-config-btn {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .status-bar {

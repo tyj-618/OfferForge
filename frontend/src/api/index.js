@@ -60,6 +60,10 @@ async function unwrap(response, retried) {
   }
   const businessError = new Error(message)
   businessError.code = code
+  // 额度超限（429）：后端返回字符串业务码 QUOTA_EXCEEDED 与剩余额度
+  if (body?.remainingQuota != null) {
+    businessError.remainingQuota = body.remainingQuota
+  }
   throw businessError
 }
 
@@ -147,7 +151,7 @@ async function sseRequest(url, body, callbacks, retried = false) {
     }
   }
   if (!response.ok || !response.body) {
-    throw classifySseStatus(response.status)
+    throw await classifySseStatus(response)
   }
   const reader = response.body.getReader()
   const decoder = new TextDecoder('utf-8')
@@ -167,13 +171,28 @@ async function sseRequest(url, body, callbacks, retried = false) {
   }
 }
 
-function classifySseStatus(status) {
+async function classifySseStatus(response) {
+  const status = response.status
+  // 429 读取 body 分类：额度超限返回字符串业务码 QUOTA_EXCEEDED，其余按限流提示
+  if (status === 429) {
+    try {
+      const body = await response.json()
+      if (body?.code === 'QUOTA_EXCEEDED') {
+        const error = new Error(body.message || '今日免费额度已用完')
+        error.code = 'QUOTA_EXCEEDED'
+        error.remainingQuota = body.remainingQuota ?? 0
+        return error
+      }
+    } catch {
+      // body 非 JSON 时按普通限流处理
+    }
+    const error = new Error('请求过于频繁，请稍后再试')
+    error.code = 42900
+    return error
+  }
   let code = -1
   let message = '面试对话连接失败，请稍后重试'
-  if (status === 429) {
-    code = 42900
-    message = '请求过于频繁，请稍后再试'
-  } else if (status === 503) {
+  if (status === 503) {
     code = 50300
     message = 'AI 响应超时，请重试'
   }
@@ -215,6 +234,17 @@ function dispatchSseFrame(frame, { onMessage, onDone, onError }) {
     error.code = parsed.code
     onError?.(error)
   }
+}
+
+// ---------- API Key / 额度 ----------
+export const apiKeyApi = {
+  get: () => http.get('/apikey'),
+  save: (payload) => http.post('/apikey', payload),
+  remove: () => http.delete('/apikey')
+}
+
+export const quotaApi = {
+  get: () => http.get('/quota')
 }
 
 // ---------- 报告 ----------

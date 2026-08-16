@@ -13,6 +13,34 @@ public interface AiModelClient {
     void generateStream(List<ChatMessage> messages, AiStreamChunkConsumer chunkConsumer) throws IOException;
 
     /**
+     * 带凭据生成：credentials 非空时切换用户自带 Key，null 使用系统配置。
+     * 默认实现绑定 {@link LlmCallContext} 后委托单参方法，Mock 等实现无需感知凭据。
+     */
+    default AiTextResult generateText(List<ChatMessage> messages, LlmCredentials credentials) {
+        LlmCredentials previous = LlmCallContext.current();
+        LlmCallContext.bind(credentials);
+        try {
+            return generateText(messages);
+        } finally {
+            LlmCallContext.bind(previous);
+        }
+    }
+
+    /**
+     * 带凭据流式生成：语义同 {@link #generateText(List, LlmCredentials)}。
+     */
+    default void generateStream(List<ChatMessage> messages, AiStreamChunkConsumer chunkConsumer,
+                                LlmCredentials credentials) throws IOException {
+        LlmCredentials previous = LlmCallContext.current();
+        LlmCallContext.bind(credentials);
+        try {
+            generateStream(messages, chunkConsumer);
+        } finally {
+            LlmCallContext.bind(previous);
+        }
+    }
+
+    /**
      * 对候选人回答评分（0-10）；candidateAnswer 为参考答案，可为 null（项目类问题无标准答案）。
      */
     AiEvaluation evaluateAnswer(String question, String candidateAnswer, String userAnswer);

@@ -43,6 +43,9 @@ public class InterviewContext {
     private boolean deepQuestionsGenerated;
     /** 工作记忆：每道题（含追问）的提问内容、回答、评分快照 */
     private List<QuestionRecord> questionHistory = new ArrayList<>();
+    /** 本场面试累计 token 消耗（仅模型返回 usage 时累计，结束时写入日志） */
+    private int inputTokens;
+    private int outputTokens;
     private long createdAtEpochMillis;
 
     public String getSessionId() {
@@ -203,6 +206,28 @@ public class InterviewContext {
 
     public void setCreatedAtEpochMillis(long createdAtEpochMillis) {
         this.createdAtEpochMillis = createdAtEpochMillis;
+    }
+
+    public int getInputTokens() {
+        return inputTokens;
+    }
+
+    public void setInputTokens(int inputTokens) {
+        this.inputTokens = inputTokens;
+    }
+
+    public int getOutputTokens() {
+        return outputTokens;
+    }
+
+    public void setOutputTokens(int outputTokens) {
+        this.outputTokens = outputTokens;
+    }
+
+    /** 累计一次 LLM 调用的 token 消耗（调用在会话锁内进行，无需额外同步） */
+    public void addTokenUsage(int inputTokens, int outputTokens) {
+        this.inputTokens += inputTokens;
+        this.outputTokens += outputTokens;
     }
 
     /**
