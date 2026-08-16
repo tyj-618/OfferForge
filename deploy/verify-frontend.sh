@@ -12,4 +12,10 @@ done
 echo "--- backend followup endpoints ---"
 curl -sk -o /dev/null -w "followup(no-auth)=%{http_code} " -X POST "https://offerforge.joinuninook.com/api/interview/nonexist/followup"
 curl -sk -o /dev/null -w "next-question(no-auth)=%{http_code}\n" -X POST "https://offerforge.joinuninook.com/api/interview/nonexist/next-question"
+echo "--- sse resilience keywords in index bundle ---"
+IDX=$(docker exec offerforge-frontend sh -c 'ls /usr/share/nginx/html/assets/index-*.js' | head -1)
+for kw in authRetry 40100 'AI 响应超时' '连接已中断'; do
+  n=$(docker exec offerforge-frontend grep -o "$kw" "$IDX" | wc -l)
+  echo "$kw: $n"
+done
 echo "VERIFY-DONE"
