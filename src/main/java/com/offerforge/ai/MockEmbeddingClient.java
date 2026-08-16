@@ -1,6 +1,6 @@
 package com.offerforge.ai;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
  * 相同/相似文本产生高余弦相似度的向量，保证检索链路可测。
  */
 @Component
-@ConditionalOnProperty(prefix = "offerforge.search", name = "embedding-provider", havingValue = "mock", matchIfMissing = true)
+@Conditional(AiClientConditions.MockEmbedding.class)
 public class MockEmbeddingClient implements EmbeddingClient {
 
     private static final Pattern LATIN_PATTERN = Pattern.compile("[a-z0-9]+");

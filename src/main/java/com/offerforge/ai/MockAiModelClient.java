@@ -1,6 +1,6 @@
 package com.offerforge.ai;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -17,7 +17,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
-@ConditionalOnProperty(prefix = "offerforge.ai", name = "provider", havingValue = "mock", matchIfMissing = true)
+@Conditional(AiClientConditions.MockAiModel.class)
 public class MockAiModelClient implements AiModelClient {
 
     private static final Pattern QUESTION_PATTERN = Pattern.compile("<question>\\s*(.*?)\\s*</question>", Pattern.DOTALL);

@@ -9,7 +9,7 @@ import com.offerforge.common.ErrorCode;
 import com.offerforge.exception.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -35,7 +35,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
-@ConditionalOnProperty(prefix = "offerforge.ai", name = "provider", havingValue = "openai-compatible")
+@Conditional(AiClientConditions.OpenAiCompatibleAiModel.class)
 public class OpenAiCompatibleModelClient implements AiModelClient {
 
     private static final Logger log = LoggerFactory.getLogger(OpenAiCompatibleModelClient.class);

@@ -3,7 +3,7 @@ package com.offerforge.ai;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.offerforge.common.ErrorCode;
 import com.offerforge.exception.BusinessException;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -22,7 +22,7 @@ import java.util.Map;
  * 凭证只通过环境变量注入，不写入代码库。
  */
 @Component
-@ConditionalOnProperty(prefix = "offerforge.search", name = "embedding-provider", havingValue = "openai-compatible")
+@Conditional(AiClientConditions.OpenAiCompatibleEmbedding.class)
 public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient {
 
     private final SearchProperties properties;
