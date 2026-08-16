@@ -40,7 +40,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                                 CurrentUserService currentUserService,
                                 @Value("${offerforge.rate-limit.interview-ask-limit:10}") int interviewAskLimit,
                                 @Value("${offerforge.rate-limit.qa-ask-limit:5}") int qaAskLimit,
-                                @Value("${offerforge.rate-limit.report-limit:3}") int reportLimit,
+                                @Value("${offerforge.rate-limit.report-limit:60}") int reportLimit,
                                 @Value("${offerforge.rate-limit.window-millis:60000}") long windowMillis) {
         this.rateLimiter = rateLimiter;
         this.currentUserService = currentUserService;
@@ -97,7 +97,8 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         if ("POST".equalsIgnoreCase(method) && uri.equals("/api/qa/ask")) {
             return new Route("qa-ask", qaAskLimit, false);
         }
-        if ("GET".equalsIgnoreCase(method) && uri.startsWith("/api/report")) {
+        // 仅报告详情限流；history/progress 是页面加载必需的纯 DB 分页读，不限流
+        if ("GET".equalsIgnoreCase(method) && uri.matches("/api/report/(?!history$|progress$)[^/]+")) {
             return new Route("report", reportLimit, false);
         }
         return null;

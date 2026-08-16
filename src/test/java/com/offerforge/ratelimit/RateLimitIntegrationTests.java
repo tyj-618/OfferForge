@@ -20,7 +20,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * 限流端到端测试（内存滑动窗口实现，本类单独收紧限额验证超限行为）。
- * /api/qa/ask 每用户每分钟 5 次、/api/report/** 每分钟 3 次，超限返回 HTTP 429 + 42900；
+ * /api/qa/ask 每用户每分钟 5 次、/api/report/{id} 详情每分钟 3 次，超限返回 HTTP 429 + 42900；
+ * 历史列表/进步曲线不限流（页面加载必需）；
  * SSE 端点（面试作答）超限以 event:error 事件流返回 42900；
  * 同一用户同时只允许一场进行中的面试。
  */
@@ -62,18 +63,29 @@ class RateLimitIntegrationTests {
     }
 
     @Test
-    void reportQueriesExceedPerMinuteLimitReturn429() throws Exception {
+    void reportDetailExceedsPerMinuteLimitReturns429() throws Exception {
         String token = newUser();
 
-        // 窗口内前 3 次放行
+        // 窗口内前 3 次过限流（报告不存在返回业务 40400，不影响限流计数验证）
         for (int i = 0; i < 3; i++) {
-            assertCode(get("/api/report/history", token), 0);
+            assertCode(get("/api/report/nonexistent-session", token), 40400);
         }
 
         // 第 4 次触发限流
-        HttpResponse<String> blocked = rawGet("/api/report/history", token);
+        HttpResponse<String> blocked = rawGet("/api/report/nonexistent-session", token);
         assertThat(blocked.statusCode()).isEqualTo(429);
         assertThat(objectMapper.readTree(blocked.body()).at("/code").asInt()).isEqualTo(42900);
+    }
+
+    @Test
+    void historyAndProgressAreNotRateLimited() throws Exception {
+        String token = newUser();
+
+        // 页面加载必需的列表/趋势接口：连续请求远超原限额也不应被限流
+        for (int i = 0; i < 10; i++) {
+            assertCode(get("/api/report/history", token), 0);
+            assertCode(get("/api/report/progress", token), 0);
+        }
     }
 
     @Test

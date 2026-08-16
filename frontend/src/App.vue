@@ -2,11 +2,26 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ToastHub from './components/ToastHub.vue'
-import { authApi, clearToken, getToken } from './api'
+import { authApi, authState, clearToken } from './api'
 
 const route = useRoute()
 const router = useRouter()
-const loggedIn = computed(() => !!getToken() && route.name !== 'login')
+// 依赖响应式 authState：登录后顶栏立即出现，登出/401 后立即消失
+const loggedIn = computed(() => !!authState.token && route.name !== 'login')
+
+// 报告详情需 interviewId 参数，从历史记录列表进入；报告详情路由也高亮历史记录
+const navItems = [
+  { to: '/interview', label: '模拟面试', routes: ['interview'] },
+  { to: '/', label: '问答练习', routes: ['qa'] },
+  { to: '/history', label: '历史记录', routes: ['history', 'report'] },
+  { to: '/resume', label: '简历', routes: ['resume'] },
+  { to: '/settings', label: '设置', routes: ['settings'] }
+]
+
+// 按路由名精确匹配高亮，避免 vue-router 对 "/" 的前缀匹配导致问答练习在所有页面常亮
+function isActive(item) {
+  return item.routes.includes(route.name)
+}
 
 async function logout() {
   try {
@@ -24,11 +39,14 @@ async function logout() {
     <header v-if="loggedIn" class="topbar">
       <div class="brand">🎯 OfferForge</div>
       <nav class="nav">
-        <RouterLink to="/">问答练习</RouterLink>
-        <RouterLink to="/interview">模拟面试</RouterLink>
-        <RouterLink to="/resume">简历管理</RouterLink>
-        <RouterLink to="/history">历史报告</RouterLink>
-        <RouterLink to="/settings">设置</RouterLink>
+        <RouterLink
+          v-for="item in navItems"
+          :key="item.label"
+          :to="item.to"
+          :class="{ 'is-active': isActive(item) }"
+        >
+          {{ item.label }}
+        </RouterLink>
       </nav>
       <button class="ghost" @click="logout">退出登录</button>
     </header>
@@ -66,7 +84,7 @@ async function logout() {
   font-weight: 500;
 }
 
-.nav a.router-link-active {
+.nav a.is-active {
   color: var(--primary);
 }
 

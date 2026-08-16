@@ -75,6 +75,12 @@ offerforge:
     max-deep-questions: ${OFFERFORGE_INTERVIEW_MAX_DEEP_QUESTIONS:3}
     message-window: ${OFFERFORGE_INTERVIEW_MESSAGE_WINDOW:12}
     session-ttl-seconds: ${OFFERFORGE_INTERVIEW_SESSION_TTL_SECONDS:1800}
+  rate-limit:
+    # 按用户滑动窗口限流（window-millis 窗口内）；报告 history/progress 不限流
+    interview-ask-limit: ${OFFERFORGE_RATE_LIMIT_INTERVIEW_ASK:10}
+    qa-ask-limit: ${OFFERFORGE_RATE_LIMIT_QA_ASK:5}
+    report-limit: ${OFFERFORGE_RATE_LIMIT_REPORT:60}
+    window-millis: ${OFFERFORGE_RATE_LIMIT_WINDOW_MILLIS:60000}
   quota:
     # 免费额度：无自带 Key 的用户每日完整面试次数上限
     enabled: ${OFFERFORGE_QUOTA_ENABLED:true}

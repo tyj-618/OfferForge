@@ -9,3 +9,6 @@ node_modules/
 frontend/dist/
 data/
 *.log
+
+# 部署打包产物
+full-bundle.tar
