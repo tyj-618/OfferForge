@@ -1,5 +1,6 @@
 package com.offerforge.interview;
 
+import com.offerforge.ai.AiStreamChunkConsumer;
 import com.offerforge.auth.CurrentUserService;
 import com.offerforge.common.ApiResponse;
 import com.offerforge.common.ErrorCode;
@@ -55,7 +56,8 @@ public class InterviewController {
         Long userId = currentUserService.requireUserId(authorization);
         String position = request == null ? null : request.position();
         Long resumeId = request == null ? null : request.resumeId();
-        return ApiResponse.success(interviewService.start(userId, position, resumeId));
+        String mode = request == null ? null : request.mode();
+        return ApiResponse.success(interviewService.start(userId, position, resumeId, mode));
     }
 
     /**
@@ -103,6 +105,36 @@ public class InterviewController {
         return emitter;
     }
 
+    /**
+     * 训练模式“继续深入”：发出暂存的追问，事件结构与 ask 一致；非训练模式或无暂存追问走 error 事件。
+     */
+    @PostMapping(value = "/{sessionId}/followup", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter followUp(@RequestHeader(value = "Authorization", required = false) String authorization,
+                               @PathVariable String sessionId) {
+        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
+        emitter.onTimeout(emitter::complete);
+        emitter.onError(throwable -> emitter.complete());
+        interviewStreamExecutor.execute(() -> writeChoiceTurn(
+                emitter, authorization, sessionId, "followup",
+                (userId, chunkConsumer) -> interviewService.chooseFollowUp(userId, sessionId, chunkConsumer)));
+        return emitter;
+    }
+
+    /**
+     * 训练模式“下一题”：放弃暂存追问并推进到下一题，事件结构与 ask 一致。
+     */
+    @PostMapping(value = "/{sessionId}/next-question", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter nextQuestion(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                   @PathVariable String sessionId) {
+        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
+        emitter.onTimeout(emitter::complete);
+        emitter.onError(throwable -> emitter.complete());
+        interviewStreamExecutor.execute(() -> writeChoiceTurn(
+                emitter, authorization, sessionId, "next-question",
+                (userId, chunkConsumer) -> interviewService.chooseNextQuestion(userId, sessionId, chunkConsumer)));
+        return emitter;
+    }
+
     @GetMapping("/{sessionId}/status")
     public ApiResponse<InterviewStatusResponse> status(
             @RequestHeader(value = "Authorization", required = false) String authorization,
@@ -143,12 +175,21 @@ public class InterviewController {
     }
 
     private void writeSkipTurn(SseEmitter emitter, String authorization, String sessionId) {
+        writeChoiceTurn(emitter, authorization, sessionId, "skip",
+                (userId, chunkConsumer) -> interviewService.skip(userId, sessionId, chunkConsumer));
+    }
+
+    /**
+     * 无请求体的流式回合统一模板（skip / followup / next-question）：鉴权后委托服务层执行，
+     * 业务/IO/运行时异常均以 error 事件收尾，避免连接悬挂到超时。
+     */
+    private void writeChoiceTurn(SseEmitter emitter, String authorization, String sessionId, String turnName,
+                                 ChoiceTurnAction action) {
         MDC.put(INTERVIEW_ID_KEY, sessionId);
         try {
             Long userId = currentUserService.requireUserId(authorization);
-            InterviewTurnResult result = interviewService.skip(
+            InterviewTurnResult result = action.execute(
                     userId,
-                    sessionId,
                     chunk -> emitter.send(SseEmitter.event().name("message").data(chunk)));
             emitter.send(SseEmitter.event().name("done").data(result));
             emitter.complete();
@@ -157,11 +198,17 @@ public class InterviewController {
         } catch (IOException exception) {
             completeWithReadableError(emitter, ErrorCode.INTERNAL_ERROR.code(), "面试对话流已中断，请稍后重试。");
         } catch (Exception exception) {
-            log.error("interview skip unexpected error sessionId={}", sessionId, exception);
+            log.error("interview {} unexpected error sessionId={}", turnName, sessionId, exception);
             completeWithReadableError(emitter, ErrorCode.INTERNAL_ERROR.code(), "系统内部错误，请稍后重试。");
         } finally {
             MDC.remove(INTERVIEW_ID_KEY);
         }
+    }
+
+    /** 选择类回合执行体：鉴权后的 userId + 流式回调，返回本轮结果 */
+    @FunctionalInterface
+    private interface ChoiceTurnAction {
+        InterviewTurnResult execute(Long userId, AiStreamChunkConsumer chunkConsumer) throws IOException;
     }
 
     private void validateMessage(String message) {

@@ -97,14 +97,19 @@ public class InterviewService {
     }
 
     public InterviewStartResponse start(Long userId, String position) {
-        return start(userId, position, null);
+        return start(userId, position, null, null);
+    }
+
+    public InterviewStartResponse start(Long userId, String position, Long resumeId) {
+        return start(userId, position, resumeId, null);
     }
 
     /**
      * 开始面试：resumeId 可空；非空时校验归属，PROJECT/DEEP 阶段将基于该简历出题。
+     * mode：training / practice，空或非法值按 practice 处理。
      * 额度策略：有自带 Key 直接开始；无 Key 时扣减一次免费额度，耗尽拒绝。
      */
-    public InterviewStartResponse start(Long userId, String position, Long resumeId) {
+    public InterviewStartResponse start(Long userId, String position, Long resumeId, String mode) {
         if (sessionStore.hasActiveSession(userId)) {
             throw new BusinessException(ErrorCode.CONFLICT, "已有一场面试正在进行，请先结束后再开始新面试");
         }
@@ -126,12 +131,13 @@ public class InterviewService {
         context.setUserId(userId);
         context.setPosition(position == null || position.isBlank() ? DEFAULT_POSITION : position.trim());
         context.setResumeId(resumeId);
+        context.setMode(InterviewContext.MODE_TRAINING.equals(mode) ? InterviewContext.MODE_TRAINING : InterviewContext.MODE_PRACTICE);
         context.setState(InterviewState.OPENING);
         context.setCreatedAtEpochMillis(System.currentTimeMillis());
         sessionStore.save(context);
         messageStore.append(sessionId, List.of(ChatMessage.assistant(OPENING_TEXT)));
-        log.info("interview started sessionId={} userId={} position={} resumeId={} keySource={} remainingQuota={}",
-                sessionId, userId, context.getPosition(), resumeId, keySource, quotaService.checkQuota(userId));
+        log.info("interview started sessionId={} userId={} position={} resumeId={} mode={} keySource={} remainingQuota={}",
+                sessionId, userId, context.getPosition(), resumeId, context.getMode(), keySource, quotaService.checkQuota(userId));
         return new InterviewStartResponse(sessionId, OPENING_TEXT, InterviewStatusResponse.from(context, properties));
     }
 
@@ -288,12 +294,13 @@ public class InterviewService {
             case FOLLOW_UP -> {
                 String followUpQuestion = followUpStrategy.generateFollowUpQuestion(
                         context.getCurrentQuestion(), evaluation.missedPoints(), evaluation.wrongPoints());
-                context.setCurrentQuestion(followUpQuestion);
-                context.setCurrentQuestionFollowUp(true);
-                context.setCurrentFollowUpCount(context.getCurrentFollowUpCount() + 1);
-                List<ChatMessage> messages = promptBuilder.buildFollowUpMessages(
-                        messageStore.list(sessionId), followUpQuestion);
-                streamAndRecord(sessionId, messages, chunkConsumer);
+                if (context.isTrainingMode()) {
+                    // 训练模式：追问暂不发出，暂存等用户选择“继续深入”或“下一题”（前端据 followUpChoiceRequired 展示按钮）
+                    context.setPendingFollowUpQuestion(followUpQuestion);
+                    log.info("interview sessionId={} follow-up pending user choice", sessionId);
+                } else {
+                    askFollowUpQuestion(context, sessionId, followUpQuestion, chunkConsumer);
+                }
             }
             case NEW_QUESTION -> {
                 if (canRaise) {
@@ -308,6 +315,92 @@ public class InterviewService {
             case FINISH -> finish(context, sessionId);
         }
         return new InterviewTurnResult(overall, evaluation.feedback(), action, statusView(context));
+    }
+
+    /**
+     * 训练模式“继续深入”：将暂存的追问正式发出（计入追问次数）；非训练模式或无暂存追问时报冲突。
+     */
+    public InterviewTurnResult chooseFollowUp(Long userId, String sessionId, AiStreamChunkConsumer chunkConsumer)
+            throws IOException {
+        Object lock = lockFor(sessionId);
+        try {
+            synchronized (lock) {
+                InterviewContext context = requireOwnedSession(userId, sessionId);
+                LlmCallContext.bind(credentialResolver.resolveFor(userId));
+                LlmCallContext.setUsageListener(context::addTokenUsage);
+                try {
+                    if (context.getState().terminal()) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，请勿继续作答");
+                    }
+                    if (!context.isTrainingMode() || context.getPendingFollowUpQuestion() == null) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "当前无可深入的追问");
+                    }
+                    String followUpQuestion = context.getPendingFollowUpQuestion();
+                    context.setPendingFollowUpQuestion(null);
+                    log.info("interview sessionId={} user chose follow-up deep dive", sessionId);
+                    askFollowUpQuestion(context, sessionId, followUpQuestion, chunkConsumer);
+                    sessionStore.save(context);
+                    return new InterviewTurnResult(null, null, StateTransitionStrategy.Action.FOLLOW_UP, statusView(context));
+                } finally {
+                    LlmCallContext.clear();
+                }
+            }
+        } finally {
+            releaseLockIfTerminal(sessionId, lock);
+        }
+    }
+
+    /**
+     * 训练模式“下一题”：放弃暂存追问（原低分已入账，不额外计分），推进到同阶段下一题或下一阶段。
+     */
+    public InterviewTurnResult chooseNextQuestion(Long userId, String sessionId, AiStreamChunkConsumer chunkConsumer)
+            throws IOException {
+        Object lock = lockFor(sessionId);
+        try {
+            synchronized (lock) {
+                InterviewContext context = requireOwnedSession(userId, sessionId);
+                LlmCallContext.bind(credentialResolver.resolveFor(userId));
+                LlmCallContext.setUsageListener(context::addTokenUsage);
+                try {
+                    if (context.getState().terminal()) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，请勿继续作答");
+                    }
+                    if (!context.isTrainingMode() || context.getPendingFollowUpQuestion() == null) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "当前无需选择下一题");
+                    }
+                    context.setPendingFollowUpQuestion(null);
+                    InterviewState phase = context.getState();
+                    log.info("interview sessionId={} user skipped follow-up, next question in {}", sessionId, phase);
+                    StateTransitionStrategy.Action action;
+                    if (context.questionsInPhase(phase) >= properties.maxQuestionsFor(phase)) {
+                        action = StateTransitionStrategy.Action.ADVANCE;
+                        advance(context, sessionId, chunkConsumer);
+                    } else {
+                        action = StateTransitionStrategy.Action.NEW_QUESTION;
+                        askNextQuestion(context, sessionId, phase, chunkConsumer);
+                    }
+                    sessionStore.save(context);
+                    return new InterviewTurnResult(null, null, action, statusView(context));
+                } finally {
+                    LlmCallContext.clear();
+                }
+            }
+        } finally {
+            releaseLockIfTerminal(sessionId, lock);
+        }
+    }
+
+    /**
+     * 发出追问：置当前题为追问、累计追问次数，经话术包装后流式发出。
+     */
+    private void askFollowUpQuestion(InterviewContext context, String sessionId, String followUpQuestion,
+                                     AiStreamChunkConsumer chunkConsumer) throws IOException {
+        context.setCurrentQuestion(followUpQuestion);
+        context.setCurrentQuestionFollowUp(true);
+        context.setCurrentFollowUpCount(context.getCurrentFollowUpCount() + 1);
+        List<ChatMessage> messages = promptBuilder.buildFollowUpMessages(
+                messageStore.list(sessionId), followUpQuestion);
+        streamAndRecord(sessionId, messages, chunkConsumer);
     }
 
     /**

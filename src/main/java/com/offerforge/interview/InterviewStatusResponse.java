@@ -16,7 +16,9 @@ public record InterviewStatusResponse(
         boolean currentQuestionFollowUp,
         String difficultyLabel,
         Double lastScore,
-        double averageScore
+        double averageScore,
+        String mode,
+        boolean followUpChoiceRequired
 ) {
 
     static InterviewStatusResponse from(InterviewContext context, InterviewProperties properties) {
@@ -33,7 +35,9 @@ public record InterviewStatusResponse(
                 context.isCurrentQuestionFollowUp(),
                 context.getCurrentDifficulty() == null ? null : context.getCurrentDifficulty().label(),
                 context.lastScore(),
-                context.averageScore());
+                context.averageScore(),
+                context.getMode(),
+                context.isTrainingMode() && context.getPendingFollowUpQuestion() != null);
     }
 
     private static int remainingQuestions(InterviewContext context, InterviewProperties properties) {

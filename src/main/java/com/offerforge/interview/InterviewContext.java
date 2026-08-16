@@ -1,5 +1,6 @@
 package com.offerforge.interview;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.offerforge.ai.AnswerEvaluation;
 import com.offerforge.knowledge.Difficulty;
 
@@ -14,12 +15,19 @@ import java.util.Map;
  */
 public class InterviewContext {
 
+    /** 训练模式：每题评分+点评，追问由用户选择是否深入 */
+    public static final String MODE_TRAINING = "training";
+    /** 实战模式：模拟真实面试节奏，追问自动进行（缺省模式） */
+    public static final String MODE_PRACTICE = "practice";
+
     private String sessionId;
     private long userId;
     /** 面试岗位方向，用于报告展示 */
     private String position;
     /** 关联简历 id（可空）：PROJECT 阶段基于简历生成项目题 */
     private Long resumeId;
+    /** 面试模式：training / practice（旧会话反序列化为 null 时按 practice 处理） */
+    private String mode;
     private InterviewState state = InterviewState.OPENING;
     private String currentQuestion;
     private String currentCandidateAnswer;
@@ -28,6 +36,8 @@ public class InterviewContext {
     private boolean currentQuestionFollowUp;
     /** 当前题目的追问次数（每道题上限 maxFollowUps） */
     private int currentFollowUpCount;
+    /** 训练模式暂存的待追问问题：用户选择“继续深入”后才正式发出 */
+    private String pendingFollowUpQuestion;
     /** 连续高分（>=7）次数，用于难度提升判定 */
     private int consecutiveHighScores;
     /** 连续低分（<4）次数，用于难度降低判定 */
@@ -78,6 +88,21 @@ public class InterviewContext {
 
     public void setResumeId(Long resumeId) {
         this.resumeId = resumeId;
+    }
+
+    /** 模式归一化：null/非法值一律按 practice，兼容旧会话 */
+    public String getMode() {
+        return MODE_TRAINING.equals(mode) ? MODE_TRAINING : MODE_PRACTICE;
+    }
+
+    public void setMode(String mode) {
+        this.mode = mode;
+    }
+
+    /** 便捷判断，非持久化字段（避免序列化后反序列化失败） */
+    @JsonIgnore
+    public boolean isTrainingMode() {
+        return MODE_TRAINING.equals(getMode());
     }
 
     public InterviewState getState() {
@@ -134,6 +159,14 @@ public class InterviewContext {
 
     public void setCurrentFollowUpCount(int currentFollowUpCount) {
         this.currentFollowUpCount = currentFollowUpCount;
+    }
+
+    public String getPendingFollowUpQuestion() {
+        return pendingFollowUpQuestion;
+    }
+
+    public void setPendingFollowUpQuestion(String pendingFollowUpQuestion) {
+        this.pendingFollowUpQuestion = pendingFollowUpQuestion;
     }
 
     public int getConsecutiveHighScores() {

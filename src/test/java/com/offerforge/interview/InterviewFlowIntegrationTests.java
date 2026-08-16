@@ -149,6 +149,53 @@ class InterviewFlowIntegrationTests {
         assertCode(get("/api/interview/missing-session/status", tokenA), 40400);
     }
 
+    @Test
+    void trainingModePausesFollowUpForUserChoice() throws Exception {
+        String token = newUser();
+        assertCode(post("/api/knowledge/import", token, Map.of()), 0);
+
+        // start 携带 mode=training，status 回显模式
+        JsonNode start = post("/api/interview/start", token, Map.of("mode", "training"));
+        assertCode(start, 0);
+        String sessionId = start.at("/data/sessionId").asText();
+        assertThat(start.at("/data/status/mode").asText()).isEqualTo("training");
+        ask(sessionId, token, "自我介绍：熟悉 Java。");
+
+        // 低分 → FOLLOW_UP 暂存：不流式追问话术，done/status 标记 followUpChoiceRequired
+        String sse1 = ask(sessionId, token, "嗯。");
+        assertThat(sse1).contains("\"score\":3").contains("\"action\":\"FOLLOW_UP\"")
+                .doesNotContain("模拟追问")
+                .contains("\"followUpChoiceRequired\":true");
+        JsonNode status1 = get("/api/interview/" + sessionId + "/status", token);
+        assertThat(status1.at("/data/followUpsUsed").asInt()).isZero();
+        assertThat(status1.at("/data/followUpChoiceRequired").asBoolean()).isTrue();
+
+        // “继续深入”：发出暂存追问，追问计数递增
+        String sse2 = ssePost("/api/interview/" + sessionId + "/followup", token);
+        assertThat(sse2).contains("模拟追问").contains("\"action\":\"FOLLOW_UP\"")
+                .contains("\"followUpChoiceRequired\":false");
+        JsonNode status2 = get("/api/interview/" + sessionId + "/status", token);
+        assertThat(status2.at("/data/followUpsUsed").asInt()).isEqualTo(1);
+        assertThat(status2.at("/data/currentQuestionFollowUp").asBoolean()).isTrue();
+
+        // 再次低分 → 追问再次暂存；“下一题”放弃追问并推进（基础阶段题量已满 → ADVANCE）
+        ask(sessionId, token, "不太清楚。");
+        String sse3 = ssePost("/api/interview/" + sessionId + "/next-question", token);
+        assertThat(sse3).contains("模拟面试官").contains("\"action\":\"ADVANCE\"").contains("\"state\":\"PROJECT\"");
+        JsonNode status3 = get("/api/interview/" + sessionId + "/status", token);
+        assertThat(status3.at("/data/followUpChoiceRequired").asBoolean()).isFalse();
+    }
+
+    @Test
+    void practiceModeRejectsChoiceEndpoints() throws Exception {
+        String token = newUser();
+        assertCode(post("/api/knowledge/import", token, Map.of()), 0);
+        // 缺省模式 = practice
+        String sessionId = post("/api/interview/start", token, Map.of()).at("/data/sessionId").asText();
+        assertThat(ssePost("/api/interview/" + sessionId + "/followup", token)).contains("event:error");
+        assertThat(ssePost("/api/interview/" + sessionId + "/next-question", token)).contains("event:error");
+    }
+
     private String newUser() throws Exception {
         String username = "interview_user_" + System.nanoTime();
         assertCode(post("/api/auth/register", null, Map.of("username", username, "password", "123456")), 0);
@@ -171,6 +218,21 @@ class InterviewFlowIntegrationTests {
                 .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE)
                 .POST(HttpRequest.BodyPublishers.ofString(
                         objectMapper.writeValueAsString(Map.of("message", message)), StandardCharsets.UTF_8));
+        if (token != null) {
+            builder.header("Authorization", "Bearer " + token);
+        }
+        HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+        return response.body();
+    }
+
+    /**
+     * 无请求体的 SSE 端点（followup / next-question）：返回完整事件流文本。
+     */
+    private String ssePost(String path, String token) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + port + path))
+                .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE)
+                .POST(HttpRequest.BodyPublishers.noBody());
         if (token != null) {
             builder.header("Authorization", "Bearer " + token);
         }

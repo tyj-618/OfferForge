@@ -1,16 +1,28 @@
 import axios from 'axios'
+import { reactive } from 'vue'
 
 const TOKEN_KEY = 'offerforge_token'
 
+/**
+ * 响应式认证状态：localStorage 读写本身非响应式，
+ * 登录/登出/续期/401 均通过 setToken/clearToken 同步此状态，
+ * 依赖它的组件（如 App.vue 顶栏）能即时更新。
+ */
+export const authState = reactive({
+  token: localStorage.getItem(TOKEN_KEY) || ''
+})
+
 export function getToken() {
-  return localStorage.getItem(TOKEN_KEY) || ''
+  return authState.token
 }
 
 export function setToken(token) {
-  localStorage.setItem(TOKEN_KEY, token || '')
+  authState.token = token || ''
+  localStorage.setItem(TOKEN_KEY, authState.token)
 }
 
 export function clearToken() {
+  authState.token = ''
   localStorage.removeItem(TOKEN_KEY)
 }
 
@@ -105,7 +117,7 @@ export const qaApi = {
 
 // ---------- 面试 ----------
 export const interviewApi = {
-  start: (position, resumeId = null) => http.post('/interview/start', { position, resumeId }),
+  start: (position, resumeId = null, mode = null) => http.post('/interview/start', { position, resumeId, mode }),
   status: (sessionId) => http.get(`/interview/${sessionId}/status`),
   finish: (sessionId) => http.post(`/interview/${sessionId}/finish`, null)
 }
@@ -208,6 +220,16 @@ export function askStream(sessionId, message, callbacks) {
 // 跳过当前题：无请求体，SSE 契约与 ask 一致（计 0 分后推进状态机）
 export function skipStream(sessionId, callbacks) {
   return sseRequest(`/api/interview/${sessionId}/skip`, null, callbacks)
+}
+
+// 训练模式“继续深入”：发出暂存的追问，SSE 契约与 ask 一致
+export function followupStream(sessionId, callbacks) {
+  return sseRequest(`/api/interview/${sessionId}/followup`, null, callbacks)
+}
+
+// 训练模式“下一题”：放弃追问并推进到下一题，SSE 契约与 ask 一致
+export function nextQuestionStream(sessionId, callbacks) {
+  return sseRequest(`/api/interview/${sessionId}/next-question`, null, callbacks)
 }
 
 function dispatchSseFrame(frame, { onMessage, onDone, onError }) {

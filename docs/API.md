@@ -104,10 +104,11 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
 请求：
 
 ```json
-{ "position": "Java 后端工程师", "resumeId": 1 }
+{ "position": "Java 后端工程师", "resumeId": 1, "mode": "training" }
 ```
 
-`position` 可空（默认通用方向）；`resumeId` 可空（不关联简历则使用通用项目题）。
+`position` 可空（默认通用方向）；`resumeId` 可空（不关联简历则使用通用项目题）；
+`mode`：`training`（训练模式）/ `practice`（实战模式），可空，缺省或非法值按 `practice` 处理。
 
 响应 data：
 
@@ -132,11 +133,15 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
   "currentQuestionFollowUp": false,
   "followUpsUsed": 0,
   "followUpLimit": 2,
-  "averageScore": 6.5
+  "averageScore": 6.5,
+  "mode": "training",
+  "followUpChoiceRequired": false
 }
 ```
 
-`state` 枚举：`OPENING | BASICS | PROJECT | DEEP | CLOSING | FINISHED`
+`state` 枚举：`OPENING | BASICS | PROJECT | DEEP | CLOSING | FINISHED`；
+`mode` 枚举：`training | practice`；
+`followUpChoiceRequired`：训练模式下后端暂存了追问、等待用户选择「继续深入」/「下一题」时为 `true`。
 
 ### POST /interview/{sessionId}/ask （SSE）
 
@@ -167,6 +172,16 @@ data:{"code":40900,"message":"面试尚未开始"}
 
 跳过当前题（计 0 分并推进状态机），无请求体，事件流契约与 ask 一致。
 仅 `BASICS/PROJECT/DEEP` 环节可用，开场/收尾环节返回 40900。
+
+### POST /interview/{sessionId}/followup （SSE）
+
+训练模式「继续深入」：发出后端暂存的追问（计入追问次数），无请求体，事件流契约与 ask 一致（`score`/`evaluationComment` 为 null）。
+仅训练模式且存在暂存追问时可用，否则 error 事件返回 40900。
+
+### POST /interview/{sessionId}/next-question （SSE）
+
+训练模式「下一题」：放弃暂存追问（原低分已入账，不额外计分）并推进到下一题，无请求体，事件流契约与 ask 一致。
+仅训练模式且存在暂存追问时可用，否则 error 事件返回 40900。
 
 ### POST /interview/{sessionId}/finish
 

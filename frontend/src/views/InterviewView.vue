@@ -1,14 +1,34 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { askStream, interviewApi, quotaApi, resumeApi, skipStream } from '../api'
+import { marked } from 'marked'
+import {
+  askStream,
+  followupStream,
+  interviewApi,
+  nextQuestionStream,
+  quotaApi,
+  resumeApi,
+  skipStream
+} from '../api'
 import { classifyError, notifyError } from '../utils/errors'
 import { toast } from '../toast'
 
+// 面试官话术含 Markdown（粗体/斜体/列表等），gfm + breaks；html 默认关闭，原始 HTML 会被转义
+marked.use({ gfm: true, breaks: true })
+
+function renderMarkdown(content) {
+  if (!content) {
+    return ''
+  }
+  return marked.parse(content)
+}
+
 const router = useRouter()
 const SESSION_KEY = 'offerforge_session'
+const MODE_KEY = 'offerforge_session_mode'
 
-const phase = ref('idle') // idle | active | finishing
+const phase = ref('idle') // idle | mode-select | active | finishing
 const position = ref('')
 const sessionId = ref('')
 const status = ref(null)
@@ -17,6 +37,8 @@ const answer = ref('')
 const sending = ref(false)
 const thinking = ref(false)
 const error = ref('')
+const mode = ref('practice') // training | practice
+const followUpChoice = ref(false) // 训练模式：追问待用户选择「继续深入」/「下一题」
 
 const resumes = ref([])
 const selectedResumeId = ref(null)
@@ -52,6 +74,8 @@ const progressText = computed(() => {
 })
 
 const isFinished = computed(() => status.value?.state === 'FINISHED')
+
+const modeLabel = computed(() => (mode.value === 'training' ? '训练模式' : '实战模式'))
 
 const quotaBannerClass = computed(() => {
   if (!quotaInfo.value || quotaInfo.value.hasOwnKey) {
@@ -118,6 +142,7 @@ onMounted(async () => {
   try {
     status.value = await interviewApi.status(saved)
     sessionId.value = saved
+    mode.value = status.value?.mode || sessionStorage.getItem(MODE_KEY) || 'practice'
     phase.value = 'active'
     if (isFinished.value) {
       messages.value.push({ role: 'assistant', content: '本次面试已结束，可前往「历史报告」查看或生成报告。' })
@@ -128,8 +153,10 @@ onMounted(async () => {
         restored: true
       })
     }
+    followUpChoice.value = !!status.value?.followUpChoiceRequired
   } catch {
     sessionStorage.removeItem(SESSION_KEY)
+    sessionStorage.removeItem(MODE_KEY)
   }
 })
 
@@ -141,11 +168,18 @@ async function refreshQuota() {
   }
 }
 
-async function startInterview() {
+function proceedToModeSelect() {
+  error.value = ''
+  phase.value = 'mode-select'
+}
+
+async function startInterview(selectedMode) {
   sending.value = true
   error.value = ''
   try {
-    const data = await interviewApi.start(position.value.trim(), selectedResumeId.value || null)
+    const data = await interviewApi.start(position.value.trim(), selectedResumeId.value || null, selectedMode)
+    mode.value = selectedMode
+    sessionStorage.setItem(MODE_KEY, selectedMode)
     sessionId.value = data.sessionId
     status.value = data.status
     sessionStorage.setItem(SESSION_KEY, data.sessionId)
@@ -166,80 +200,149 @@ async function startInterview() {
   }
 }
 
-async function send(textOverride) {
-  const text = (textOverride ?? answer.value).trim()
+function onEnterSend(event) {
+  // Enter 发送，Shift+Enter 换行
+  if (event.shiftKey) {
+    return
+  }
+  event.preventDefault()
+  send()
+}
+
+function send() {
+  const text = answer.value.trim()
   if (!text || sending.value || isFinished.value) {
     return
   }
+  messages.value.push({ role: 'user', content: text })
+  answer.value = ''
+  runStreamingTurn((callbacks) => askStream(sessionId.value, text, callbacks), () => retrySend(text))
+}
+
+function retrySend(text) {
+  // 重试时用户消息已在列表中，只重新发起请求
+  runStreamingTurn((callbacks) => askStream(sessionId.value, text, callbacks), () => retrySend(text))
+}
+
+// 跳过当前题：后端计 0 分并推进状态机，SSE 返回下一题
+function skipQuestion() {
+  if (!canSkip.value || sending.value || isFinished.value) {
+    return
+  }
+  runStreamingTurn((callbacks) => skipStream(sessionId.value, callbacks), skipQuestion)
+}
+
+// 训练模式「继续深入」：发出后端暂存的追问
+function chooseFollowUp() {
+  if (sending.value || isFinished.value) {
+    return
+  }
+  runStreamingTurn((callbacks) => followupStream(sessionId.value, callbacks), chooseFollowUp)
+}
+
+// 训练模式「下一题」：放弃追问，推进到下一题
+function chooseNextQuestion() {
+  if (sending.value || isFinished.value) {
+    return
+  }
+  runStreamingTurn((callbacks) => nextQuestionStream(sessionId.value, callbacks), chooseNextQuestion)
+}
+
+// ---------- SSE 流式渲染：chunk 队列 + 10~30ms 节流，营造逐字输出感 ----------
+const chunkQueue = []
+let queueTimer = null
+let activeStreamMessage = null
+let pendingDone = null
+
+async function runStreamingTurn(request, retry) {
   sending.value = true
   thinking.value = true
-  messages.value.push({ role: 'user', content: text })
+  followUpChoice.value = false
   const assistantMessage = { role: 'assistant', content: '' }
   messages.value.push(assistantMessage)
-  answer.value = ''
+  activeStreamMessage = assistantMessage
   scrollDown()
   try {
-    await askStream(sessionId.value, text, {
-      onMessage: (chunk) => {
-        thinking.value = false
-        assistantMessage.content += chunk
-        scrollDown()
-      },
-      onDone: (result) => handleAskDone(assistantMessage, result),
-      onError: (e) => {
-        if (!assistantMessage.content) {
-          messages.value.pop()
-        }
-        notifyError(e, () => send(text))
-      }
+    await request({
+      onMessage: enqueueChunk,
+      onDone: (result) => queueDone(assistantMessage, result),
+      onError: (e) => failStream(assistantMessage, e, retry)
     })
   } catch (e) {
-    if (!assistantMessage.content) {
-      messages.value.pop()
-    }
-    notifyError(e, () => send(text))
+    failStream(assistantMessage, e, retry)
   } finally {
-    thinking.value = false
-    sending.value = false
+    // 兜底：连接结束但无 done 事件且队列已排空时释放输入状态
+    if (activeStreamMessage === assistantMessage && chunkQueue.length === 0 && !queueTimer && !pendingDone) {
+      endStream()
+    }
     scrollDown()
   }
 }
 
-// 跳过当前题：后端计 0 分并推进状态机，SSE 返回下一题
-async function skipQuestion() {
-  if (!canSkip.value || sending.value || isFinished.value) {
+function enqueueChunk(chunk) {
+  chunkQueue.push(chunk)
+  scheduleDrain()
+}
+
+function scheduleDrain() {
+  if (queueTimer) {
     return
   }
-  sending.value = true
-  thinking.value = true
-  const assistantMessage = { role: 'assistant', content: '' }
-  messages.value.push(assistantMessage)
-  scrollDown()
-  try {
-    await skipStream(sessionId.value, {
-      onMessage: (chunk) => {
-        thinking.value = false
-        assistantMessage.content += chunk
-        scrollDown()
-      },
-      onDone: (result) => handleAskDone(assistantMessage, result),
-      onError: (e) => {
-        if (!assistantMessage.content) {
-          messages.value.pop()
-        }
-        notifyError(e, skipQuestion)
-      }
-    })
-  } catch (e) {
-    if (!assistantMessage.content) {
-      messages.value.pop()
+  queueTimer = setTimeout(drainNext, 10 + Math.random() * 20)
+}
+
+function drainNext() {
+  queueTimer = null
+  const chunk = chunkQueue.shift()
+  if (activeStreamMessage) {
+    if (!activeStreamMessage.content) {
+      // 第一个字符渲染出来才收起「正在思考…」动画
+      thinking.value = false
     }
-    notifyError(e, skipQuestion)
-  } finally {
-    thinking.value = false
-    sending.value = false
+    activeStreamMessage.content += chunk
     scrollDown()
   }
+  if (chunkQueue.length > 0) {
+    scheduleDrain()
+    return
+  }
+  if (pendingDone) {
+    const done = pendingDone
+    pendingDone = null
+    endStream()
+    handleAskDone(done.assistantMessage, done.result)
+  }
+}
+
+function queueDone(assistantMessage, result) {
+  if (chunkQueue.length === 0 && !queueTimer) {
+    endStream()
+    handleAskDone(assistantMessage, result)
+  } else {
+    // 渲染队列未排空：先逐字放完再结算评分/下一题
+    pendingDone = { assistantMessage, result }
+  }
+}
+
+function failStream(assistantMessage, e, retry) {
+  chunkQueue.length = 0
+  pendingDone = null
+  if (queueTimer) {
+    clearTimeout(queueTimer)
+    queueTimer = null
+  }
+  if (!assistantMessage.content) {
+    messages.value.pop()
+  }
+  endStream()
+  notifyError(e, retry)
+}
+
+function endStream() {
+  sending.value = false
+  thinking.value = false
+  activeStreamMessage = null
+  scrollDown()
 }
 
 async function handleAskDone(assistantMessage, result) {
@@ -248,6 +351,11 @@ async function handleAskDone(assistantMessage, result) {
   // 刚发出的题目若为追问，气泡打上标识
   assistantMessage.followUp = !!result.status?.currentQuestionFollowUp
   status.value = result.status
+  if (result.status?.mode) {
+    mode.value = result.status.mode
+  }
+  // 训练模式下后端暂存了追问 → 展示「继续深入」/「下一题」选择
+  followUpChoice.value = !!result.status?.followUpChoiceRequired
   if (result.action === 'FINISH' || result.status?.state === 'FINISHED') {
     await finishAndShowReport()
   }
@@ -275,6 +383,7 @@ async function finishAndShowReport() {
     // finish 触发报告生成与归档，随后跳转报告页
     await interviewApi.finish(sessionId.value)
     sessionStorage.removeItem(SESSION_KEY)
+    sessionStorage.removeItem(MODE_KEY)
     router.push(`/report/${sessionId.value}`)
   } catch (e) {
     notifyError(e, finishAndShowReport)
@@ -316,9 +425,9 @@ function scrollDown() {
           </button>
         </template>
       </div>
-      <form class="start-row" @submit.prevent="startInterview">
+      <form class="start-row" @submit.prevent="proceedToModeSelect">
         <input v-model="position" placeholder="面试岗位方向，如：Java 后端工程师（可留空）" :disabled="sending" />
-        <button type="submit" :disabled="sending">{{ sending ? '准备中…' : '开始面试' }}</button>
+        <button type="submit" :disabled="sending">开始面试</button>
       </form>
       <div class="resume-row">
         <template v-if="resumes.length > 1">
@@ -341,6 +450,28 @@ function scrollDown() {
       <p v-if="error" class="error-text">{{ error }}</p>
     </div>
 
+    <!-- 模式选择卡片：开始面试前的前置步骤 -->
+    <div v-else-if="phase === 'mode-select'" class="card start-card">
+      <h2>选择面试模式</h2>
+      <p class="muted">模式决定追问节奏与反馈方式，开始后本场不可切换。</p>
+      <div class="mode-options">
+        <button type="button" class="mode-card" :disabled="sending" @click="startInterview('training')">
+          <span class="mode-name">🎓 训练模式</span>
+          <span class="muted mode-desc">
+            每题给出评分与改进建议；面试官认为可以深入时，由你选择「继续深入」或「下一题」，适合针对性复习。
+          </span>
+        </button>
+        <button type="button" class="mode-card" :disabled="sending" @click="startInterview('practice')">
+          <span class="mode-name">⚔️ 实战模式</span>
+          <span class="muted mode-desc">
+            模拟真实面试节奏，面试官只作必要点评并按表现自动追问；完整面试结束后给出详尽报告。
+          </span>
+        </button>
+      </div>
+      <button type="button" class="ghost back-btn" :disabled="sending" @click="phase = 'idle'">← 返回</button>
+      <p v-if="error" class="error-text">{{ error }}</p>
+    </div>
+
     <!-- 进行中 -->
     <template v-else>
       <!-- 顶部进度条：当前阶段 / 总阶段 -->
@@ -357,6 +488,7 @@ function scrollDown() {
         <div class="interview-main">
           <!-- 平板档：状态折叠在顶部；桌面档隐藏（信息移到右侧边栏），手机档隐藏（收入底部抽屉） -->
           <div class="card status-bar">
+            <span class="badge mode-badge">{{ modeLabel }}</span>
             <span class="badge">{{ status?.phaseLabel || '—' }}</span>
             <span :class="['badge', difficultyClass]">难度：{{ status?.difficultyLabel || '—' }}</span>
             <span
@@ -377,7 +509,9 @@ function scrollDown() {
           <div class="bubble">
             <div v-if="item.followUp" class="followup-tag"><span class="badge warning">🔄 追问</span></div>
             <div class="bubble-content">
-              {{ item.content }}<span v-if="item.restored" class="muted">（刷新恢复，历史消息不回放）</span>
+              <div v-if="item.role === 'assistant'" class="md" v-html="renderMarkdown(item.content)"></div>
+              <template v-else>{{ item.content }}</template>
+              <span v-if="item.restored" class="muted">（刷新恢复，历史消息不回放）</span>
               <span v-if="isStreamingItem(item)" class="stream-cursor"></span>
             </div>
             <div v-if="item.score != null" class="score-line">
@@ -393,32 +527,45 @@ function scrollDown() {
         </div>
       </div>
 
+      <!-- 训练模式：追问选择（后端暂存了追问时显示） -->
+      <div v-if="followUpChoice && mode === 'training' && !isFinished" class="card followup-choice">
+        <span>💡 这道题还可以深入讲解，你想：</span>
+        <div class="choice-actions">
+          <button type="button" :disabled="sending" @click="chooseFollowUp">继续深入</button>
+          <button type="button" class="secondary" :disabled="sending" @click="chooseNextQuestion">下一题</button>
+        </div>
+      </div>
+
       <form v-if="!isFinished" class="card answer-row" @submit.prevent="send()">
         <textarea
           v-model="answer"
-          rows="3"
-          placeholder="输入你的回答…（Ctrl+Enter 发送）"
+          rows="2"
+          placeholder="输入你的回答…（Enter 发送，Shift+Enter 换行）"
           :disabled="sending"
-          @keydown.ctrl.enter.prevent="send()"
+          @keydown.enter="onEnterSend"
         ></textarea>
-        <button type="submit" :disabled="sending || !answer.trim()">
-          {{ sending ? '面试官思考中…' : '发送' }}
-        </button>
-        <button
-          type="button"
-          class="ghost skip-btn"
-          title="跳过当前题（本题计 0 分）"
-          :disabled="sending || !canSkip"
-          @click="skipQuestion"
-        >
-          跳过此题
-        </button>
+        <div class="answer-actions">
+          <button
+            type="button"
+            class="ghost skip-btn"
+            title="跳过当前题（本题计 0 分）"
+            :disabled="sending || !canSkip"
+            @click="skipQuestion"
+          >
+            跳过此题
+          </button>
+          <button type="submit" :disabled="sending || !answer.trim()">发送</button>
+        </div>
       </form>
         </div>
 
         <!-- 桌面档：右侧边栏展示面试状态 -->
         <aside class="card side-panel">
           <h3>面试状态</h3>
+          <div class="side-row">
+            <span class="muted">模式</span>
+            <span class="badge">{{ modeLabel }}</span>
+          </div>
           <div class="side-row">
             <span class="muted">当前环节</span>
             <span class="badge">{{ status?.phaseLabel || '—' }}</span>
@@ -459,6 +606,10 @@ function scrollDown() {
           <div class="bottom-sheet card" @click.stop>
             <div class="sheet-handle"></div>
             <h3>面试状态</h3>
+            <div class="side-row">
+              <span class="muted">模式</span>
+              <span class="badge">{{ modeLabel }}</span>
+            </div>
             <div class="side-row">
               <span class="muted">当前环节</span>
               <span class="badge">{{ status?.phaseLabel || '—' }}</span>
@@ -576,12 +727,64 @@ function scrollDown() {
   flex-shrink: 0;
 }
 
+/* ---------- 模式选择卡片 ---------- */
+.mode-options {
+  display: flex;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.mode-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+  height: auto;
+  padding: 16px 18px;
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.mode-card:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: #f6f8ff;
+}
+
+.mode-card:disabled {
+  background: #fff;
+}
+
+.mode-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.mode-desc {
+  font-size: 13px;
+  white-space: normal;
+  line-height: 1.6;
+}
+
+.back-btn {
+  margin-top: 14px;
+}
+
 .status-bar {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
   margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.mode-badge {
+  background: #e7f8ee;
+  color: var(--success);
 }
 
 .progress {
@@ -593,7 +796,8 @@ function scrollDown() {
 }
 
 .chat-box {
-  height: 460px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -670,6 +874,7 @@ function scrollDown() {
 
 .skip-btn {
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .skip-btn:disabled {
@@ -748,6 +953,79 @@ function scrollDown() {
   word-break: break-word;
 }
 
+/* ---------- Markdown 渲染（面试官消息） ---------- */
+.md {
+  white-space: normal;
+}
+
+.md :deep(p) {
+  margin: 0 0 8px;
+}
+
+.md :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.md :deep(strong) {
+  font-weight: 600;
+}
+
+.md :deep(ul),
+.md :deep(ol) {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+
+.md :deep(li) {
+  margin-bottom: 2px;
+}
+
+.md :deep(code) {
+  background: #e5eaf6;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.md :deep(pre) {
+  background: #eef1f8;
+  padding: 8px 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 6px 0;
+}
+
+.md :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+
+.md :deep(blockquote) {
+  border-left: 3px solid #c8d2f5;
+  padding-left: 10px;
+  color: var(--text-light);
+  margin: 6px 0;
+}
+
+.md :deep(h1),
+.md :deep(h2),
+.md :deep(h3) {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 8px 0 6px;
+}
+
+.md :deep(table) {
+  border-collapse: collapse;
+  margin: 6px 0;
+}
+
+.md :deep(th),
+.md :deep(td) {
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+}
+
 .score-line {
   margin-top: 8px;
   display: flex;
@@ -759,15 +1037,55 @@ function scrollDown() {
   font-size: 12px;
 }
 
+/* ---------- 追问选择卡片（训练模式） ---------- */
+.followup-choice {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  margin-top: 12px;
+  flex-shrink: 0;
+  background: #fffaf0;
+  border-color: #ffe7b8;
+}
+
+.choice-actions {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.choice-actions button {
+  white-space: nowrap;
+}
+
+/* ---------- 回答输入区：输入框 + 跳过/发送按钮同行右对齐，等高 ---------- */
 .answer-row {
   display: flex;
   gap: 10px;
   margin-top: 12px;
-  align-items: flex-end;
+  align-items: stretch;
+  flex-shrink: 0;
+}
+
+.answer-row textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+}
+
+.answer-actions {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .answer-row button {
-  height: 42px;
+  height: auto;
+  min-height: 42px;
+  white-space: nowrap;
 }
 
 /* ---------- 响应式三档 ---------- */
@@ -776,7 +1094,13 @@ function scrollDown() {
 }
 
 .interview-main {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  /* 输入框固定可见：主区限高视口，消息区内部滚动（vh 为旧浏览器回退） */
+  height: calc(100vh - 230px);
+  height: calc(100dvh - 230px);
+  min-height: 400px;
 }
 
 .side-panel {
@@ -829,6 +1153,11 @@ function scrollDown() {
     position: sticky;
     top: 84px;
   }
+
+  .interview-main {
+    height: calc(100vh - 180px);
+    height: calc(100dvh - 180px);
+  }
 }
 
 /* 手机档（<768px）：状态收入底部抽屉 */
@@ -837,8 +1166,14 @@ function scrollDown() {
     display: none;
   }
 
-  .chat-box {
-    height: 48vh;
+  .mode-options {
+    flex-direction: column;
+  }
+
+  .interview-main {
+    height: calc(100vh - 250px);
+    height: calc(100dvh - 250px);
+    min-height: 320px;
   }
 
   .answer-row {
@@ -853,7 +1188,7 @@ function scrollDown() {
     display: flex;
     position: fixed;
     right: 16px;
-    bottom: 20px;
+    bottom: 110px;
     z-index: 50;
     align-items: center;
     gap: 6px;
