@@ -135,10 +135,32 @@ export const resumeApi = {
  * SSE 通用请求：POST + text/event-stream，逐块回调 onMessage，
  * done 事件（评分/动作/进度）回调 onDone，error 事件回调 onError。
  * 非 2xx 响应按状态码分类：429 限流、503 AI 服务不可用；401 静默续期后重连一次。
+ * error 事件帧携带 40100（token 失效，SSE 恒返 200 不走 HTTP 401）时同样静默续期并重连一次。
+ * 闲置保护：连接建立后若超时窗口内无任何数据到达（代理/网络悬挂），主动中止并报可重试超时错误。
  */
+const SSE_IDLE_TIMEOUT_MS = 90000
+
 async function sseRequest(url, body, callbacks, retried = false) {
+  const controller = new AbortController()
+  let idleTimer = null
+  let idleTimedOut = false
+  const armIdleTimer = () => {
+    clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => {
+      idleTimedOut = true
+      controller.abort()
+    }, SSE_IDLE_TIMEOUT_MS)
+  }
+  const disarmIdleTimer = () => clearTimeout(idleTimer)
+  const idleTimeoutError = () => {
+    const error = new Error('AI 响应超时，请重试')
+    error.code = 50300
+    return error
+  }
+
   let response
   try {
+    armIdleTimer()
     response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -146,14 +168,20 @@ async function sseRequest(url, body, callbacks, retried = false) {
         Accept: 'text/event-stream',
         Authorization: `Bearer ${getToken()}`
       },
-      body: body ? JSON.stringify(body) : null
+      body: body ? JSON.stringify(body) : null,
+      signal: controller.signal
     })
   } catch {
+    disarmIdleTimer()
+    if (idleTimedOut) {
+      throw idleTimeoutError()
+    }
     const networkError = new Error('网络连接失败，请检查网络后重试')
     networkError.isNetwork = true
     throw networkError
   }
   if (response.status === 401 && !retried) {
+    disarmIdleTimer()
     try {
       await refreshTokenOnce()
       return await sseRequest(url, body, callbacks, true)
@@ -163,23 +191,48 @@ async function sseRequest(url, body, callbacks, retried = false) {
     }
   }
   if (!response.ok || !response.body) {
+    disarmIdleTimer()
     throw await classifySseStatus(response)
   }
   const reader = response.body.getReader()
   const decoder = new TextDecoder('utf-8')
   let buffer = ''
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) {
-      break
+  try {
+    for (;;) {
+      armIdleTimer()
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+      buffer += decoder.decode(value, { stream: true })
+      let separator
+      while ((separator = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, separator)
+        buffer = buffer.slice(separator + 2)
+        // 鉴权失效错误帧：续期后重连一次（鉴权在发送任何对话内容之前，重放无副作用）
+        if (dispatchSseFrame(frame, callbacks, retried) === 'authRetry') {
+          disarmIdleTimer()
+          reader.cancel().catch(() => {})
+          try {
+            await refreshTokenOnce()
+          } catch {
+            clearToken()
+            window.location.href = '/login'
+            return
+          }
+          return await sseRequest(url, body, callbacks, true)
+        }
+      }
     }
-    buffer += decoder.decode(value, { stream: true })
-    let separator
-    while ((separator = buffer.indexOf('\n\n')) >= 0) {
-      const frame = buffer.slice(0, separator)
-      buffer = buffer.slice(separator + 2)
-      dispatchSseFrame(frame, callbacks)
+  } catch (e) {
+    if (idleTimedOut) {
+      throw idleTimeoutError()
     }
+    const networkError = new Error('网络连接失败，请检查网络后重试')
+    networkError.isNetwork = true
+    throw networkError
+  } finally {
+    disarmIdleTimer()
   }
 }
 
@@ -232,7 +285,8 @@ export function nextQuestionStream(sessionId, callbacks) {
   return sseRequest(`/api/interview/${sessionId}/next-question`, null, callbacks)
 }
 
-function dispatchSseFrame(frame, { onMessage, onDone, onError }) {
+// 返回 'authRetry' 表示错误帧为鉴权失效，由调用方续期重连而非报错
+function dispatchSseFrame(frame, { onMessage, onDone, onError }, retried) {
   let eventName = 'message'
   const dataLines = []
   for (const line of frame.split('\n')) {
@@ -243,7 +297,7 @@ function dispatchSseFrame(frame, { onMessage, onDone, onError }) {
     }
   }
   if (dataLines.length === 0) {
-    return
+    return ''
   }
   const payload = dataLines.join('\n')
   if (eventName === 'message') {
@@ -252,10 +306,14 @@ function dispatchSseFrame(frame, { onMessage, onDone, onError }) {
     onDone?.(JSON.parse(payload))
   } else if (eventName === 'error') {
     const parsed = JSON.parse(payload)
+    if (parsed.code === 40100 && !retried) {
+      return 'authRetry'
+    }
     const error = new Error(parsed.message || '面试对话异常')
     error.code = parsed.code
     onError?.(error)
   }
+  return ''
 }
 
 // ---------- API Key / 额度 ----------

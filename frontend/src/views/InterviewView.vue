@@ -271,8 +271,12 @@ async function runStreamingTurn(request, retry) {
   } catch (e) {
     failStream(assistantMessage, e, retry)
   } finally {
-    // 兜底：连接结束但无 done 事件且队列已排空时释放输入状态
+    // 兜底：连接结束但无 done 事件且队列已排空时释放输入状态；
+    // 若已流出部分内容则连接异常中断，提示刷新恢复（后端状态机已推进，status 接口能还原当前题）
     if (activeStreamMessage === assistantMessage && chunkQueue.length === 0 && !queueTimer && !pendingDone) {
+      if (assistantMessage.content) {
+        assistantMessage.comment = '连接已中断，请刷新页面查看最新进度'
+      }
       endStream()
     }
     scrollDown()
