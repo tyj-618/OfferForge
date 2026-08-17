@@ -26,6 +26,16 @@ public interface KnowledgeRepository extends JpaRepository<KnowledgeItem, Long> 
      */
     List<KnowledgeItem> findByOwnerUserIdOrderById(Long ownerUserId);
 
+    /**
+     * 官方题库列表：owner 恒为 NULL，按 id 升序。
+     */
+    List<KnowledgeItem> findByOwnerUserIdIsNullOrderById();
+
+    /**
+     * 批量删除用：仅命中本人私有条目，非本人 id 自然被排除。
+     */
+    List<KnowledgeItem> findByIdInAndOwnerUserId(Collection<Long> ids, Long ownerUserId);
+
     Optional<KnowledgeItem> findByIdAndOwnerUserId(Long id, Long ownerUserId);
 
     /**

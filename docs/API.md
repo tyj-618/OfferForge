@@ -89,6 +89,20 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
 
 响应 data：`{ "total": 60, "inserted": 60, "skipped": 0 }`
 
+### GET /knowledge/official
+
+官方题库列表（全局共享只读），资源库页按分组筛选浏览。
+
+响应 data：`[{ "id": 1, "question": "...", "answer": "...", "category": "Java基础", "difficulty": "简单" }]`
+
+### POST /knowledge/batch-delete
+
+批量删除本人上传的资料；仅删除归属本人的条目，其余静默跳过。
+
+请求：`{ "ids": [1, 2, 3] }`
+
+响应 data：`{ "deleted": 3 }`
+
 ---
 
 ## 问答 `/api/qa`

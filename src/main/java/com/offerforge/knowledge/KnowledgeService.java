@@ -242,9 +242,34 @@ public class KnowledgeService {
     /** 我的上传列表（仅本人私有条目） */
     public List<OwnedKnowledge> listMine(Long userId) {
         return repository.findByOwnerUserIdOrderById(userId).stream()
-                .map(item -> new OwnedKnowledge(item.getId(), item.getQuestion(), item.getAnswer(),
-                        item.getCategory(), item.getDifficulty() == null ? null : item.getDifficulty().label()))
+                .map(this::toOwnedKnowledge)
                 .toList();
+    }
+
+    /** 官方题库列表（owner 恒为 NULL，全局共享只读） */
+    public List<OwnedKnowledge> listOfficial() {
+        return repository.findByOwnerUserIdIsNullOrderById().stream()
+                .map(this::toOwnedKnowledge)
+                .toList();
+    }
+
+    private OwnedKnowledge toOwnedKnowledge(KnowledgeItem item) {
+        return new OwnedKnowledge(item.getId(), item.getQuestion(), item.getAnswer(),
+                item.getCategory(), item.getDifficulty() == null ? null : item.getDifficulty().label());
+    }
+
+    /**
+     * 批量删除本人私有条目；非本人 id 静默跳过（不泄露他人条目存在性），返回实际删除条数。
+     */
+    @Transactional
+    public int batchDeleteOwned(Long userId, List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return 0;
+        }
+        List<KnowledgeItem> owned = repository.findByIdInAndOwnerUserId(ids, userId);
+        repository.deleteAll(owned);
+        log.info("knowledge batch deleted userId={} requested={} deleted={}", userId, ids.size(), owned.size());
+        return owned.size();
     }
 
     /** 删除本人私有条目；不存在或非本人抛 NOT_FOUND（不泄露他人条目存在性） */

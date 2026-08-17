@@ -152,10 +152,13 @@ export const knowledgeApi = {
   importBuiltin: () => http.post('/knowledge/import', null),
   categories: () => http.get('/knowledge/categories'),
   mine: () => http.get('/knowledge/mine'),
+  official: () => http.get('/knowledge/official'),
   recommend: (resumeId = null) => http.get('/knowledge/recommend', { params: resumeId == null ? {} : { resumeId } }),
   // 上传资料：FormData（file + 可选 category），仅支持 .md/.txt，单文件 ≤1MB
   upload: (formData) => http.post('/knowledge/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  remove: (id) => http.delete(`/knowledge/${id}`)
+  remove: (id) => http.delete(`/knowledge/${id}`),
+  // 批量删除本人资料：后端仅删归属本人的 id，返回实际删除条数
+  batchRemove: (ids) => http.post('/knowledge/batch-delete', { ids })
 }
 
 export const qaApi = {

@@ -4,10 +4,9 @@ import { knowledgeApi } from '../api'
 import { notifyError } from '../utils/errors'
 import { toast } from '../toast'
 
-// 资料库（任务 8）：官方分组全局共享，用户上传仅本人可见；自定义分组随上传自动建立
+// 资料库（导入/上传入口）：列表浏览与删除已迁至资源库页，本页不再铺开已上传条目
 const officialCategories = ref([])
 const customCategories = ref([])
-const myItems = ref([])
 const loading = ref(false)
 const importing = ref(false)
 const uploading = ref(false)
@@ -21,10 +20,9 @@ const customCategoryOptions = computed(() => customCategories.value)
 async function loadAll() {
   loading.value = true
   try {
-    const [view, mine] = await Promise.all([knowledgeApi.categories(), knowledgeApi.mine()])
+    const view = await knowledgeApi.categories()
     officialCategories.value = view?.official || []
     customCategories.value = view?.custom || []
-    myItems.value = mine || []
   } catch (e) {
     notifyError(e)
   } finally {
@@ -95,19 +93,6 @@ async function upload() {
     notifyError(e)
   } finally {
     uploading.value = false
-  }
-}
-
-async function removeItem(item) {
-  if (!window.confirm(`确定删除「${item.question.slice(0, 30)}${item.question.length > 30 ? '…' : ''}」吗？`)) {
-    return
-  }
-  try {
-    await knowledgeApi.remove(item.id)
-    toast.success('已删除')
-    await loadAll()
-  } catch (e) {
-    notifyError(e)
   }
 }
 
@@ -187,33 +172,13 @@ A: 建立可靠连接并同步双方初始序号…
       </div>
     </div>
 
-    <!-- 我的上传 -->
+    <!-- 已上传资料的浏览/删除统一在资源库页，本页不再铺开展示 -->
     <div class="card">
       <div class="section-head">
-        <h2>我的上传（{{ myItems.length }}）</h2>
+        <h2>查看与管理资料</h2>
+        <RouterLink class="ghost" to="/library">前往资源库</RouterLink>
       </div>
-      <div v-if="customCategories.length" class="chip-list">
-        <span v-for="name in customCategories" :key="name" class="badge success">{{ name }}</span>
-      </div>
-      <table v-if="myItems.length" class="mine-table">
-        <thead>
-          <tr>
-            <th>题面</th>
-            <th>分组</th>
-            <th class="col-action">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in myItems" :key="item.id">
-            <td class="col-question">{{ item.question }}</td>
-            <td><span class="badge">{{ item.category }}</span></td>
-            <td class="col-action">
-              <button type="button" class="ghost danger-text" @click="removeItem(item)">删除</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else-if="!loading" class="muted">暂无上传资料；上传的题目可在开始面试时勾选使用。</p>
+      <p class="muted">官方题库与已上传资料均可在资源库页按分组筛选、搜索关键词、展开查看答案；自己上传的资料支持批量删除。</p>
     </div>
   </div>
 </template>
@@ -305,33 +270,6 @@ A: 建立可靠连接并同步双方初始序号…
   padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-}
-
-.mine-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 12px;
-  font-size: 14px;
-}
-
-.mine-table th,
-.mine-table td {
-  text-align: left;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-.mine-table .col-question {
-  max-width: 480px;
-}
-
-.mine-table .col-action {
-  width: 72px;
-  white-space: nowrap;
-}
-
-.danger-text {
-  color: var(--danger, #d4380d);
 }
 
 @media (max-width: 767px) {

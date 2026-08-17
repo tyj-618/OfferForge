@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -53,6 +54,25 @@ public class KnowledgeController {
             @RequestHeader(value = "Authorization", required = false) String authorization) {
         Long userId = currentUserService.requireUserId(authorization);
         return ApiResponse.success(knowledgeService.listMine(userId));
+    }
+
+    /** 官方题库列表（全局共享只读）：资源库页按分组筛选与浏览答案 */
+    @GetMapping("/official")
+    public ApiResponse<List<KnowledgeService.OwnedKnowledge>> official(
+            @RequestHeader(value = "Authorization", required = false) String authorization) {
+        currentUserService.requireUserId(authorization);
+        return ApiResponse.success(knowledgeService.listOfficial());
+    }
+
+    /** 批量删除本人上传的资料；仅删除归属本人的条目，返回实际删除条数 */
+    @PostMapping("/batch-delete")
+    public ApiResponse<BatchDeleteResult> batchDelete(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody BatchDeleteRequest request) {
+        Long userId = currentUserService.requireUserId(authorization);
+        int deleted = knowledgeService.batchDeleteOwned(userId,
+                request == null ? null : request.ids());
+        return ApiResponse.success(new BatchDeleteResult(deleted));
     }
 
     /** 分组推荐：按简历技能关键词打分，resumeId 可空（默认最新简历） */
@@ -101,5 +121,11 @@ public class KnowledgeController {
         Long userId = currentUserService.requireUserId(authorization);
         knowledgeService.deleteOwned(userId, id);
         return ApiResponse.success(null);
+    }
+
+    public record BatchDeleteRequest(List<Long> ids) {
+    }
+
+    public record BatchDeleteResult(int deleted) {
     }
 }

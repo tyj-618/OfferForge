@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -116,6 +117,52 @@ class KnowledgeOwnershipTests {
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).errorCode())
                 .isEqualTo(ErrorCode.PARAM_ERROR);
+    }
+
+    @Test
+    void officialListExcludesPrivateItems() {
+        int officialCount = knowledgeService.listOfficial().size();
+        assertThat(officialCount).isPositive();
+
+        knowledgeService.uploadKnowledge(USER_A, "a.md", MARKED_CONTENT, null);
+
+        // 官方列表不含私有条目，且私有上传不改变官方条数
+        List<KnowledgeService.OwnedKnowledge> official = knowledgeService.listOfficial();
+        assertThat(official).hasSize(officialCount);
+        assertThat(official).extracting(KnowledgeService.OwnedKnowledge::question)
+                .noneMatch(question -> question.contains("顺序消费"));
+    }
+
+    @Test
+    void batchDeleteOnlyDeletesOwnedItems() {
+        String content = """
+                Q: 私有题：限流算法有哪些？
+                A: 计数器、滑动窗口、令牌桶、漏桶。
+
+                Q: 私有题：什么是缓存穿透？
+                A: 查询不存在的数据绕过缓存直达存储。
+                """;
+        knowledgeService.uploadKnowledge(USER_A, "a.md", content, null);
+        List<Long> itemIds = knowledgeService.listMine(USER_A).stream()
+                .map(KnowledgeService.OwnedKnowledge::id).toList();
+        assertThat(itemIds).hasSize(2);
+
+        // 他人批量删除无效：静默跳过不报错
+        assertThat(knowledgeService.batchDeleteOwned(USER_B, itemIds)).isZero();
+        assertThat(knowledgeService.listMine(USER_A)).hasSize(2);
+
+        // 本人批量删除：混合他人/官方 id 也只删自己的
+        Long officialId = knowledgeService.listOfficial().get(0).id();
+        List<Long> mixed = new ArrayList<>(itemIds);
+        mixed.add(officialId);
+        mixed.add(999999L);
+        assertThat(knowledgeService.batchDeleteOwned(USER_A, mixed)).isEqualTo(2);
+        assertThat(knowledgeService.listMine(USER_A)).isEmpty();
+        assertThat(knowledgeService.listOfficial()).extracting(KnowledgeService.OwnedKnowledge::id)
+                .contains(officialId);
+
+        // 空列表安全
+        assertThat(knowledgeService.batchDeleteOwned(USER_A, List.of())).isZero();
     }
 
     @Test
