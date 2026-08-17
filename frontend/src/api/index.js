@@ -160,7 +160,9 @@ export const knowledgeApi = {
   // 迁移本人资料到指定分组：分组名可为已有标签或新建标签
   updateCategory: (id, category) => http.put(`/knowledge/${id}/category`, { category }),
   // 批量删除本人资料：后端仅删归属本人的 id，返回实际删除条数
-  batchRemove: (ids) => http.post('/knowledge/batch-delete', { ids })
+  batchRemove: (ids) => http.post('/knowledge/batch-delete', { ids }),
+  // 批量迁移本人资料到指定标签：标签名可为已有或新建，返回实际迁移条数
+  batchMove: (ids, category) => http.post('/knowledge/batch-move', { ids, category })
 }
 
 export const qaApi = {

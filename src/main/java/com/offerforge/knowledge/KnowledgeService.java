@@ -295,6 +295,25 @@ public class KnowledgeService {
     }
 
     /**
+     * 批量迁移本人条目到指定分组；非本人 id 静默跳过，返回实际迁移条数。
+     */
+    @Transactional
+    public int batchMoveOwned(Long userId, List<Long> ids, String category) {
+        if (ids == null || ids.isEmpty()) {
+            return 0;
+        }
+        String target = normalizeCategory(category);
+        List<KnowledgeItem> owned = repository.findByIdInAndOwnerUserId(ids, userId);
+        for (KnowledgeItem item : owned) {
+            item.setCategory(target);
+        }
+        repository.saveAll(owned);
+        log.info("knowledge batch moved userId={} requested={} moved={} category={}",
+                userId, ids.size(), owned.size(), target);
+        return owned.size();
+    }
+
+    /**
      * 可见分组视图：官方分组按固定顺序，自定义分组按首次上传顺序（排除与官方重名的分组）。
      */
     public CategoriesView visibleCategories(Long userId) {

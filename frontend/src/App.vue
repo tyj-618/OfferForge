@@ -26,7 +26,6 @@ const navItems = [
   { to: '/', label: '快捷提问', routes: ['qa'] },
   { to: '/history', label: '历史记录', routes: ['history', 'report'] },
   { to: '/resume', label: '简历', routes: ['resume'] },
-  { to: '/knowledge', label: '资料库', routes: ['knowledge'] },
   { to: '/library', label: '资源库', routes: ['library'] },
   { to: '/docs', label: '文档', routes: ['docs'] },
   { to: '/settings', label: '设置', routes: ['settings'] }

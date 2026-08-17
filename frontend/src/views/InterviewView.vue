@@ -634,7 +634,7 @@ function scrollDown() {
       <div class="category-row">
         <div class="category-head">
           <span class="muted">出题范围（可选，不勾选使用默认题库）：</span>
-          <RouterLink class="category-link" to="/knowledge">管理资料库 →</RouterLink>
+          <RouterLink class="category-link" to="/library">管理资源库 →</RouterLink>
         </div>
         <div v-if="categoryOptions.length" class="category-chips">
           <label v-for="opt in categoryOptions" :key="opt.name" class="chip-check">

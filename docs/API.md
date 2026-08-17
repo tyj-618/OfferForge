@@ -109,6 +109,14 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
 
 请求：`{ "category": "新标签" }`
 
+### POST /knowledge/batch-move
+
+批量迁移本人上传的资料到指定标签；仅迁移归属本人的条目，其余静默跳过；支持新建标签。
+
+请求：`{ "ids": [1, 2, 3], "category": "新标签" }`
+
+响应 data：`{ "moved": 3 }`
+
 ---
 
 ## 问答 `/api/qa`

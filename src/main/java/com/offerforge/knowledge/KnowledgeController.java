@@ -76,6 +76,18 @@ public class KnowledgeController {
         return ApiResponse.success(new BatchDeleteResult(deleted));
     }
 
+    /** 批量迁移本人上传的资料到指定标签；仅迁移归属本人的条目，返回实际迁移条数 */
+    @PostMapping("/batch-move")
+    public ApiResponse<BatchMoveResult> batchMove(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody BatchMoveRequest request) {
+        Long userId = currentUserService.requireUserId(authorization);
+        int moved = knowledgeService.batchMoveOwned(userId,
+                request == null ? null : request.ids(),
+                request == null ? null : request.category());
+        return ApiResponse.success(new BatchMoveResult(moved));
+    }
+
     /** 分组推荐：按简历技能关键词打分，resumeId 可空（默认最新简历） */
     @GetMapping("/recommend")
     public ApiResponse<List<String>> recommend(
@@ -139,6 +151,12 @@ public class KnowledgeController {
     }
 
     public record BatchDeleteResult(int deleted) {
+    }
+
+    public record BatchMoveRequest(List<Long> ids, String category) {
+    }
+
+    public record BatchMoveResult(int moved) {
     }
 
     public record CategoryUpdateRequest(String category) {

@@ -189,6 +189,37 @@ class KnowledgeOwnershipTests {
     }
 
     @Test
+    void batchMoveOnlyMovesOwnedItems() {
+        String content = """
+                Q: 私有题：分布式锁如何实现？
+                A: Redis SETNX 或 Zookeeper 临时节点。
+
+                Q: 私有题：什么是缓存雪崩？
+                A: 大量 key 同时失效或缓存服务宕机。
+                """;
+        knowledgeService.uploadKnowledge(USER_A, "a.md", content, null);
+        List<Long> itemIds = knowledgeService.listMine(USER_A).stream()
+                .map(KnowledgeService.OwnedKnowledge::id).toList();
+
+        // 他人批量迁移无效：静默跳过，条目分组不变
+        assertThat(knowledgeService.batchMoveOwned(USER_B, itemIds, "新标签")).isZero();
+        assertThat(knowledgeService.listMine(USER_A))
+                .allSatisfy(item -> assertThat(item.category())
+                        .isEqualTo(KnowledgeService.DEFAULT_CUSTOM_CATEGORY));
+
+        // 本人批量迁移：混合官方/不存在 id 也只迁自己的，且支持新建标签
+        Long officialId = knowledgeService.listOfficial().get(0).id();
+        List<Long> mixed = new ArrayList<>(itemIds);
+        mixed.add(officialId);
+        mixed.add(999999L);
+        assertThat(knowledgeService.batchMoveOwned(USER_A, mixed, "批量新标签")).isEqualTo(2);
+        assertThat(knowledgeService.listMine(USER_A))
+                .allSatisfy(item -> assertThat(item.category()).isEqualTo("批量新标签"));
+        assertThat(knowledgeService.listOfficial()).extracting(KnowledgeService.OwnedKnowledge::id)
+                .contains(officialId);
+    }
+
+    @Test
     void recommendCategoriesScoresByResumeKeywords() {
         resumeService.save(USER_A, new ResumeRequest(null, "张三", null,
                 "Java 并发编程、MySQL 索引优化、Redis 缓存、Spring Boot 微服务", null, null, null, null));

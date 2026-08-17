@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { knowledgeApi } from '../api'
 import { notifyError } from '../utils/errors'
 import { toast } from '../toast'
+import UploadModal from '../components/UploadModal.vue'
 
 // 资源库：官方/我的双标签浏览，分组筛选 + 关键词搜索；仅「我的」可勾选批量删除
 const tab = ref('official') // 'official' | 'mine'
@@ -21,6 +22,17 @@ const moveCategory = ref('')
 const moveNewName = ref('')
 const moving = ref(false)
 const categoryOptions = ref([])
+
+// 上传资源小窗与官方题库导入
+const uploadOpen = ref(false)
+const importingOfficial = ref(false)
+const customCategoryList = ref([])
+
+// 批量迁移：选中条目一并迁到指定标签（可新建）
+const batchMoveOpen = ref(false)
+const batchMoveCategory = ref('')
+const batchMoveNewName = ref('')
+const batchMoving = ref(false)
 
 const currentItems = computed(() => (tab.value === 'official' ? officialItems.value : myItems.value))
 
@@ -76,9 +88,32 @@ async function loadCategoryOptions() {
   try {
     const view = await knowledgeApi.categories()
     categoryOptions.value = [...(view?.official || []), ...(view?.custom || [])]
+    customCategoryList.value = view?.custom || []
   } catch (e) {
     notifyError(e)
   }
+}
+
+// 官方题库导入：幂等，入口在官方标签空态处
+async function importOfficial() {
+  importingOfficial.value = true
+  try {
+    const summary = await knowledgeApi.importBuiltin()
+    toast.success(`官方题库导入完成：新增 ${summary.inserted} 题，已存在 ${summary.skipped} 题`)
+    await loadAll()
+  } catch (e) {
+    notifyError(e)
+  } finally {
+    importingOfficial.value = false
+  }
+}
+
+// 上传成功后刷新列表与分组候选，并切到「我的资料」便于查看新上传内容
+async function onUploaded() {
+  tab.value = 'mine'
+  activeCategory.value = ''
+  keyword.value = ''
+  await Promise.all([loadAll(), loadCategoryOptions()])
 }
 
 function switchTab(nextTab) {
@@ -155,6 +190,38 @@ async function batchRemove() {
   }
 }
 
+// 批量迁移：新建标签输入优先于下拉选择，空白标签由后端回落默认分组
+function toggleBatchMove() {
+  batchMoveOpen.value = !batchMoveOpen.value
+  if (batchMoveOpen.value) {
+    batchMoveCategory.value = ''
+    batchMoveNewName.value = ''
+  }
+}
+
+async function submitBatchMove() {
+  const target = batchMoveNewName.value.trim() || batchMoveCategory.value
+  if (!target) {
+    toast.info('请选择或输入目标标签')
+    return
+  }
+  if (!selectedIds.value.length) {
+    return
+  }
+  batchMoving.value = true
+  try {
+    const result = await knowledgeApi.batchMove(selectedIds.value, target)
+    toast.success(`已迁移 ${result.moved} 条资料到「${target}」`)
+    selectedIds.value = []
+    batchMoveOpen.value = false
+    await Promise.all([loadAll(), loadCategoryOptions()])
+  } catch (e) {
+    notifyError(e)
+  } finally {
+    batchMoving.value = false
+  }
+}
+
 // 打开/关闭迁移面板：默认选中当前分组，新建标签输入优先于下拉选择
 function openMove(item) {
   if (moveTargetId.value === item.id) {
@@ -198,7 +265,10 @@ onMounted(() => {
 
 <template>
   <div class="page">
-    <h1 class="page-title">资源库</h1>
+    <div class="page-head">
+      <h1 class="page-title">资源库</h1>
+      <button type="button" class="pick-file-btn" @click="uploadOpen = true">⬆ 上传资源</button>
+    </div>
 
     <!-- 标签：官方资料 / 我的资料 -->
     <div class="tabs" role="tablist">
@@ -263,6 +333,14 @@ onMounted(() => {
         <span class="muted">已选 {{ selectedIds.length }} 条</span>
         <button
           type="button"
+          class="ghost"
+          :disabled="!selectedIds.length || batchMoving"
+          @click="toggleBatchMove"
+        >
+          {{ batchMoveOpen ? '收起迁移' : `批量迁移（${selectedIds.length}）` }}
+        </button>
+        <button
+          type="button"
           class="ghost danger-text"
           :disabled="!selectedIds.length || deleting"
           @click="batchRemove"
@@ -271,14 +349,43 @@ onMounted(() => {
         </button>
       </div>
 
+      <!-- 批量迁移面板：选已有标签或输入新建标签（新建优先） -->
+      <div v-if="tab === 'mine' && batchMoveOpen" class="move-panel batch-move-panel">
+        <span class="move-label">批量迁移到标签：</span>
+        <select v-model="batchMoveCategory" class="move-select" :disabled="batchMoving">
+          <option value="" disabled>选择已有标签</option>
+          <option v-for="name in categoryOptions" :key="name" :value="name">{{ name }}</option>
+        </select>
+        <input
+          v-model="batchMoveNewName"
+          class="move-input"
+          maxlength="64"
+          placeholder="或输入新标签名（优先生效）"
+          :disabled="batchMoving"
+        />
+        <button type="button" :disabled="batchMoving || !selectedIds.length" @click="submitBatchMove">
+          {{ batchMoving ? '迁移中…' : '确认迁移' }}
+        </button>
+      </div>
+
       <!-- 条目列表：点击题面展开答案 -->
       <div v-if="loading" class="muted">加载中…</div>
-      <div v-else-if="!filteredItems.length" class="muted empty-tip">
-        {{ currentItems.length ? '没有符合筛选条件的资料' : (tab === 'official' ? '官方题库尚未导入，请到资料库页一键导入' : '暂无上传资料，请到资料库页上传') }}
+      <div v-else-if="!filteredItems.length" class="empty-tip">
+        <template v-if="currentItems.length">没有符合筛选条件的资料</template>
+        <template v-else-if="tab === 'official'">
+          <p class="muted">官方题库尚未导入，点击下方按钮一键导入。</p>
+          <button type="button" :disabled="importingOfficial" @click="importOfficial">
+            {{ importingOfficial ? '导入中…' : '导入官方题库' }}
+          </button>
+        </template>
+        <template v-else>
+          <p class="muted">暂无上传资料，点击右上角「上传资源」添加。</p>
+        </template>
       </div>
       <div v-else class="item-list">
         <div v-for="item in filteredItems" :key="item.id" class="item">
           <div class="item-head" @click="toggleExpand(item)">
+            <!-- 勾选框固定在最左侧头部，其余内容在 item-main 内自由换行 -->
             <input
               v-if="tab === 'mine'"
               type="checkbox"
@@ -287,12 +394,14 @@ onMounted(() => {
               @click.stop
               @change="toggleSelect(item.id)"
             />
-            <span class="item-question">{{ item.question }}</span>
-            <span class="badges">
-              <span class="badge">{{ item.category }}</span>
-              <span v-if="item.difficulty" class="badge outline">{{ item.difficulty }}</span>
-            </span>
-            <span class="expand-icon">{{ expandedId === item.id ? '▲' : '▼' }}</span>
+            <div class="item-main">
+              <span class="item-question">{{ item.question }}</span>
+              <span class="badges">
+                <span class="badge">{{ item.category }}</span>
+                <span v-if="item.difficulty" class="badge outline">{{ item.difficulty }}</span>
+              </span>
+              <span class="expand-icon">{{ expandedId === item.id ? '▲' : '▼' }}</span>
+            </div>
           </div>
           <div v-if="expandedId === item.id" class="item-body">
             <pre class="answer-block">{{ item.answer }}</pre>
@@ -323,10 +432,36 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- 上传资源小窗 -->
+    <UploadModal
+      v-if="uploadOpen"
+      :custom-categories="customCategoryList"
+      @close="uploadOpen = false"
+      @uploaded="onUploaded"
+    />
   </div>
 </template>
 
 <style scoped>
+/* 页头：标题居左，右上角「上传资源」主按钮 */
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.page-head .page-title {
+  margin: 0;
+}
+
+.pick-file-btn {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+}
+
 .tabs {
   display: flex;
   gap: 8px;
@@ -415,6 +550,11 @@ onMounted(() => {
 .empty-tip {
   padding: 28px 0;
   text-align: center;
+  color: var(--text-light);
+}
+
+.empty-tip p {
+  margin: 0 0 10px;
 }
 
 .item-list {
@@ -431,11 +571,22 @@ onMounted(() => {
 .item-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  /* 头部顶对齐：勾选框始终钉在行首左上角 */
+  align-items: flex-start;
   gap: 10px;
   padding: 12px 4px;
   cursor: pointer;
   min-width: 0;
+}
+
+/* 勾选框之外的全部内容：在右侧区域自由换行，不影响勾选框位置 */
+.item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }
 
 .item-head:hover {
@@ -520,6 +671,12 @@ onMounted(() => {
   background: #fff;
   border: 1px dashed var(--primary);
   border-radius: 10px;
+}
+
+/* 批量迁移面板位于批量操作栏下方，需要额外底边距 */
+.batch-move-panel {
+  margin-top: 0;
+  margin-bottom: 12px;
 }
 
 .move-label {

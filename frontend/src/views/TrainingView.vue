@@ -290,7 +290,7 @@ function scrollDown() {
           <span class="muted category-tag">{{ opt.official ? '官方题库' : '我的资料' }}</span>
         </button>
       </div>
-      <p v-else class="muted">暂无可用分组，请先前往 <RouterLink to="/knowledge">资料库</RouterLink> 导入官方题库或上传资料。</p>
+      <p v-else class="muted">暂无可用分组，请先前往 <RouterLink to="/library">资源库</RouterLink> 导入官方题库或上传资料。</p>
       <p v-if="error" class="error-text">{{ error }}</p>
 
       <div v-if="records.length" class="recent-records">
