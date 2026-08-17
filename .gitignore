@@ -12,3 +12,5 @@ data/
 
 # 部署打包产物
 full-bundle.tar
+update-bundle.tar
+deploy-bundle.tar
