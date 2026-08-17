@@ -76,6 +76,8 @@ async function loadAll() {
     const [official, mine] = await Promise.all([knowledgeApi.official(), knowledgeApi.mine()])
     officialItems.value = official || []
     myItems.value = mine || []
+    // 列表刷新后清除迁移面板目标，防止残留状态串到其他条目上
+    moveTargetId.value = null
   } catch (e) {
     notifyError(e)
   } finally {
@@ -134,7 +136,17 @@ function pickCategory(category) {
 }
 
 function toggleExpand(item) {
+  // 收起条目时同步关闭其迁移面板，避免面板目标残留串到下一条
+  if (expandedId.value === item.id && moveTargetId.value === item.id) {
+    moveTargetId.value = null
+  }
   expandedId.value = expandedId.value === item.id ? null : item.id
+}
+
+// 迁移面板标题：截断题面，让用户明确当前正在迁移哪条资料
+function moveTitle(item) {
+  const text = item.question || ''
+  return text.length > 24 ? text.slice(0, 24) + '…' : text
 }
 
 function toggleSelect(id) {
@@ -234,6 +246,11 @@ function openMove(item) {
 }
 
 async function submitMove(item) {
+  // 兼容兼保护：面板目标与当前条目不一致时直接重置，绝不迁错条目
+  if (moveTargetId.value !== item.id) {
+    moveTargetId.value = null
+    return
+  }
   const target = moveNewName.value.trim() || moveCategory.value
   if (!target) {
     toast.info('请选择或输入目标标签')
@@ -411,9 +428,9 @@ onMounted(() => {
               </button>
               <button type="button" class="ghost danger-text" @click="removeOne(item)">删除</button>
             </div>
-            <!-- 迁移面板：选已有标签或输入新建标签（新建优先） -->
+            <!-- 迁移面板：标题展示目标条目题面，选已有标签或输入新建标签（新建优先） -->
             <div v-if="tab === 'mine' && moveTargetId === item.id" class="move-panel">
-              <span class="move-label">迁移到标签：</span>
+              <span class="move-title">迁移「{{ moveTitle(item) }}」到标签：</span>
               <select v-model="moveCategory" class="move-select" :disabled="moving">
                 <option v-for="name in categoryOptions" :key="name" :value="name">{{ name }}</option>
               </select>
@@ -427,6 +444,7 @@ onMounted(() => {
               <button type="button" :disabled="moving" @click="submitMove(item)">
                 {{ moving ? '迁移中…' : '确认迁移' }}
               </button>
+              <button type="button" class="ghost" :disabled="moving" @click="moveTargetId = null">取消</button>
             </div>
           </div>
         </div>
@@ -682,6 +700,13 @@ onMounted(() => {
 .move-label {
   font-size: 13px;
   color: var(--text-light);
+}
+
+/* 迁移面板标题：显示目标条目题面，明确当前操作对象 */
+.move-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .move-select {
