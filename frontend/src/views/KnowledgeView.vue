@@ -136,10 +136,29 @@ onMounted(loadAll)
     <!-- 上传资料 -->
     <div class="card">
       <h2>上传我的资料</h2>
-      <p class="muted">
-        支持 Markdown / TXT 文件（≤1MB），自动按问答对切分入库，仅本人可见。格式一：Q:/问: 为题面、A:/答:
-        为参考答案；格式二：Markdown 标题为题面、标题间正文为答案。
-      </p>
+      <p class="muted">支持 Markdown / TXT 文件（≤1MB），自动按问答对切分入库，仅本人可见。支持以下两种格式：</p>
+      <div class="format-grid">
+        <div class="format-card">
+          <div class="format-title">格式一：Q:/A: 标记</div>
+          <p class="muted">Q: 或 问: 开头的行为题面，A: 或 答: 开头的行为参考答案。</p>
+          <pre class="format-example">Q: TCP 三次握手的作用？
+A: 建立可靠连接并同步双方初始序号…
+
+问: Redis 为什么快？
+答: 基于内存操作，单线程避免锁竞争…</pre>
+        </div>
+        <div class="format-card">
+          <div class="format-title">格式二：Markdown 标题</div>
+          <p class="muted">Markdown 标题（# 开头）为题面，标题之间的正文为答案。</p>
+          <pre class="format-example"># TCP 三次握手的作用？
+
+建立可靠连接并同步双方初始序号…
+
+# Redis 为什么快？
+
+基于内存操作，单线程避免锁竞争…</pre>
+        </div>
+      </div>
       <div class="upload-row">
         <button type="button" class="ghost" @click="pickFile">
           {{ selectedFile ? selectedFile.name : '选择文件（.md / .txt）' }}
@@ -227,6 +246,44 @@ onMounted(loadAll)
   margin-top: 12px;
 }
 
+/* 上传格式说明：两种格式并列卡片，各自带示例，避免一段式文字难以分辨 */
+.format-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.format-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fafbff;
+}
+
+.format-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.format-card p {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.format-example {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-light);
+}
+
 .file-hidden {
   display: none;
 }
@@ -270,6 +327,10 @@ onMounted(loadAll)
   .upload-row {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .format-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
