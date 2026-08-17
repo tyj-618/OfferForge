@@ -45,11 +45,12 @@ class FollowUpStrategyTests {
 
     @Test
     void promptCarriesOriginalQuestionAndEvaluationFindings() {
-        String prompt = strategy.buildPrompt("HashMap 的原理？",
+        String prompt = strategy.buildPrompt("HashMap 的原理？", "只知道是数组存的",
                 List.of("hash 冲突解决"), List.of("链表不会转红黑树"));
 
         assertThat(prompt).contains("<task>followup-gen</task>");
         assertThat(prompt).contains("HashMap 的原理？");
+        assertThat(prompt).contains("候选人回答预览：只知道是数组存的");
         assertThat(prompt).contains("hash 冲突解决");
         assertThat(prompt).contains("链表不会转红黑树");
         assertThat(prompt).contains("换一个新角度").contains("难度比原题略低");
@@ -57,7 +58,7 @@ class FollowUpStrategyTests {
 
     @Test
     void generatedFollowUpKeepsSameKnowledgePoint() {
-        String followUp = strategy.generateFollowUpQuestion("HashMap 的原理？",
+        String followUp = strategy.generateFollowUpQuestion("HashMap 的原理？", "只知道是数组存的",
                 List.of("hash 冲突解决"), List.of());
 
         assertThat(followUp).contains("HashMap 的原理？").contains("换个角度");
@@ -67,7 +68,7 @@ class FollowUpStrategyTests {
     void fallsBackToConcreteQuestionWhenModelReturnsBlank() {
         FollowUpStrategy fallback = new FollowUpStrategy(properties, new BlankClient());
 
-        String followUp = fallback.generateFollowUpQuestion("线程池参数如何设置？", List.of(), List.of());
+        String followUp = fallback.generateFollowUpQuestion("线程池参数如何设置？", null, List.of(), List.of());
         assertThat(followUp).contains("线程池参数如何设置？").contains("实际场景");
     }
 

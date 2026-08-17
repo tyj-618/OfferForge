@@ -10,24 +10,31 @@ import com.offerforge.interview.QuestionRecord;
 import com.offerforge.knowledge.KnowledgeService;
 import com.offerforge.knowledge.RetrievedKnowledge;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 
+import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * 报告生成单元测试：维度/阶段均分统计、亮点与薄弱点识别、推荐材料与知识库关联。
+ * 报告生成单元测试：维度/阶段均分统计、亮点与薄弱点识别、推荐材料与知识库关联、进步曲线。
  */
 class ReportServiceTests {
 
     private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
+    private final InterviewSessionRepository sessionRepository = mock(InterviewSessionRepository.class);
     private final ReportService reportService = new ReportService(
             new MockAiModelClient(), knowledgeService,
-            mock(InterviewService.class), mock(InterviewSessionRepository.class),
+            mock(InterviewService.class), sessionRepository,
             new ObjectMapper().findAndRegisterModules());
 
     @Test
@@ -70,7 +77,7 @@ class ReportServiceTests {
 
     @Test
     void recommendedMaterialsLinkWeakKnowledgePointsToKnowledgeBase() {
-        when(knowledgeService.search("线程池参数", 1)).thenReturn(List.of(
+        when(knowledgeService.search(eq(1L), eq("线程池参数"), eq(1))).thenReturn(List.of(
                 new RetrievedKnowledge(1L, "线程池的核心参数有哪些，如何设置？", "答案", "并发", 0.9)));
         InterviewContext context = sampleContext();
 
@@ -86,7 +93,7 @@ class ReportServiceTests {
 
     @Test
     void recommendedMaterialFallsBackToWeakQuestionWhenSearchEmpty() {
-        when(knowledgeService.search(anyString(), anyInt())).thenReturn(List.of());
+        when(knowledgeService.search(anyLong(), anyString(), anyInt())).thenReturn(List.of());
         InterviewContext context = sampleContext();
 
         InterviewReport report = reportService.generate(context);
@@ -104,6 +111,52 @@ class ReportServiceTests {
         assertThat(reportService.rating(69.9)).isEqualTo("及格");
         assertThat(reportService.rating(60.0)).isEqualTo("及格");
         assertThat(reportService.rating(59.9)).isEqualTo("需努力");
+    }
+
+    @Test
+    void progressReversesDescQueryToChronologicalOrder() {
+        // 仓储按开始时间倒序返回，progress 需反转为时间正序供前端直接绘制
+        when(sessionRepository.findByUserIdOrderByStartTimeDesc(eq(1L), org.mockito.ArgumentMatchers.any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(
+                        session("s2", Instant.parse("2026-08-02T10:00:00Z"), 70.0),
+                        session("s1", Instant.parse("2026-08-01T10:00:00Z"), 60.0))));
+
+        List<InterviewProgressPoint> points = reportService.progress(1L, 10);
+
+        assertThat(points).hasSize(2);
+        assertThat(points.get(0).interviewId()).isEqualTo("s1");
+        assertThat(points.get(0).overallScore()).isEqualTo(60.0);
+        assertThat(points.get(1).interviewId()).isEqualTo("s2");
+        assertThat(points.get(1).overallScore()).isEqualTo(70.0);
+    }
+
+    @Test
+    void progressCapsLimitToRequestedSize() {
+        when(sessionRepository.findByUserIdOrderByStartTimeDesc(eq(1L), org.mockito.ArgumentMatchers.any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(session("s1", Instant.parse("2026-08-02T10:00:00Z"), 80.0))));
+
+        List<InterviewProgressPoint> points = reportService.progress(1L, 1);
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        org.mockito.Mockito.verify(sessionRepository).findByUserIdOrderByStartTimeDesc(eq(1L), pageable.capture());
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(1);
+        assertThat(points).hasSize(1);
+    }
+
+    @Test
+    void progressIsEmptyWhenNoArchivedSession() {
+        when(sessionRepository.findByUserIdOrderByStartTimeDesc(eq(1L), org.mockito.ArgumentMatchers.any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        assertThat(reportService.progress(1L, 10)).isEmpty();
+    }
+
+    private static InterviewSession session(String sessionId, Instant startTime, double overallScore) {
+        InterviewSession entity = new InterviewSession();
+        entity.setSessionId(sessionId);
+        entity.setStartTime(startTime);
+        entity.setOverallScore(overallScore);
+        return entity;
     }
 
     @Test

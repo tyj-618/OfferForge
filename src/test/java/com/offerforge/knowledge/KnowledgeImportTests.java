@@ -29,10 +29,10 @@ class KnowledgeImportTests {
     void importLoadsAllBuiltinQuestions() {
         KnowledgeService.ImportSummary summary = knowledgeService.importBuiltinKnowledge();
 
-        assertThat(summary.total()).isEqualTo(50);
-        assertThat(summary.inserted()).isEqualTo(50);
+        assertThat(summary.total()).isEqualTo(64);
+        assertThat(summary.inserted()).isEqualTo(64);
         assertThat(summary.skipped()).isZero();
-        assertThat(knowledgeRepository.count()).isEqualTo(50);
+        assertThat(knowledgeRepository.count()).isEqualTo(64);
 
         List<KnowledgeItem> items = knowledgeRepository.findAll();
         assertThat(items).allSatisfy(item -> {
@@ -43,7 +43,9 @@ class KnowledgeImportTests {
             assertThat(item.getId()).isNotNull();
         });
         assertThat(items).extracting(KnowledgeItem::getCategory)
-                .contains("Java并发", "MySQL", "Redis", "Spring");
+                .contains("Java并发", "MySQL", "Redis", "Spring", "Spring Boot", "算法");
+        // 内置题库归属官方：owner 恒为 NULL
+        assertThat(items).allSatisfy(item -> assertThat(item.getOwnerUserId()).isNull());
     }
 
     @Test
@@ -52,7 +54,7 @@ class KnowledgeImportTests {
         KnowledgeService.ImportSummary second = knowledgeService.importBuiltinKnowledge();
 
         assertThat(second.inserted()).isZero();
-        assertThat(second.skipped()).isEqualTo(50);
-        assertThat(knowledgeRepository.count()).isEqualTo(50);
+        assertThat(second.skipped()).isEqualTo(64);
+        assertThat(knowledgeRepository.count()).isEqualTo(64);
     }
 }

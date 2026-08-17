@@ -33,7 +33,8 @@ function scoreClass(score) {
 }
 
 function renderTrend() {
-  if (!trendEl.value) {
+  // 单点无法形成趋势线，由模板展示友好提示，不初始化图表
+  if (!trendEl.value || progressPoints.value.length < 2) {
     return
   }
   if (!trendChart) {
@@ -110,7 +111,10 @@ onBeforeUnmount(() => {
     <template v-else>
       <div class="card section">
         <h2>评分趋势（最近 10 次）</h2>
-        <div v-if="progressPoints.length" ref="trendEl" class="trend"></div>
+        <div v-if="progressPoints.length >= 2" ref="trendEl" class="trend"></div>
+        <p v-else-if="progressPoints.length === 1" class="empty">
+          已完成 1 次面试，再完成至少 1 次即可展示评分趋势
+        </p>
         <p v-else class="empty">暂无面试记录，先去「模拟面试」完成一场吧</p>
       </div>
 

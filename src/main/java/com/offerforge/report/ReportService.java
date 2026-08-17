@@ -174,7 +174,7 @@ public class ReportService {
 
         List<QuestionRecord> weakQuestions = weakQuestions(mains);
         fillSummary(report, context, mains, weakQuestions);
-        report.setRecommendedMaterials(buildMaterials(weakQuestions));
+        report.setRecommendedMaterials(buildMaterials(context.getUserId(), weakQuestions));
         log.info("report generated sessionId={} questions={} overallScore={} rating={}",
                 context.getSessionId(), report.getTotalQuestions(), report.getOverallScore(), report.getRating());
         return report;
@@ -273,9 +273,9 @@ public class ReportService {
     }
 
     /**
-     * 推荐材料：薄弱知识点去重后从知识库检索练习题；检索为空时用薄弱题本身兜底。
+     * 推荐材料：薄弱知识点去重后从知识库检索练习题（仅官方 + 本人私有）；检索为空时用薄弱题本身兜底。
      */
-    private List<RecommendedMaterial> buildMaterials(List<QuestionRecord> weakQuestions) {
+    private List<RecommendedMaterial> buildMaterials(Long userId, List<QuestionRecord> weakQuestions) {
         Set<String> topics = new LinkedHashSet<>();
         for (QuestionRecord record : weakQuestions) {
             if (record.getKnowledgePoint() != null && !record.getKnowledgePoint().isBlank()
@@ -291,7 +291,7 @@ public class ReportService {
                     .orElse(null);
             String suggested = null;
             try {
-                List<RetrievedKnowledge> results = knowledgeService.search(topic, 1);
+                List<RetrievedKnowledge> results = knowledgeService.search(userId, topic, 1);
                 if (!results.isEmpty()) {
                     suggested = results.get(0).question();
                 }

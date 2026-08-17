@@ -129,6 +129,23 @@ class InterviewFlowIntegrationTests {
     }
 
     @Test
+    void askEmitsProgressFramesBeforeMessageFrames() throws Exception {
+        String token = newUser();
+        assertCode(post("/api/knowledge/import", token, Map.of()), 0);
+        String sessionId = post("/api/interview/start", token, Map.of()).at("/data/sessionId").asText();
+
+        // 首轮（OPENING→BASICS）：出题前即下发状态帧，且先于任何对话内容帧
+        String sse1 = ask(sessionId, token, "自我介绍：熟悉 Java。");
+        assertThat(sse1).contains("event:progress").contains("正在准备下一题…");
+        assertThat(sse1.indexOf("event:progress")).isLessThan(sse1.indexOf("event:message"));
+
+        // 评估轮：评估是长阻塞 LLM 调用，评估状态帧先于追问/下一题内容帧
+        String sse2 = ask(sessionId, token, LONG_ANSWER);
+        assertThat(sse2).contains("正在评估你的回答…");
+        assertThat(sse2.indexOf("正在评估你的回答…")).isLessThan(sse2.indexOf("event:message"));
+    }
+
+    @Test
     void interviewEndpointsEnforceAuthAndOwnership() throws Exception {
         assertCode(post("/api/interview/start", null, Map.of()), 40100);
 
@@ -163,17 +180,19 @@ class InterviewFlowIntegrationTests {
         assertThat(start.at("/data/status/mode").asText()).isEqualTo("training");
         ask(sessionId, token, "自我介绍：熟悉 Java。");
 
-        // 低分 → FOLLOW_UP 暂存：不流式追问话术，done 携带详细评估，status 标记 followUpChoiceRequired
+        // 低分 → FOLLOW_UP：先流导师反馈气泡（segment 分段）再流追问话术，done 携带详细评估
         String sse1 = ask(sessionId, token, "嗯。");
         assertThat(sse1).contains("\"score\":3").contains("\"action\":\"FOLLOW_UP\"")
-                .doesNotContain("模拟追问")
-                .contains("\"followUpChoiceRequired\":true")
+                .contains("【导师反馈】").contains("模拟追问")
+                .contains("\"followUpChoiceRequired\":false")
                 .contains("\"goodPoints\"").contains("\"improvedAnswer\"");
+        // 消息顺序：导师反馈在前，追问（下一题）在后
+        assertThat(sse1.indexOf("【导师反馈】")).isLessThan(sse1.indexOf("模拟追问"));
         JsonNode status1 = get("/api/interview/" + sessionId + "/status", token);
-        assertThat(status1.at("/data/followUpsUsed").asInt()).isZero();
-        assertThat(status1.at("/data/followUpChoiceRequired").asBoolean()).isTrue();
+        assertThat(status1.at("/data/followUpsUsed").asInt()).isEqualTo(1);
+        assertThat(status1.at("/data/currentQuestionFollowUp").asBoolean()).isTrue();
 
-        // “深度训练”：进入子流程并发出第 1 道递进题，暂存追问丢弃
+        // “深度训练”：用户主动进入子流程并发出第 1 道递进题
         String sse2 = ssePost("/api/interview/" + sessionId + "/deep-training", token);
         assertThat(sse2).contains("深度训练").contains("event:done");
         JsonNode status2 = get("/api/interview/" + sessionId + "/status", token);
@@ -208,7 +227,7 @@ class InterviewFlowIntegrationTests {
         String sessionId = post("/api/interview/start", token, Map.of("mode", "training"))
                 .at("/data/sessionId").asText();
         ask(sessionId, token, "自我介绍：熟悉 Java。");
-        // 低分触发追问暂存后进入深度训练
+        // 低分触发追问后，用户主动进入深度训练
         ask(sessionId, token, "嗯。");
         ssePost("/api/interview/" + sessionId + "/deep-training", token);
 
@@ -221,6 +240,24 @@ class InterviewFlowIntegrationTests {
 
         // 非深度训练状态再次退出 → error 事件
         assertThat(ssePost("/api/interview/" + sessionId + "/deep-training/exit", token)).contains("event:error");
+    }
+
+    @Test
+    void trainingModeStreamsMentorFeedbackBeforeNextQuestion() throws Exception {
+        String token = newUser();
+        assertCode(post("/api/knowledge/import", token, Map.of()), 0);
+        String sessionId = post("/api/interview/start", token, Map.of("mode", "training"))
+                .at("/data/sessionId").asText();
+        ask(sessionId, token, "自我介绍：熟悉 Java。");
+
+        // 高分 → 阶段题量已满推进：导师反馈气泡先流，segment 分段后再流下一阶段新题
+        String sse = ask(sessionId, token, LONG_ANSWER);
+        assertThat(sse).contains("【导师反馈】").contains("模拟面试官").contains("event:segment")
+                .contains("\"score\":8").contains("\"action\":\"ADVANCE\"").contains("\"state\":\"PROJECT\"");
+        assertThat(sse.indexOf("【导师反馈】")).isLessThan(sse.indexOf("模拟面试官"));
+        // 导师反馈不含评分字样（人性化点评不透露分数）
+        String mentorFrame = sse.substring(sse.indexOf("【导师反馈】"), sse.indexOf("模拟面试官"));
+        assertThat(mentorFrame).doesNotContain("得分").doesNotContain("评分");
     }
 
     @Test

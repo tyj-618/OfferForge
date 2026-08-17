@@ -1,5 +1,5 @@
-# OfferForge 生产部署 Compose（与现有项目共用 MySQL/Redis/ES）
-# 只部署 OfferForge 独有的服务：Spring Boot 后端 + Nginx 前端
+# Easy Offer Forge 生产部署 Compose（与现有项目共用 MySQL/Redis/ES）
+# 只部署 Easy Offer Forge 独有的服务：Spring Boot 后端 + Nginx 前端
 # 后端加入现有中间件所在的 Docker 网络（MIDDLEWARE_NETWORK），直接用容器名访问；
 # 若中间件直接跑在宿主机上，可将 .env 中各 HOST 改为 host.docker.internal（extra_hosts 已声明）
 # 启动：docker compose -f docker-compose.prod.yml up -d --build

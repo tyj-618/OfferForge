@@ -26,6 +26,9 @@ offerforge:
     max-deep-questions: 1
     max-follow-ups: 2
     message-window: 12
+  training:
+    # 测试用小容量配置，便于快速走完专项训练流程
+    max-questions: 3
   rate-limit:
     # 集成测试同用户会连续多场面试，放宽限额避免误伤；限流行为由 RateLimitIntegrationTests 专项验证
     interview-ask-limit: 1000

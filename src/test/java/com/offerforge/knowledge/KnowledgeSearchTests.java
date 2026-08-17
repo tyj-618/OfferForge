@@ -31,7 +31,7 @@ class KnowledgeSearchTests {
 
     @Test
     void keywordFallbackFindsHashMapQuestion() {
-        List<RetrievedKnowledge> results = knowledgeService.search("HashMap 的底层原理是什么", 5);
+        List<RetrievedKnowledge> results = knowledgeService.search(1L, "HashMap 的底层原理是什么", 5);
 
         assertThat(results).isNotEmpty();
         assertThat(results.get(0).question()).contains("HashMap");
@@ -41,7 +41,7 @@ class KnowledgeSearchTests {
 
     @Test
     void keywordFallbackFindsCacheAvalancheQuestion() {
-        List<RetrievedKnowledge> results = knowledgeService.search("缓存雪崩怎么解决", 5);
+        List<RetrievedKnowledge> results = knowledgeService.search(1L, "缓存雪崩怎么解决", 5);
 
         assertThat(results).isNotEmpty();
         assertThat(results.get(0).question()).contains("缓存");
@@ -49,13 +49,13 @@ class KnowledgeSearchTests {
 
     @Test
     void blankQueryReturnsEmpty() {
-        assertThat(knowledgeService.search("   ", 5)).isEmpty();
-        assertThat(knowledgeService.search(null, 5)).isEmpty();
+        assertThat(knowledgeService.search(1L, "   ", 5)).isEmpty();
+        assertThat(knowledgeService.search(1L, null, 5)).isEmpty();
     }
 
     @Test
     void searchRespectsLimit() {
-        List<RetrievedKnowledge> results = knowledgeService.search("线程", 3);
+        List<RetrievedKnowledge> results = knowledgeService.search(1L, "线程", 3);
 
         assertThat(results.size()).isLessThanOrEqualTo(3);
     }

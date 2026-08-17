@@ -348,5 +348,103 @@
     "difficulty": "MEDIUM",
     "tags": ["工厂模式", "策略模式", "模板方法", "观察者"],
     "answer": "常见落地：1) 工厂模式——Spring BeanFactory，或根据支付渠道类型创建对应支付处理器，消除 if-else；2) 策略模式——多种排序/计价/风控算法实现同一接口，运行时按配置切换；3) 模板方法——AbstractQueuedSynchronizer、JdbcTemplate，固定流程骨架，子类实现差异步骤；4) 观察者——Spring 事件机制 ApplicationEvent，业务解耦（注册成功后发邮件/发券）；5) 装饰器——Java IO 流、MyBatis Cache；6) 代理——Spring AOP、MyBatis Mapper。回答要点：说清模式解决什么问题、项目中具体位置与收益。"
+  },
+  {
+    "question": "Spring Boot 的自动装配原理是什么？",
+    "category": "Spring Boot",
+    "difficulty": "MEDIUM",
+    "tags": ["自动装配", "@SpringBootApplication", "条件装配"],
+    "answer": "@SpringBootApplication 组合了 @EnableAutoConfiguration，通过 @Import(AutoConfigurationImportSelector.class) 读取 META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports（旧版为 spring.factories）中的自动配置类清单。每个配置类用 @Conditional 系列条件注解（@ConditionalOnClass、@ConditionalOnMissingBean、@ConditionalOnProperty 等）判断是否生效，结合 @EnableConfigurationProperties 把 application.yaml 配置绑定为属性对象，实现约定优于配置：引入 starter 依赖即自动装配对应组件，用户可用自己的 Bean 或配置覆盖默认行为。"
+  },
+  {
+    "question": "Spring Boot 中 Starter 的作用是什么？自定义 Starter 的步骤？",
+    "category": "Spring Boot",
+    "difficulty": "MEDIUM",
+    "tags": ["Starter", "依赖聚合", "自定义装配"],
+    "answer": "Starter 是一组依赖与自动配置的聚合包：引入一个 starter 就能获得某功能所需的全部依赖和默认装配（如 spring-boot-starter-web 含 MVC、内嵌 Tomcat、JSON 支持）。自定义步骤：1) 建 xxx-spring-boot-autoconfigure 模块写功能代码与 @AutoConfiguration 配置类，用 @ConditionalOnXxx 控制生效、@ConfigurationProperties 暴露可配置项；2) 在 META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports 登记配置类全限定名；3) 建 xxx-spring-boot-starter 模块仅做依赖聚合（pom 依赖 autoconfigure 模块）；4) 发布后使用方引入 starter 即自动生效。"
+  },
+  {
+    "question": "Spring Boot 应用的配置加载优先级是怎样的？多环境配置如何管理？",
+    "category": "Spring Boot",
+    "difficulty": "EASY",
+    "tags": ["配置优先级", "profile", "application.yaml"],
+    "answer": "优先级从高到低（常用）：命令行参数 > JAVA_OPTS/JVM 系统属性 > 操作系统环境变量 > application-{profile}.yaml > application.yaml > @PropertySource 默认值；jar 包外部配置优先于包内。同一配置源内属性名精确匹配优先于宽松绑定。多环境管理：用 spring.profiles.active 指定环境（dev/test/prod），application-{profile}.yaml 写差异配置，公共配置放 application.yaml；生产建议敏感值用环境变量或配置中心注入，不落代码库。"
+  },
+  {
+    "question": "Spring Boot 如何实现全局异常处理与参数校验？",
+    "category": "Spring Boot",
+    "difficulty": "EASY",
+    "tags": ["全局异常", "@RestControllerAdvice", "参数校验"],
+    "answer": "全局异常：用 @RestControllerAdvice + @ExceptionHandler 按异常类型集中处理，统一返回错误码结构（如 {code, message, requestId}）；业务异常自定义 BusinessException 携带错误码，兜底 Exception 记日志返回通用错误避免堆栈外泄。参数校验：入参 DTO 加 Bean Validation 注解（@NotBlank、@Size、@Min、@Email 等），控制器方法参数加 @Valid/@Validated 触发校验，校验失败抛 MethodArgumentNotValidException，由全局异常处理器转成友好提示；分组校验用 @Validated(Group.class)。"
+  },
+  {
+    "question": "手撕：两数之和（数组中找和为 target 的两个数，返回下标）。",
+    "category": "算法",
+    "difficulty": "EASY",
+    "tags": ["数组", "哈希表", "两数之和"],
+    "answer": "参考实现要点：一次遍历 + HashMap。遍历到 nums[i] 时先查 map 中是否存在 complement = target - nums[i]，存在则返回两个下标；否则把 (nums[i], i) 存入 map。时间 O(n)，空间 O(n)。对比暴力双循环 O(n²)；排序双指针需额外记录原始下标且破坏输入。边界：无解返回空数组；同一元素不能用两次（先查后存天然规避）。"
+  },
+  {
+    "question": "手撕：反转单链表。",
+    "category": "算法",
+    "difficulty": "EASY",
+    "tags": ["链表", "反转链表", "迭代递归"],
+    "answer": "参考实现要点：迭代法三指针 prev/curr/next：每步先暂存 curr.next，再把 curr.next 指向 prev，然后 prev、curr 各前进一步，循环结束后 prev 即新头节点；时间 O(n)，空间 O(1)。递归法：reverse(head.next) 后令 head.next.next = head、head.next = null，空间 O(n) 栈开销。常考变体：反转区间 [m,n]、K 个一组反转（先计数再分组反转并拼接）。"
+  },
+  {
+    "question": "手撕：二分查找（有序数组中找目标值下标，不存在返回 -1）。",
+    "category": "算法",
+    "difficulty": "EASY",
+    "tags": ["二分查找", "有序数组", "边界"],
+    "answer": "参考实现要点：闭区间 [left, right]，循环条件 left <= right；mid = left + (right - left) / 2 防溢出；nums[mid] == target 返回 mid，小于目标 left = mid + 1，否则 right = mid - 1；出循环返回 -1。时间 O(logn)。易错点：区间开闭与更新方式必须配套；变体（第一个 >= target、最后一个 <= target）靠收缩边界 + 循环不变量推导，写完用 0/1/2 元素数组验证边界。"
+  },
+  {
+    "question": "手撕：爬楼梯（每次爬 1 或 2 阶，n 阶有多少种方法）。",
+    "category": "算法",
+    "difficulty": "EASY",
+    "tags": ["动态规划", "爬楼梯", "斐波那契"],
+    "answer": "参考实现要点：dp[i] = dp[i-1] + dp[i-2]，初始 dp[1]=1、dp[2]=2，本质斐波那契数列。用两个变量滚动实现，时间 O(n)、空间 O(1)。状态定义要讲清：到达第 i 阶的方法数 = 从 i-1 跨 1 阶 + 从 i-2 跨 2 阶。延伸：一次可爬 1~k 阶 → 完全背包；矩阵快速幂可优化到 O(logn)。面试中先确认 n 范围与是否取模。"
+  },
+  {
+    "question": "手撕：二叉树的层序遍历。",
+    "category": "算法",
+    "difficulty": "MEDIUM",
+    "tags": ["二叉树", "BFS", "队列"],
+    "answer": "参考实现要点：BFS + 队列。外层 while 队列非空，每层先取当前队列大小 size（该层节点数），循环 size 次出队并把值加入当前层列表、左右子节点非空入队；一层结束收集下一层。时间 O(n)，空间 O(n)（最宽层）。变体：锯齿形层序（奇偶层反转当前层列表）、自底向上层序（结果反转）、右视图（每层最后一个元素）。"
+  },
+  {
+    "question": "手撕：无重复字符的最长子串（滑动窗口）。",
+    "category": "算法",
+    "difficulty": "MEDIUM",
+    "tags": ["滑动窗口", "哈希表", "双指针"],
+    "answer": "参考实现要点：左右双指针维护窗口 [left, right]，用 Map 记录字符最近出现位置。right 逐位右移；若 s[right] 已在窗口内（上次位置 >= left），把 left 跳到 该位置 + 1；更新字符位置并计算窗口长度取最大值。时间 O(n)，空间 O(字符集大小)。易错点：left 只能右移（取 max），否则窗口会重新包含重复字符。也可用 HashSet 逐个收缩左边界，但效率略低。"
+  },
+  {
+    "question": "手撕：数组中第 K 大的元素。",
+    "category": "算法",
+    "difficulty": "MEDIUM",
+    "tags": ["快速选择", "堆", "TopK"],
+    "answer": "参考实现要点：方案一最小堆：维护容量 K 的最小堆，遍历数组入堆、堆大小超 K 则弹堆顶，遍历完堆顶即第 K 大；时间 O(n logK)，适合流式/海量数据。方案二快速选择：快排 partition 后根据枢纽位置只递归包含目标的一侧，平均 O(n)、最坏 O(n²)（随机打乱/随机枢纽规避）。面试要能对比两者适用场景；海量数据落盘/多机场景用堆 + 分治归并。"
+  },
+  {
+    "question": "手撕：全排列（回溯）。",
+    "category": "算法",
+    "difficulty": "MEDIUM",
+    "tags": ["回溯", "全排列", "递归"],
+    "answer": "参考实现要点：回溯模板——路径 path + 已用标记 used（或交换法）。递归函数：path 长度 == n 时收集结果副本；否则遍历每个未用元素：选择（加入 path、标记 used）→ 递归 → 撤销（弹出、取消标记）。时间 O(n·n!)。含重复元素变体：先排序，同层跳过 used[i-1]==false 的相同元素去重。要点：结果必须收集 path 的副本而非引用。"
+  },
+  {
+    "question": "手撕：LRU 缓存（get/put 均 O(1)）。",
+    "category": "算法",
+    "difficulty": "HARD",
+    "tags": ["LRU", "哈希表双向链表", "设计题"],
+    "answer": "参考实现要点：HashMap + 双向链表。Map 存 key→节点，双向链表维护访问顺序（头部最近、尾部最久）。get：命中则把节点移到头部并返回值，未命中返回 -1；put：已存在则更新值并移头部，不存在则新建节点插头部，容量超限则删尾节点并同步删 Map。哨兵头尾节点可消除空链表边界判断。Java 可直接继承 LinkedHashMap 重写 removeEldestEntry，但面试要求手写双链。Redis 的近似 LRU 是采样淘汰，可作加分点。"
+  },
+  {
+    "question": "手撕：编辑距离（两字符串最少增删改次数）。",
+    "category": "算法",
+    "difficulty": "HARD",
+    "tags": ["动态规划", "编辑距离", "二维DP"],
+    "answer": "参考实现要点：dp[i][j] 表示 word1 前 i 个字符转成 word2 前 j 个字符的最少操作数。边界：dp[i][0]=i、dp[0][j]=j（纯删/纯插）。转移：字符相同 dp[i][j]=dp[i-1][j-1]；不同取三者最小 +1：dp[i-1][j]（删）、dp[i][j-1]（插）、dp[i-1][j-1]（改）。时间 O(mn)，空间可滚动数组优化到 O(n)。讲解时要能把每个转移对应到具体操作；变体：只判是否一步可达、最长公共子序列同框架。"
   }
 ]

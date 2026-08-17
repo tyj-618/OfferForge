@@ -9,8 +9,8 @@ const router = useRouter()
 // 依赖响应式 authState：登录后顶栏立即出现，登出/401 后立即消失
 const loggedIn = computed(() => !!authState.token && route.name !== 'login')
 
-// 顶栏用户名：优先昵称，无昵称时显示用户名
-const displayUsername = computed(() => currentUser.nickname || currentUser.username || '')
+// 顶栏用户名：优先显示注册时用户输入的用户名；昵称仅作兜底（注册时默认为 Candidate_xxx）
+const displayUsername = computed(() => currentUser.username || currentUser.nickname || '')
 
 // 刷新恢复：token 在而登录缓存丢失时，经 /api/auth/me 补齐用户名
 onMounted(() => {
@@ -22,13 +22,16 @@ onMounted(() => {
 // 报告详情需 interviewId 参数，从历史记录列表进入；报告详情路由也高亮历史记录
 const navItems = [
   { to: '/interview', label: '模拟面试', routes: ['interview'] },
-  { to: '/', label: '问答练习', routes: ['qa'] },
+  { to: '/training', label: '专项训练', routes: ['training'] },
+  { to: '/', label: '快捷提问', routes: ['qa'] },
   { to: '/history', label: '历史记录', routes: ['history', 'report'] },
   { to: '/resume', label: '简历', routes: ['resume'] },
+  { to: '/knowledge', label: '资料库', routes: ['knowledge'] },
+  { to: '/docs', label: '文档', routes: ['docs'] },
   { to: '/settings', label: '设置', routes: ['settings'] }
 ]
 
-// 按路由名精确匹配高亮，避免 vue-router 对 "/" 的前缀匹配导致问答练习在所有页面常亮
+// 按路由名精确匹配高亮，避免 vue-router 对 "/" 的前缀匹配导致快捷提问在所有页面常亮
 function isActive(item) {
   return item.routes.includes(route.name)
 }
@@ -47,7 +50,7 @@ async function logout() {
 <template>
   <div class="app">
     <header v-if="loggedIn" class="topbar">
-      <div class="brand">🎯 OfferForge</div>
+      <div class="brand">🎯 Easy Offer Forge</div>
       <nav class="nav">
         <RouterLink
           v-for="item in navItems"

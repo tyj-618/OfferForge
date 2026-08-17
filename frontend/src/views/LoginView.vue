@@ -43,7 +43,7 @@ function switchMode(target) {
 <template>
   <div class="login-page">
     <div class="login-card card">
-      <div class="brand-title">🎯 OfferForge</div>
+      <div class="brand-title">🎯 Easy Offer Forge</div>
       <p class="muted subtitle">AI 面试教练 · 让每次面试都有备而来</p>
 
       <div class="tabs">

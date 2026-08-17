@@ -1,6 +1,5 @@
 package com.offerforge.interview;
 
-import com.offerforge.ai.AiStreamChunkConsumer;
 import com.offerforge.auth.CurrentUserService;
 import com.offerforge.common.ApiResponse;
 import com.offerforge.common.ErrorCode;
@@ -57,7 +56,9 @@ public class InterviewController {
         String position = request == null ? null : request.position();
         Long resumeId = request == null ? null : request.resumeId();
         String mode = request == null ? null : request.mode();
-        return ApiResponse.success(interviewService.start(userId, position, resumeId, mode));
+        java.util.List<String> categories = request == null ? null : request.categories();
+        Boolean includeAlgorithm = request == null ? null : request.includeAlgorithm();
+        return ApiResponse.success(interviewService.start(userId, position, resumeId, mode, categories, includeAlgorithm));
     }
 
     /**
@@ -106,8 +107,8 @@ public class InterviewController {
     }
 
     /**
-     * 训练模式“深度训练”：丢弃暂存追问进入 DEEP_TRAINING 子流程并发出第 1 道递进题，
-     * 事件结构与 ask 一致；非训练模式或无待选追问走 error 事件。
+     * 训练模式“深度训练”：围绕当前知识点进入 DEEP_TRAINING 子流程并发出第 1 道递进题，
+     * 事件结构与 ask 一致；非训练模式或非出题阶段走 error 事件。
      */
     @PostMapping(value = "/{sessionId}/deep-training", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter deepTraining(@RequestHeader(value = "Authorization", required = false) String authorization,
@@ -117,7 +118,7 @@ public class InterviewController {
         emitter.onError(throwable -> emitter.complete());
         interviewStreamExecutor.execute(() -> writeChoiceTurn(
                 emitter, authorization, sessionId, "deep-training",
-                (userId, chunkConsumer) -> interviewService.enterDeepTraining(userId, sessionId, chunkConsumer)));
+                interviewService::enterDeepTraining));
         return emitter;
     }
 
@@ -132,12 +133,12 @@ public class InterviewController {
         emitter.onError(throwable -> emitter.complete());
         interviewStreamExecutor.execute(() -> writeChoiceTurn(
                 emitter, authorization, sessionId, "deep-training-exit",
-                (userId, chunkConsumer) -> interviewService.exitDeepTraining(userId, sessionId, chunkConsumer)));
+                interviewService::exitDeepTraining));
         return emitter;
     }
 
     /**
-     * 训练模式“下一板块”：放弃深度训练机会并推进到下一题/下一阶段，事件结构与 ask 一致。
+     * 训练模式“下一板块”：用户主动切换到下一题/下一阶段，事件结构与 ask 一致。
      */
     @PostMapping(value = "/{sessionId}/next-question", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter nextQuestion(@RequestHeader(value = "Authorization", required = false) String authorization,
@@ -147,8 +148,19 @@ public class InterviewController {
         emitter.onError(throwable -> emitter.complete());
         interviewStreamExecutor.execute(() -> writeChoiceTurn(
                 emitter, authorization, sessionId, "next-question",
-                (userId, chunkConsumer) -> interviewService.chooseNextQuestion(userId, sessionId, chunkConsumer)));
+                interviewService::chooseNextQuestion));
         return emitter;
+    }
+
+    /**
+     * 暂存续考（任务 4）：查询当前用户未结束的面试会话，供开始卡片展示「继续未完成的面试」；
+     * 无进行中会话时 data 为 null。
+     */
+    @GetMapping("/active-session")
+    public ApiResponse<InterviewStatusResponse> activeSession(
+            @RequestHeader(value = "Authorization", required = false) String authorization) {
+        Long userId = currentUserService.requireUserId(authorization);
+        return ApiResponse.success(interviewService.activeSession(userId));
     }
 
     @GetMapping("/{sessionId}/status")
@@ -170,11 +182,7 @@ public class InterviewController {
         try {
             Long userId = currentUserService.requireUserId(authorization);
             validateMessage(message);
-            InterviewTurnResult result = interviewService.answer(
-                    userId,
-                    sessionId,
-                    message,
-                    chunk -> emitter.send(SseEmitter.event().name("message").data(chunk)));
+            InterviewTurnResult result = interviewService.answer(userId, sessionId, message, sseSink(emitter));
             emitter.send(SseEmitter.event().name("done").data(result));
             emitter.complete();
         } catch (BusinessException exception) {
@@ -191,8 +199,7 @@ public class InterviewController {
     }
 
     private void writeSkipTurn(SseEmitter emitter, String authorization, String sessionId) {
-        writeChoiceTurn(emitter, authorization, sessionId, "skip",
-                (userId, chunkConsumer) -> interviewService.skip(userId, sessionId, chunkConsumer));
+        writeChoiceTurn(emitter, authorization, sessionId, "skip", interviewService::skip);
     }
 
     /**
@@ -204,9 +211,7 @@ public class InterviewController {
         MDC.put(INTERVIEW_ID_KEY, sessionId);
         try {
             Long userId = currentUserService.requireUserId(authorization);
-            InterviewTurnResult result = action.execute(
-                    userId,
-                    chunk -> emitter.send(SseEmitter.event().name("message").data(chunk)));
+            InterviewTurnResult result = action.execute(userId, sessionId, sseSink(emitter));
             emitter.send(SseEmitter.event().name("done").data(result));
             emitter.complete();
         } catch (BusinessException exception) {
@@ -221,10 +226,32 @@ public class InterviewController {
         }
     }
 
-    /** 选择类回合执行体：鉴权后的 userId + 流式回调，返回本轮结果 */
+    /** 选择类回合执行体：鉴权后的 userId + 会话 ID + 流式输出槽，返回本轮结果 */
     @FunctionalInterface
     private interface ChoiceTurnAction {
-        InterviewTurnResult execute(Long userId, AiStreamChunkConsumer chunkConsumer) throws IOException;
+        InterviewTurnResult execute(Long userId, String sessionId, InterviewStreamSink sink) throws IOException;
+    }
+
+    /**
+     * SSE 输出槽：message 为对话内容帧，segment 标记新气泡，progress 为阶段状态提示。
+     */
+    private static InterviewStreamSink sseSink(SseEmitter emitter) {
+        return new InterviewStreamSink() {
+            @Override
+            public void chunk(String text) throws IOException {
+                emitter.send(SseEmitter.event().name("message").data(text));
+            }
+
+            @Override
+            public void segment() throws IOException {
+                emitter.send(SseEmitter.event().name("segment").data(""));
+            }
+
+            @Override
+            public void progress(String text) throws IOException {
+                emitter.send(SseEmitter.event().name("progress").data(text));
+            }
+        };
     }
 
     private void validateMessage(String message) {

@@ -12,7 +12,7 @@ public class QaPromptBuilder {
     private static final int ANSWER_MAX_CHARS = 800;
 
     static final String SYSTEM_PROMPT = """
-            你是 OfferForge 的 Java 后端面试知识助手，正在帮助求职者理解面试知识点。
+            你是 Easy Offer Forge 的 Java 后端面试知识助手，正在帮助求职者理解面试知识点。
             规则：
             1. 严格基于 <knowledge> 块中提供的知识点作答，不得编造参考资料之外的结论；
             2. 回答结构清晰：先给出结论，再分点展开关键细节；

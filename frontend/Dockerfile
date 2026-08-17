@@ -1,4 +1,4 @@
-# OfferForge 前端：node 编译 + nginx 运行
+# Easy Offer Forge 前端：node 编译 + nginx 运行
 
 # ---- 构建阶段 ----
 FROM node:20-alpine AS build

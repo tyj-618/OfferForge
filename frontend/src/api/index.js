@@ -149,7 +149,13 @@ export const authApi = {
 
 // ---------- 知识库 / 问答 ----------
 export const knowledgeApi = {
-  importBuiltin: () => http.post('/knowledge/import', null)
+  importBuiltin: () => http.post('/knowledge/import', null),
+  categories: () => http.get('/knowledge/categories'),
+  mine: () => http.get('/knowledge/mine'),
+  recommend: (resumeId = null) => http.get('/knowledge/recommend', { params: resumeId == null ? {} : { resumeId } }),
+  // 上传资料：FormData（file + 可选 category），仅支持 .md/.txt，单文件 ≤1MB
+  upload: (formData) => http.post('/knowledge/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  remove: (id) => http.delete(`/knowledge/${id}`)
 }
 
 export const qaApi = {
@@ -158,8 +164,13 @@ export const qaApi = {
 
 // ---------- 面试 ----------
 export const interviewApi = {
-  start: (position, resumeId = null, mode = null) => http.post('/interview/start', { position, resumeId, mode }),
+  // categories：勾选的资料分组（可空）；非空时出题仅用这些分组
+  // includeAlgorithm：开启后 DEEP 阶段掺入算法手写编程题（任务 12）
+  start: (position, resumeId = null, mode = null, categories = null, includeAlgorithm = null) =>
+    http.post('/interview/start', { position, resumeId, mode, categories, includeAlgorithm }),
   status: (sessionId) => http.get(`/interview/${sessionId}/status`),
+  // 暂存续考（任务 4）：取未结束的面试会话，无则返回 null
+  activeSession: () => http.get('/interview/active-session'),
   finish: (sessionId) => http.post(`/interview/${sessionId}/finish`, null)
 }
 
@@ -311,6 +322,19 @@ export function askStream(sessionId, message, callbacks) {
   return sseRequest(`/api/interview/${sessionId}/ask`, { message }, callbacks)
 }
 
+// ---------- 专项训练（任务 7）：SSE 契约与面试 ask 一致 ----------
+export const trainingApi = {
+  start: (category) => http.post('/training/start', { category }),
+  status: (sessionId) => http.get(`/training/${sessionId}/status`),
+  finish: (sessionId) => http.post(`/training/${sessionId}/finish`, null),
+  records: () => http.get('/training/records')
+}
+
+// 专项训练作答：message/segment/progress/done/error 事件结构与面试一致
+export function trainingAnswerStream(sessionId, message, callbacks) {
+  return sseRequest(`/api/training/${sessionId}/answer`, { message }, callbacks)
+}
+
 // 跳过当前题：无请求体，SSE 契约与 ask 一致（计 0 分后推进状态机）
 export function skipStream(sessionId, callbacks) {
   return sseRequest(`/api/interview/${sessionId}/skip`, null, callbacks)
@@ -332,7 +356,7 @@ export function nextQuestionStream(sessionId, callbacks) {
 }
 
 // 返回 'authRetry' 表示错误帧为鉴权失效，由调用方续期重连而非报错
-function dispatchSseFrame(frame, { onMessage, onDone, onError }, retried) {
+function dispatchSseFrame(frame, { onMessage, onDone, onError, onSegment, onProgress }, retried) {
   let eventName = 'message'
   const dataLines = []
   for (const line of frame.split('\n')) {
@@ -342,12 +366,19 @@ function dispatchSseFrame(frame, { onMessage, onDone, onError }, retried) {
       dataLines.push(line.slice(5).trimStart())
     }
   }
-  if (dataLines.length === 0) {
+  // segment/progress 帧允许空载荷（segment 仅作分段信号）；done/error 无载荷时忽略防解析异常
+  const payload = dataLines.join('\n')
+  if (!payload && eventName !== 'segment' && eventName !== 'progress') {
     return ''
   }
-  const payload = dataLines.join('\n')
   if (eventName === 'message') {
-    onMessage?.(payload)
+    if (payload) {
+      onMessage?.(payload)
+    }
+  } else if (eventName === 'segment') {
+    onSegment?.()
+  } else if (eventName === 'progress') {
+    onProgress?.(payload)
   } else if (eventName === 'done') {
     onDone?.(JSON.parse(payload))
   } else if (eventName === 'error') {

@@ -9,18 +9,26 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.time.Instant;
 
 @Entity
-@Table(name = "knowledge_item")
+@Table(name = "knowledge_item", uniqueConstraints = {
+        // 题面唯一性按归属维度约束：官方（NULL）与不同用户的私有题互不冲突（NULL 不参与唯一判定）
+        @UniqueConstraint(name = "uk_knowledge_question_owner", columnNames = {"question", "owner_user_id"})
+})
 public class KnowledgeItem {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true, length = 512)
+    /** 归属用户：NULL=官方全局共享，非 NULL=用户私有（仅本人可见） */
+    @Column(name = "owner_user_id")
+    private Long ownerUserId;
+
+    @Column(nullable = false, length = 512)
     private String question;
 
     @Column(nullable = false, columnDefinition = "TEXT")
@@ -58,6 +66,14 @@ public class KnowledgeItem {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public Long getOwnerUserId() {
+        return ownerUserId;
+    }
+
+    public void setOwnerUserId(Long ownerUserId) {
+        this.ownerUserId = ownerUserId;
     }
 
     public String getQuestion() {

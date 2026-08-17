@@ -1,4 +1,4 @@
-# OfferForge API 文档
+# Easy Offer Forge API 文档
 
 Base URL：`/api`（开发环境 `http://localhost:8081`，Docker 部署经 nginx 反代 `http://localhost/api`）
 
@@ -152,7 +152,7 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
 
 `state` 枚举：`OPENING | BASICS | PROJECT | DEEP | CLOSING | FINISHED | DEEP_TRAINING`；
 `mode` 枚举：`training | practice`；
-`followUpChoiceRequired`：训练模式下后端暂存了追问、等待用户选择「深度训练」/「下一板块」时为 `true`；
+`followUpChoiceRequired`：已废弃（旧版低分选择卡标记），恒为 `false`，保留仅为响应体兼容；
 实战模式过程免评分：`lastScore`/`averageScore` 为 `null`（评分仍完整入库供结束报告使用）；
 `deepTrainingActive`：是否处于深度训练子流程；`deepTrainingAsked`：已出递进题数（上限 5）；
 `deepTrainingPassStreak`：连续达标（≥6 分）题数，达 2 自动返回主面试；
@@ -167,8 +167,14 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
 事件流：
 
 ```
+event:progress
+data:正在评估你的回答…（阻塞节点状态帧：评估/追问生成/导师点评/出题，不进入对话记录，供前端思考动画展示动态文案）
+
 event:message
 data:面试官的下一段话（分块多次下发）
+
+event:segment
+data:（新气泡分段信号：训练模式导师反馈与后续追问/下一题分属两个对话气泡）
 
 event:done
 data:{"score":7,"evaluationComment":"……","evaluation":{...},"status":{...},"action":"NEW_QUESTION"}
@@ -176,7 +182,7 @@ data:{"score":7,"evaluationComment":"……","evaluation":{...},"status":{...},"
 
 `action` 枚举：`ADVANCE`（推进阶段）/ `NEW_QUESTION`（同阶段换题）/ `FOLLOW_UP`（追问）/ `FINISH`（`status.state=FINISHED` 时前端跳转报告），无评分轮次为 `null`。
 
-训练模式 done 载荷携带 `evaluation` 详细评估（实战模式为 null）：
+训练模式回合流程：先流式输出导师人设反馈（按得分区间人性化点评：高分表扬/中分肯定指方向/低分宽慰鼓励，不透露分数），`event:segment` 分段后再流式输出追问/下一题（保证下一题始终在对话最下方）；done 载荷携带 `evaluation` 详细评估（实战模式为 null），供前端「具体分析」小窗展示：
 
 ```json
 {
@@ -205,9 +211,9 @@ data:{"code":40900,"message":"面试尚未开始"}
 
 ### POST /interview/{sessionId}/deep-training （SSE）
 
-训练模式「深度训练」：丢弃暂存追问，进入 `DEEP_TRAINING` 子流程并发出第 1 道递进题，无请求体，事件流契约与 ask 一致。
-递进题围绕薄弱知识点逐题递进（上限 5 题），连续 2 题 ≥6 分达标后自动返回主面试；不计入主流程已问题数/平均分。
-仅训练模式且存在暂存追问（`followUpChoiceRequired=true`）时可用，否则 error 事件返回 40900。
+训练模式「深度训练」：围绕当前知识点进入 `DEEP_TRAINING` 子流程并发出第 1 道递进题，无请求体，事件流契约与 ask 一致。
+递进题围绕知识点逐题递进（上限 5 题），连续 2 题 ≥6 分达标后自动返回主面试；不计入主流程已问题数/平均分。
+仅训练模式且处于出题阶段（BASICS/PROJECT/DEEP）时可用，否则 error 事件返回 40900。
 
 ### POST /interview/{sessionId}/deep-training/exit （SSE）
 
@@ -216,8 +222,8 @@ data:{"code":40900,"message":"面试尚未开始"}
 
 ### POST /interview/{sessionId}/next-question （SSE）
 
-训练模式「下一板块」：放弃深度训练机会（原低分已入账，不额外计分）并推进到下一题，无请求体，事件流契约与 ask 一致。
-仅训练模式且存在暂存追问时可用，否则 error 事件返回 40900。
+训练模式「下一板块」：用户主动切换到同阶段下一题或下一阶段（不额外计分），无请求体，事件流契约与 ask 一致。
+仅训练模式且处于出题阶段时可用，否则 error 事件返回 40900。
 
 > 原 `POST /interview/{sessionId}/followup` 端点已移除，由深度训练子流程取代。
 

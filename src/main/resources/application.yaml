@@ -20,6 +20,12 @@ spring:
       ddl-auto: none
     open-in-view: false
 
+  web:
+    multipart:
+      # 资料库上传：单文件 1MB 上限（仅接受 .md/.txt）
+      max-file-size: 1MB
+      max-request-size: 2MB
+
 server:
   port: ${SERVER_PORT:8081}
   servlet:
@@ -74,7 +80,12 @@ offerforge:
     max-project-questions: ${OFFERFORGE_INTERVIEW_MAX_PROJECT_QUESTIONS:2}
     max-deep-questions: ${OFFERFORGE_INTERVIEW_MAX_DEEP_QUESTIONS:3}
     message-window: ${OFFERFORGE_INTERVIEW_MESSAGE_WINDOW:12}
-    session-ttl-seconds: ${OFFERFORGE_INTERVIEW_SESSION_TTL_SECONDS:1800}
+    # 会话 TTL（任务 4）：延长至 24h，支撑「深入模块」暂存面试与续考恢复
+    session-ttl-seconds: ${OFFERFORGE_INTERVIEW_SESSION_TTL_SECONDS:86400}
+  training:
+    # 专项训练（任务 7）：单场最多出题数与会话长 TTL（刷新/暂离恢复）
+    max-questions: ${OFFERFORGE_TRAINING_MAX_QUESTIONS:6}
+    session-ttl-seconds: ${OFFERFORGE_TRAINING_SESSION_TTL_SECONDS:86400}
   rate-limit:
     # 按用户滑动窗口限流（window-millis 窗口内）；报告 history/progress 不限流
     interview-ask-limit: ${OFFERFORGE_RATE_LIMIT_INTERVIEW_ASK:10}

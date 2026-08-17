@@ -29,7 +29,7 @@ public class QaService {
 
     public QaResponse ask(Long userId, String question) {
         long startedAt = System.currentTimeMillis();
-        List<RetrievedKnowledge> retrieved = knowledgeService.search(question, RETRIEVAL_LIMIT);
+        List<RetrievedKnowledge> retrieved = knowledgeService.search(userId, question, RETRIEVAL_LIMIT);
         List<ChatMessage> messages = promptBuilder.build(question, retrieved);
         AiTextResult result = aiModelClient.generateText(messages);
         List<Long> referencedIds = retrieved.stream().map(RetrievedKnowledge::itemId).toList();

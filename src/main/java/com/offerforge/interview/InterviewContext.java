@@ -26,8 +26,14 @@ public class InterviewContext {
     private String position;
     /** 关联简历 id（可空）：PROJECT 阶段基于简历生成项目题 */
     private Long resumeId;
+    /** 简历摘要缓存：实战模式首次出题时构建，供面试官话术自然转场（旧会话为 null） */
+    private String resumeSummary;
     /** 面试模式：training / practice（旧会话反序列化为 null 时按 practice 处理） */
     private String mode;
+    /** 勾选的资料分组（可空）：非空时 BASICS/DEEP 出题仅用这些分组（旧会话为 null 按阶段默认） */
+    private List<String> selectedCategories;
+    /** 是否包含算法手写编程题：开启后 DEEP 阶段按难度掺入算法分组（旧会话缺失默认 false） */
+    private boolean includeAlgorithm;
     private InterviewState state = InterviewState.OPENING;
     private String currentQuestion;
     private String currentCandidateAnswer;
@@ -36,7 +42,7 @@ public class InterviewContext {
     private boolean currentQuestionFollowUp;
     /** 当前题目的追问次数（每道题上限 maxFollowUps） */
     private int currentFollowUpCount;
-    /** 训练模式暂存的待追问问题：用户选择“深度训练”的触发信号，进入子流程后丢弃 */
+    /** 已废弃：旧版训练模式暂存追问（系统判定触发深度训练）；新流程不再写入，仅为存量 Redis 会话反序列化兼容保留 */
     private String pendingFollowUpQuestion;
     /** 深度训练：进入前的主面试阶段，退出/达标后恢复 */
     private InterviewState deepTrainingReturnState;
@@ -48,8 +54,8 @@ public class InterviewContext {
     private int consecutiveHighScores;
     /** 连续低分（<4）次数，用于难度降低判定 */
     private int consecutiveLowScores;
-    /** 当前出题难度，随连续答题表现动态调整 */
-    private Difficulty currentDifficulty = Difficulty.MEDIUM;
+    /** 当前出题难度：由浅入深从 EASY 起步，随连续答题表现动态调整 */
+    private Difficulty currentDifficulty = Difficulty.EASY;
     private Map<String, Integer> phaseQuestionCounts = new HashMap<>();
     /** 基于简历生成的备选题队列（PROJECT 项目题 / DEEP 深挖题），优先于通用题库消费 */
     private List<InterviewQuestionBank.InterviewQuestion> preparedQuestions = new ArrayList<>();
@@ -96,6 +102,14 @@ public class InterviewContext {
         this.resumeId = resumeId;
     }
 
+    public String getResumeSummary() {
+        return resumeSummary;
+    }
+
+    public void setResumeSummary(String resumeSummary) {
+        this.resumeSummary = resumeSummary;
+    }
+
     /** 模式归一化：null/非法值一律按 practice，兼容旧会话 */
     public String getMode() {
         return MODE_TRAINING.equals(mode) ? MODE_TRAINING : MODE_PRACTICE;
@@ -103,6 +117,22 @@ public class InterviewContext {
 
     public void setMode(String mode) {
         this.mode = mode;
+    }
+
+    public List<String> getSelectedCategories() {
+        return selectedCategories;
+    }
+
+    public void setSelectedCategories(List<String> selectedCategories) {
+        this.selectedCategories = selectedCategories;
+    }
+
+    public boolean isIncludeAlgorithm() {
+        return includeAlgorithm;
+    }
+
+    public void setIncludeAlgorithm(boolean includeAlgorithm) {
+        this.includeAlgorithm = includeAlgorithm;
     }
 
     /** 便捷判断，非持久化字段（避免序列化后反序列化失败） */

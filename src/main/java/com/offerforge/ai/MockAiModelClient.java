@@ -219,6 +219,10 @@ public class MockAiModelClient implements AiModelClient {
     private String mockAnswer(String userPrompt) {
         Matcher questionMatcher = QUESTION_PATTERN.matcher(userPrompt);
         String question = questionMatcher.find() ? questionMatcher.group(1).trim() : "未提供问题";
+        if (userPrompt.contains("<task>mentor-feedback</task>")) {
+            // 导师反馈 mock：不重复题面、不携带分数，便于断言独立气泡与顺序
+            return "【导师反馈】针对你刚才的回答，我已给出人性化点评，继续保持。";
+        }
         if (userPrompt.contains("<task>interviewer</task>")) {
             return "【模拟面试官】接下来请回答：" + question;
         }
@@ -227,6 +231,9 @@ public class MockAiModelClient implements AiModelClient {
         }
         if (userPrompt.contains("<task>deep-training</task>")) {
             return "【深度训练】请回答：" + question;
+        }
+        if (userPrompt.contains("<task>training</task>")) {
+            return "【专项训练】请回答：" + question;
         }
         if (userPrompt.contains("<task>followup-gen</task>")) {
             return generateFollowUpQuestion(userPrompt);

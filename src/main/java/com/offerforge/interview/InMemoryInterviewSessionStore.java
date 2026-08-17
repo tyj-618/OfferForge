@@ -3,6 +3,7 @@ package com.offerforge.interview;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
+import java.util.Comparator;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,7 +31,13 @@ public class InMemoryInterviewSessionStore implements InterviewSessionStore {
 
     @Override
     public boolean hasActiveSession(Long userId) {
+        return findActiveSession(userId).isPresent();
+    }
+
+    @Override
+    public Optional<InterviewContext> findActiveSession(Long userId) {
         return sessions.values().stream()
-                .anyMatch(context -> context.getUserId() == userId && !context.getState().terminal());
+                .filter(context -> context.getUserId() == userId && !context.getState().terminal())
+                .max(Comparator.comparingLong(InterviewContext::getCreatedAtEpochMillis));
     }
 }

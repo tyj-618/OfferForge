@@ -94,6 +94,10 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         if ("POST".equalsIgnoreCase(method) && uri.matches("/api/interview/[^/]+/ask")) {
             return new Route("interview-ask", interviewAskLimit, true);
         }
+        // 专项训练作答与面试作答同为重 LLM 开销的 SSE 端点，共用限额（任务 7）
+        if ("POST".equalsIgnoreCase(method) && uri.matches("/api/training/[^/]+/answer")) {
+            return new Route("training-answer", interviewAskLimit, true);
+        }
         if ("POST".equalsIgnoreCase(method) && uri.equals("/api/qa/ask")) {
             return new Route("qa-ask", qaAskLimit, false);
         }

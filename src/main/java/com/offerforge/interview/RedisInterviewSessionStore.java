@@ -70,11 +70,16 @@ public class RedisInterviewSessionStore implements InterviewSessionStore {
     }
 
     /**
-     * SCAN 全部会话 key，批量 MGET 取值后逐个反序列化判断；单用户会话数极少（TTL 30 分钟），成本可接受。
+     * SCAN 全部会话 key，批量 MGET 取值后逐个反序列化判断；单用户会话数极少，成本可接受。
      * 单条反序列化失败跳过，不影响其余会话的判断。
      */
     @Override
     public boolean hasActiveSession(Long userId) {
+        return findActiveSession(userId).isPresent();
+    }
+
+    @Override
+    public Optional<InterviewContext> findActiveSession(Long userId) {
         ScanOptions options = ScanOptions.scanOptions().match("interview:*" + KEY_SUFFIX).count(100).build();
         List<String> keys = new ArrayList<>();
         try (Cursor<byte[]> cursor = redisTemplate.executeWithStickyConnection(
@@ -84,26 +89,28 @@ public class RedisInterviewSessionStore implements InterviewSessionStore {
             }
         }
         if (keys.isEmpty()) {
-            return false;
+            return Optional.empty();
         }
         List<String> values = redisTemplate.opsForValue().multiGet(keys);
         if (values == null) {
-            return false;
+            return Optional.empty();
         }
+        InterviewContext latest = null;
         for (String json : values) {
             if (json == null) {
                 continue;
             }
             try {
                 InterviewContext context = objectMapper.readValue(json, InterviewContext.class);
-                if (context.getUserId() == userId && !context.getState().terminal()) {
-                    return true;
+                if (context.getUserId() == userId && !context.getState().terminal()
+                        && (latest == null || context.getCreatedAtEpochMillis() > latest.getCreatedAtEpochMillis())) {
+                    latest = context;
                 }
             } catch (JsonProcessingException exception) {
                 log.warn("skip malformed session context during active session scan");
             }
         }
-        return false;
+        return Optional.ofNullable(latest);
     }
 
     private String key(String sessionId) {

@@ -1,4 +1,4 @@
-# OfferForge 后端：多阶段构建（JDK 17 编译 + JRE 17 运行）
+# Easy Offer Forge 后端：多阶段构建（JDK 17 编译 + JRE 17 运行）
 
 # ---- 构建阶段 ----
 FROM maven:3.9-eclipse-temurin-17 AS build

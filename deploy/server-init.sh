@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OfferForge 服务器端初始化：生成 .env、建库建表
+# Easy Offer Forge 服务器端初始化：生成 .env、建库建表
 set -euo pipefail
 cd /opt/offerforge
 

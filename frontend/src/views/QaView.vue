@@ -47,13 +47,13 @@ async function ask(textOverride) {
 
 <template>
   <div class="page">
-    <h1 class="page-title">问答练习</h1>
+    <h1 class="page-title">快捷提问</h1>
 
     <div class="card knowledge-card">
       <div class="knowledge-row">
         <div>
           <strong>知识库</strong>
-          <p class="muted">问答与模拟面试基于你的个人知识库出题，首次使用请先导入内置题库。</p>
+          <p class="muted">快捷提问与模拟面试基于你的个人知识库出题，首次使用请先导入内置题库。</p>
         </div>
         <button :disabled="importing" @click="importKnowledge">
           {{ importing ? '导入中…' : '导入内置知识库' }}

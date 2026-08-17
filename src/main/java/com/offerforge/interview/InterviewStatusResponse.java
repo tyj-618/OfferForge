@@ -19,16 +19,23 @@ public record InterviewStatusResponse(
         Double lastScore,
         Double averageScore,
         String mode,
+        /** 已废弃：旧版低分选择卡标记，新流程恒为 false，保留仅为响应体兼容 */
         boolean followUpChoiceRequired,
         boolean deepTrainingActive,
         int deepTrainingAsked,
         int deepTrainingPassStreak,
-        InterviewState returnState
+        InterviewState returnState,
+        /** 最近一道已作答题目所属资料分组（任务 4：「深入该模块」跳转专项训练用；无作答记录时为 null） */
+        String lastAnswerCategory
 ) {
 
     static InterviewStatusResponse from(InterviewContext context, InterviewProperties properties) {
         boolean training = context.isTrainingMode();
         boolean deepTrainingActive = context.getState() == InterviewState.DEEP_TRAINING;
+        var history = context.getQuestionHistory();
+        String lastAnswerCategory = history.isEmpty()
+                ? null
+                : history.get(history.size() - 1).getKnowledgePoint();
         return new InterviewStatusResponse(
                 context.getSessionId(),
                 context.getState(),
@@ -48,7 +55,8 @@ public record InterviewStatusResponse(
                 deepTrainingActive,
                 context.getDeepTrainingAsked(),
                 context.getDeepTrainingConsecutivePass(),
-                context.getDeepTrainingReturnState());
+                context.getDeepTrainingReturnState(),
+                lastAnswerCategory);
     }
 
     private static int remainingQuestions(InterviewContext context, InterviewProperties properties) {

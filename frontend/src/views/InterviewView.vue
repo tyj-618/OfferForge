@@ -5,9 +5,8 @@ import { marked } from 'marked'
 import {
   askStream,
   deepTrainingExitStream,
-  deepTrainingStream,
   interviewApi,
-  nextQuestionStream,
+  knowledgeApi,
   quotaApi,
   resumeApi,
   skipStream
@@ -37,12 +36,87 @@ const messages = ref([])
 const answer = ref('')
 const sending = ref(false)
 const thinking = ref(false)
+// 思考中状态文案：随后端 progress 帧更新（评估/出题等阻塞节点的实时反馈）
+const thinkingText = ref('')
 const error = ref('')
 const mode = ref('practice') // training | practice
-const followUpChoice = ref(false) // 训练模式：低分/无效回答后待用户选择「深度训练」/「下一板块」
+
+// 训练模式「具体分析」小窗：同一时刻最多展开一个，锚定在对应得分徽章旁
+const analysisOpenIndex = ref(null)
+
+function toggleAnalysis(index) {
+  analysisOpenIndex.value = analysisOpenIndex.value === index ? null : index
+}
+
+// 任务 4：暂存续考——开始卡片展示「继续未完成的面试」入口；
+// 「深入该模块」跳转专项训练前二次确认（将暂存当前面试进度）
+const resumableSession = ref(null)
+const confirmDiscard = ref(false)
+const confirmDeepDive = ref('')
+
+// 深入目标分组需在可见资料分组内（项目经历等非题库分组不展示入口）
+function isCategoryAvailable(category) {
+  return categoryOptions.value.some((opt) => opt.name === category)
+}
+
+function requestDeepDive(category) {
+  if (sending.value) {
+    return
+  }
+  confirmDeepDive.value = category
+}
+
+function cancelDeepDive() {
+  confirmDeepDive.value = ''
+}
+
+// 确认深入：面试进度由后端会话保持（24h TTL），跳转专项训练并带入目标分组
+function goDeepDive() {
+  const category = confirmDeepDive.value
+  confirmDeepDive.value = ''
+  router.push(`/training?category=${encodeURIComponent(category)}&from=interview`)
+}
 
 const resumes = ref([])
 const selectedResumeId = ref(null)
+
+// 出题范围（任务 8）：勾选的资料分组；不勾选按阶段默认官方题库
+const categoryOptions = ref([])
+const selectedCategories = ref([])
+const recommendedCategories = ref([])
+
+// 算法开关（任务 12）：开启后 DEEP 阶段按难度掺入算法分组题目
+const includeAlgorithm = ref(false)
+
+async function loadCategories() {
+  try {
+    const view = await knowledgeApi.categories()
+    categoryOptions.value = [
+      ...(view?.official || []).map((name) => ({ name, official: true })),
+      ...(view?.custom || []).map((name) => ({ name, official: false }))
+    ]
+  } catch {
+    // 分组加载失败不阻断开始面试（后端按默认题库出题）
+  }
+}
+
+// 有简历时按简历技能关键词推荐分组并默认勾选（仅追加，不覆盖用户手动勾选）
+async function loadRecommendedCategories() {
+  if (!selectedResumeId.value) {
+    return
+  }
+  try {
+    const recommended = await knowledgeApi.recommend(selectedResumeId.value)
+    recommendedCategories.value = recommended || []
+    for (const name of recommendedCategories.value) {
+      if (!selectedCategories.value.includes(name)) {
+        selectedCategories.value.push(name)
+      }
+    }
+  } catch {
+    // 推荐失败静默降级：不勾选任何分组
+  }
+}
 
 // 额度横幅三状态：有 Key 无限制 / 无 Key 剩余额度 / 额度用完引导配置
 const quotaInfo = ref(null)
@@ -141,32 +215,84 @@ onMounted(async () => {
   } catch {
     // 简历列表加载失败不阻断面试开始（后端会降级为通用项目题）
   }
+  loadCategories()
+  loadRecommendedCategories()
   refreshQuota()
   // 刷新页面后恢复进行中的会话（状态栏与当前题；历史消息不回放）
   const saved = sessionStorage.getItem(SESSION_KEY)
-  if (!saved) {
+  if (saved) {
+    try {
+      await restoreSession(saved)
+    } catch {
+      sessionStorage.removeItem(SESSION_KEY)
+      sessionStorage.removeItem(MODE_KEY)
+    }
+    return
+  }
+  // 本地无会话记录：查询后端暂存的未完成面试（深入模块跳转专项训练后回来续考）
+  try {
+    resumableSession.value = await interviewApi.activeSession()
+  } catch {
+    // 查询失败静默降级：不展示续考入口
+  }
+})
+
+// 恢复既有会话：刷新恢复与「继续未完成的面试」共用（历史消息不回放，仅展示当前题）
+async function restoreSession(saved) {
+  status.value = await interviewApi.status(saved)
+  sessionId.value = saved
+  mode.value = status.value?.mode || sessionStorage.getItem(MODE_KEY) || 'practice'
+  phase.value = 'active'
+  if (isFinished.value) {
+    messages.value.push({ role: 'assistant', content: '本次面试已结束，可前往「历史报告」查看或生成报告。' })
+  } else if (status.value.currentQuestion) {
+    messages.value.push({
+      role: 'assistant',
+      content: status.value.currentQuestion,
+      restored: true
+    })
+  }
+  // 旧低分选择卡（followUpChoiceRequired）已移除，深入入口由「深入该模块」按钮承担
+}
+
+// 继续未完成的面试：写回本地会话标记后按刷新恢复同逻辑还原
+async function resumeSavedInterview() {
+  const target = resumableSession.value
+  if (!target || sending.value) {
+    return
+  }
+  sending.value = true
+  error.value = ''
+  try {
+    sessionStorage.setItem(SESSION_KEY, target.sessionId)
+    sessionStorage.setItem(MODE_KEY, target.mode || 'practice')
+    await restoreSession(target.sessionId)
+    resumableSession.value = null
+  } catch (e) {
+    sessionStorage.removeItem(SESSION_KEY)
+    sessionStorage.removeItem(MODE_KEY)
+    resumableSession.value = null
+    error.value = classifyError(e).message
+  } finally {
+    sending.value = false
+  }
+}
+
+// 放弃暂存面试：正常结束并归档报告后清空入口
+async function discardSavedInterview() {
+  confirmDiscard.value = false
+  const target = resumableSession.value
+  if (!target) {
     return
   }
   try {
-    status.value = await interviewApi.status(saved)
-    sessionId.value = saved
-    mode.value = status.value?.mode || sessionStorage.getItem(MODE_KEY) || 'practice'
-    phase.value = 'active'
-    if (isFinished.value) {
-      messages.value.push({ role: 'assistant', content: '本次面试已结束，可前往「历史报告」查看或生成报告。' })
-    } else if (status.value.currentQuestion) {
-      messages.value.push({
-        role: 'assistant',
-        content: status.value.currentQuestion,
-        restored: true
-      })
-    }
-    followUpChoice.value = !!status.value?.followUpChoiceRequired
-  } catch {
-    sessionStorage.removeItem(SESSION_KEY)
-    sessionStorage.removeItem(MODE_KEY)
+    await interviewApi.finish(target.sessionId)
+    toast.info('已放弃暂存的面试，报告已归档至历史记录')
+  } catch (e) {
+    toast.error(classifyError(e).message)
   }
-})
+  resumableSession.value = null
+}
 
 async function refreshQuota() {
   try {
@@ -185,7 +311,8 @@ async function startInterview(selectedMode) {
   sending.value = true
   error.value = ''
   try {
-    const data = await interviewApi.start(position.value.trim(), selectedResumeId.value || null, selectedMode)
+    const data = await interviewApi.start(position.value.trim(), selectedResumeId.value || null, selectedMode,
+      selectedCategories.value.length ? selectedCategories.value : null, includeAlgorithm.value || null)
     mode.value = selectedMode
     sessionStorage.setItem(MODE_KEY, selectedMode)
     sessionId.value = data.sessionId
@@ -240,28 +367,12 @@ function skipQuestion() {
   runStreamingTurn((callbacks) => skipStream(sessionId.value, callbacks), skipQuestion)
 }
 
-// 训练模式「深度训练」：丢弃暂存追问，进入针对薄弱知识点的递进训练子流程
-function enterDeepTraining() {
-  if (sending.value || isFinished.value) {
-    return
-  }
-  runStreamingTurn((callbacks) => deepTrainingStream(sessionId.value, callbacks), enterDeepTraining)
-}
-
-// 主动退出深度训练：恢复主面试并出下一题
+// 主动退出深度训练：恢复主面试并出下一题（仅兼容存量会话，新入口已下线）
 function exitDeepTraining() {
   if (sending.value || isFinished.value || !deepTrainingActive.value) {
     return
   }
   runStreamingTurn((callbacks) => deepTrainingExitStream(sessionId.value, callbacks), exitDeepTraining)
-}
-
-// 训练模式「下一板块」：放弃深度训练机会，推进到下一题/下一阶段
-function chooseNextQuestion() {
-  if (sending.value || isFinished.value) {
-    return
-  }
-  runStreamingTurn((callbacks) => nextQuestionStream(sessionId.value, callbacks), chooseNextQuestion)
 }
 
 // ---------- SSE 流式渲染：chunk 拆单字符入队 + 5~15ms 节流，营造逐字输出感 ----------
@@ -270,11 +381,12 @@ const chunkQueue = []
 let queueTimer = null
 let activeStreamMessage = null
 let pendingDone = null
+// segment 分段帧：导师反馈与下一题分属两个气泡，需等渲染队列排空后才新建气泡
+let pendingSegments = 0
 
 async function runStreamingTurn(request, retry) {
   sending.value = true
   thinking.value = true
-  followUpChoice.value = false
   const assistantMessage = { role: 'assistant', content: '' }
   messages.value.push(assistantMessage)
   activeStreamMessage = assistantMessage
@@ -282,6 +394,10 @@ async function runStreamingTurn(request, retry) {
   try {
     await request({
       onMessage: enqueueChunk,
+      onSegment: queueSegment,
+      onProgress: (text) => {
+        thinkingText.value = text
+      },
       onDone: (result) => queueDone(assistantMessage, result),
       onError: (e) => failStream(assistantMessage, e, retry)
     })
@@ -290,7 +406,7 @@ async function runStreamingTurn(request, retry) {
   } finally {
     // 兜底：连接结束但无 done 事件且队列已排空时释放输入状态；
     // 若已流出部分内容则连接异常中断，提示刷新恢复（后端状态机已推进，status 接口能还原当前题）
-    if (activeStreamMessage === assistantMessage && chunkQueue.length === 0 && !queueTimer && !pendingDone) {
+    if (activeStreamMessage === assistantMessage && chunkQueue.length === 0 && !queueTimer && !pendingDone && pendingSegments === 0) {
       if (assistantMessage.content) {
         assistantMessage.comment = '连接已中断，请刷新页面查看最新进度'
       }
@@ -330,6 +446,7 @@ function drainNext() {
     scheduleDrain()
     return
   }
+  flushSegments()
   if (pendingDone) {
     const done = pendingDone
     pendingDone = null
@@ -338,8 +455,37 @@ function drainNext() {
   }
 }
 
+// 消费待处理的分段帧：新建空气泡承接后续内容（如下一题），并恢复思考动画
+function flushSegments() {
+  while (pendingSegments > 0) {
+    pendingSegments--
+    startNewBubble()
+  }
+}
+
+function queueSegment() {
+  if (chunkQueue.length === 0 && !queueTimer && !pendingDone) {
+    startNewBubble()
+  } else {
+    pendingSegments++
+  }
+}
+
+function startNewBubble() {
+  // 当前气泡还是空的（如分段帧早于首字到达）：复用它，不重复创建
+  if (!activeStreamMessage || !activeStreamMessage.content) {
+    return
+  }
+  const next = { role: 'assistant', content: '' }
+  messages.value.push(next)
+  activeStreamMessage = next
+  thinking.value = true
+  scrollDown()
+}
+
 function queueDone(assistantMessage, result) {
   if (chunkQueue.length === 0 && !queueTimer) {
+    flushSegments()
     endStream()
     handleAskDone(assistantMessage, result)
   } else {
@@ -351,6 +497,7 @@ function queueDone(assistantMessage, result) {
 function failStream(assistantMessage, e, retry) {
   chunkQueue.length = 0
   pendingDone = null
+  pendingSegments = 0
   if (queueTimer) {
     clearTimeout(queueTimer)
     queueTimer = null
@@ -365,23 +512,23 @@ function failStream(assistantMessage, e, retry) {
 function endStream() {
   sending.value = false
   thinking.value = false
+  thinkingText.value = ''
   activeStreamMessage = null
   scrollDown()
 }
 
 async function handleAskDone(assistantMessage, result) {
   assistantMessage.score = result.score
-  assistantMessage.comment = result.evaluationComment
-  // 训练模式详细反馈卡片（得分/亮点/不足/改进回答）；实战模式后端不返回 evaluation
+  // 训练模式详细反馈（亮点/不足/改进回答）进「具体分析」小窗，不再内联渲染；点评文字不再展示
   assistantMessage.evaluation = result.evaluation
+  // 任务 4：记录本题所属分组，供反馈气泡旁「深入该模块」按钮跳转专项训练
+  assistantMessage.category = result.status?.lastAnswerCategory || null
   // 刚发出的题目若为追问/深度训练题，气泡打上标识
   assistantMessage.followUp = !!result.status?.currentQuestionFollowUp
   status.value = result.status
   if (result.status?.mode) {
     mode.value = result.status.mode
   }
-  // 训练模式下后端暂存了追问（低分/无效回答触发）→ 展示「深度训练」/「下一板块」选择
-  followUpChoice.value = !!result.status?.followUpChoiceRequired
   if (result.action === 'FINISH' || result.status?.state === 'FINISHED') {
     await finishAndShowReport()
   }
@@ -433,6 +580,16 @@ function scrollDown() {
     <!-- 开始卡片 -->
     <div v-if="phase === 'idle'" class="card start-card">
       <h2>开始一场模拟面试</h2>
+      <!-- 任务 4：暂存续考入口（深入模块跳专项训练后回来接着考） -->
+      <div v-if="resumableSession" class="resume-banner">
+        <span>
+          ⏸️ 你有一场未完成的面试（{{ resumableSession.phaseLabel || '进行中' }} · 已作答 {{ resumableSession.askedCount ?? 0 }} 题），进度已暂存。
+        </span>
+        <span class="resume-actions">
+          <button type="button" :disabled="sending" @click="resumeSavedInterview">继续未完成的面试</button>
+          <button type="button" class="ghost" :disabled="sending" @click="confirmDiscard = true">放弃</button>
+        </span>
+      </div>
       <p class="muted">
         面试分为基础考察、项目经历、深度追问三个环节，AI 面试官会根据你的回答动态追问与调整难度，结束后生成详细反馈报告。
       </p>
@@ -473,6 +630,27 @@ function scrollDown() {
           <span class="muted">暂无简历，面试将使用通用项目题；可先去 <RouterLink to="/resume">简历管理</RouterLink> 创建</span>
         </template>
       </div>
+      <!-- 出题范围：勾选资料分组，不勾选按默认官方题库；有简历时推荐分组默认勾选 -->
+      <div class="category-row">
+        <div class="category-head">
+          <span class="muted">出题范围（可选，不勾选使用默认题库）：</span>
+          <RouterLink class="category-link" to="/knowledge">管理资料库 →</RouterLink>
+        </div>
+        <div v-if="categoryOptions.length" class="category-chips">
+          <label v-for="opt in categoryOptions" :key="opt.name" class="chip-check">
+            <input v-model="selectedCategories" type="checkbox" :value="opt.name" :disabled="sending" />
+            <span>
+              {{ opt.name }}
+              <span v-if="recommendedCategories.includes(opt.name)" class="recommend-star" title="根据简历推荐">⭐</span>
+            </span>
+          </label>
+        </div>
+        <!-- 算法开关（任务 12）：开启后 DEEP 阶段掺入算法分组手写编程题 -->
+        <label class="algorithm-toggle">
+          <input v-model="includeAlgorithm" type="checkbox" :disabled="sending" />
+          <span>包含算法手写编程题<span class="muted">（开启后深度环节按难度掺入高频算法题）</span></span>
+        </label>
+      </div>
       <p v-if="error" class="error-text">{{ error }}</p>
     </div>
 
@@ -484,7 +662,7 @@ function scrollDown() {
         <button type="button" class="mode-card" :disabled="sending" @click="startInterview('training')">
           <span class="mode-name">🎓 训练模式</span>
           <span class="muted mode-desc">
-            每题给出详细反馈（亮点/不足/改进回答）；回答不佳时由你选择「深度训练」专项强化或「下一板块」，适合针对性复习。
+            每题先给导师式人性化点评，再出下一题；得分旁可点「具体分析」查看亮点/不足/改进后的回答，适合针对性复习。
           </span>
         </button>
         <button type="button" class="mode-card" :disabled="sending" @click="startInterview('practice')">
@@ -552,46 +730,62 @@ function scrollDown() {
               <div v-if="item.role === 'assistant'" class="md" v-html="renderMarkdown(item.content)"></div>
               <template v-else>{{ item.content }}</template>
               <span v-if="item.restored" class="muted">（刷新恢复，历史消息不回放）</span>
+              <span v-if="item.comment" class="muted comment">{{ item.comment }}</span>
               <span v-if="isStreamingItem(item)" class="stream-cursor"></span>
             </div>
             <div v-if="item.score != null" class="score-line">
               <span :class="['badge', scoreClass(item.score)]">得分 {{ item.score }}</span>
-              <span v-if="item.comment" class="muted comment">{{ item.comment }}</span>
-            </div>
-            <!-- 训练模式详细反馈卡片：亮点/不足/改进回答（实战模式后端不返回 evaluation） -->
-            <div v-if="mode === 'training' && item.evaluation" class="eval-card">
-              <div v-if="item.evaluation.goodPoints?.length" class="eval-section good">
-                <div class="eval-title">✅ 亮点</div>
-                <ul>
-                  <li v-for="(point, idx) in item.evaluation.goodPoints" :key="'g' + idx">{{ point }}</li>
-                </ul>
+              <!-- 训练模式：得分不再附点评，亮点/不足/改进回答收入「具体分析」小窗 -->
+              <div v-if="mode === 'training' && item.evaluation" class="analysis-anchor">
+                <button type="button" class="ghost small analysis-btn" @click="toggleAnalysis(index)">
+                  {{ analysisOpenIndex === index ? '收起分析' : '🔍 具体分析' }}
+                </button>
+                <div v-if="analysisOpenIndex === index" class="analysis-popover card">
+                  <div class="analysis-head">
+                    <strong>本题分析</strong>
+                    <button type="button" class="ghost small" @click="analysisOpenIndex = null">✕ 关闭</button>
+                  </div>
+                  <div class="analysis-body">
+                    <div v-if="item.evaluation.goodPoints?.length" class="eval-section good">
+                      <div class="eval-title">✅ 亮点</div>
+                      <ul>
+                        <li v-for="(point, idx) in item.evaluation.goodPoints" :key="'g' + idx">{{ point }}</li>
+                      </ul>
+                    </div>
+                    <div v-if="item.evaluation.badPoints?.length" class="eval-section bad">
+                      <div class="eval-title">❌ 不足</div>
+                      <ul>
+                        <li v-for="(point, idx) in item.evaluation.badPoints" :key="'b' + idx">{{ point }}</li>
+                      </ul>
+                    </div>
+                    <div v-if="item.evaluation.improvedAnswer" class="eval-section improved">
+                      <div class="eval-title">💡 改进后的回答</div>
+                      <blockquote class="md" v-html="renderMarkdown(item.evaluation.improvedAnswer)"></blockquote>
+                    </div>
+                    <p v-if="!item.evaluation.goodPoints?.length && !item.evaluation.badPoints?.length && !item.evaluation.improvedAnswer" class="muted">
+                      本题暂无详细分析内容
+                    </p>
+                  </div>
+                </div>
               </div>
-              <div v-if="item.evaluation.badPoints?.length" class="eval-section bad">
-                <div class="eval-title">❌ 不足</div>
-                <ul>
-                  <li v-for="(point, idx) in item.evaluation.badPoints" :key="'b' + idx">{{ point }}</li>
-                </ul>
-              </div>
-              <div v-if="item.evaluation.improvedAnswer" class="eval-section improved">
-                <div class="eval-title">💡 改进回答</div>
-                <blockquote class="md" v-html="renderMarkdown(item.evaluation.improvedAnswer)"></blockquote>
-              </div>
+              <!-- 任务 4：每题反馈后常显「深入该模块」，跳转该题所属分组的专项训练（面试暂存续考） -->
+              <button
+                v-if="mode === 'training' && item.category && isCategoryAvailable(item.category)"
+                type="button"
+                class="ghost small deep-dive-btn"
+                :disabled="sending"
+                @click="requestDeepDive(item.category)"
+              >
+                🎯 深入该模块
+              </button>
             </div>
           </div>
         </div>
         <div v-if="thinking" class="bubble-row assistant">
           <div class="bubble typing-bubble" aria-label="面试官思考中">
             <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+            <span v-if="thinkingText" class="thinking-text">{{ thinkingText }}</span>
           </div>
-        </div>
-      </div>
-
-      <!-- 训练模式：回答不佳（低分/无效回答）时的选择 -->
-      <div v-if="followUpChoice && mode === 'training' && !isFinished" class="card followup-choice">
-        <span>💡 这道题可以专项强化，你想：</span>
-        <div class="choice-actions">
-          <button type="button" :disabled="sending" @click="enterDeepTraining">深度训练</button>
-          <button type="button" class="secondary" :disabled="sending" @click="chooseNextQuestion">下一板块</button>
         </div>
       </div>
 
@@ -730,6 +924,30 @@ function scrollDown() {
         </div>
       </div>
 
+      <!-- 任务 4：深入该模块二次确认（将暂存当前面试进度） -->
+      <div v-if="confirmDeepDive" class="loading-overlay">
+        <div class="card confirm-dialog">
+          <h3>深入「{{ confirmDeepDive }}」模块？</h3>
+          <p class="muted">将暂存当前面试进度，跳转该分组的专项训练；训练结束后回到本页可继续未完成的面试。</p>
+          <div class="confirm-actions">
+            <button class="secondary" @click="cancelDeepDive">继续面试</button>
+            <button @click="goDeepDive">前往专项训练</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 任务 4：放弃暂存面试二次确认 -->
+      <div v-if="confirmDiscard" class="loading-overlay">
+        <div class="card confirm-dialog">
+          <h3>放弃暂存的面试？</h3>
+          <p class="muted">该场面试将按已作答题目正常结束并归档报告，之后无法继续。</p>
+          <div class="confirm-actions">
+            <button class="secondary" @click="confirmDiscard = false">再想想</button>
+            <button @click="discardSavedInterview">确认放弃</button>
+          </div>
+        </div>
+      </div>
+
       <!-- 阶段过渡横幅：淡入淡出 -->
       <Transition name="phase-fade">
         <div v-if="phaseBanner" class="phase-banner">进入：{{ phaseBanner }}</div>
@@ -743,6 +961,30 @@ function scrollDown() {
   margin-bottom: 8px;
 }
 
+/* ---------- 任务 4：续考横幅与深入该模块按钮 ---------- */
+.resume-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 10px 0 4px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #fff7e6;
+  border: 1px solid #ffe3ad;
+}
+
+.resume-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.deep-dive-btn {
+  white-space: nowrap;
+}
+
 .start-row {
   display: flex;
   gap: 10px;
@@ -754,6 +996,66 @@ function scrollDown() {
   align-items: center;
   gap: 10px;
   margin-top: 12px;
+}
+
+.category-row {
+  margin-top: 14px;
+}
+
+.algorithm-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.algorithm-toggle input {
+  accent-color: var(--accent, #4f6ef7);
+  width: 16px;
+  height: 16px;
+}
+
+.category-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.category-link {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.category-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.chip-check:has(input:checked) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(64, 128, 255, 0.06);
+}
+
+.recommend-star {
+  font-size: 12px;
 }
 
 .resume-row select {
@@ -906,6 +1208,12 @@ function scrollDown() {
   animation: cursor-blink 1s steps(1) infinite;
 }
 
+.thinking-text {
+  margin-left: 8px;
+  font-size: 13px;
+  color: var(--text-light);
+}
+
 @keyframes cursor-blink {
   50% {
     opacity: 0;
@@ -965,13 +1273,40 @@ function scrollDown() {
   white-space: nowrap;
 }
 
-/* ---------- 训练模式详细反馈卡片 ---------- */
-.eval-card {
-  margin-top: 10px;
-  padding: 12px 14px;
-  border-radius: 8px;
-  background: #f8f9fc;
-  border: 1px solid #e6e9f2;
+/* ---------- 训练模式「具体分析」小窗（锚定在得分徽章旁，向上展开） ---------- */
+.analysis-anchor {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.analysis-btn {
+  white-space: nowrap;
+}
+
+.analysis-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  width: min(440px, 82vw);
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 14px 16px;
+  text-align: left;
+  box-shadow: 0 8px 28px rgba(31, 41, 55, 0.18);
+  animation: bubble-in 0.2s ease;
+}
+
+.analysis-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.analysis-body {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1154,29 +1489,6 @@ function scrollDown() {
 
 .comment {
   font-size: 12px;
-}
-
-/* ---------- 追问选择卡片（训练模式） ---------- */
-.followup-choice {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 16px;
-  margin-top: 12px;
-  flex-shrink: 0;
-  background: #fffaf0;
-  border-color: #ffe7b8;
-}
-
-.choice-actions {
-  display: flex;
-  gap: 10px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
-.choice-actions button {
-  white-space: nowrap;
 }
 
 /* ---------- 回答输入区：输入框 + 跳过/发送按钮同行右对齐，等高 ---------- */

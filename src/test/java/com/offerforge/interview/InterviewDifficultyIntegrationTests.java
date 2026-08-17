@@ -18,7 +18,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 难度控制端到端测试：连续高分推进阶段，DEEP 阶段连续高分触发难度提升并留阶段换题。
+ * 难度控制端到端测试：由浅入深从简单起步，连续高分推进阶段，DEEP 阶段连续高分触发难度提升并留阶段换题。
  * 题量上限：BASICS=2（验证高分但连击不足时仍推进）、PROJECT=1、DEEP=3。
  */
 @ActiveProfiles("test")
@@ -47,8 +47,8 @@ class InterviewDifficultyIntegrationTests {
         assertCode(post("/api/knowledge/import", token, Map.of()), 0);
         JsonNode start = post("/api/interview/start", token, Map.of());
         String sessionId = start.at("/data/sessionId").asText();
-        // 初始难度为中等
-        assertThat(start.at("/data/status/difficultyLabel").asText()).isEqualTo("中等");
+        // 由浅入深：初始难度为简单
+        assertThat(start.at("/data/status/difficultyLabel").asText()).isEqualTo("简单");
 
         // 自我介绍 → BASICS
         ask(sessionId, token, "自我介绍：熟悉 Java 后端。");
@@ -61,16 +61,16 @@ class InterviewDifficultyIntegrationTests {
         String sse2 = ask(sessionId, token, LONG_ANSWER);
         assertThat(sse2).contains("\"action\":\"ADVANCE\"").contains("\"state\":\"DEEP\"");
         JsonNode statusBeforeRaise = get("/api/interview/" + sessionId + "/status", token);
-        assertThat(statusBeforeRaise.at("/data/difficultyLabel").asText()).isEqualTo("中等");
+        assertThat(statusBeforeRaise.at("/data/difficultyLabel").asText()).isEqualTo("简单");
 
-        // DEEP 第 1 题高分：连击=3 且难度可提升 → 留阶段换更高难度题（MEDIUM→HARD）
+        // DEEP 第 1 题高分：连击=3 且难度可提升 → 留阶段换更高难度题（EASY→MEDIUM）
         String sse3 = ask(sessionId, token, LONG_ANSWER);
         assertThat(sse3).contains("\"action\":\"NEW_QUESTION\"").contains("\"state\":\"DEEP\"");
         JsonNode statusAfterRaise = get("/api/interview/" + sessionId + "/status", token);
-        assertThat(statusAfterRaise.at("/data/difficultyLabel").asText()).isEqualTo("困难");
+        assertThat(statusAfterRaise.at("/data/difficultyLabel").asText()).isEqualTo("中等");
         assertThat(statusAfterRaise.at("/data/currentQuestion").asText()).isNotBlank();
 
-        // DEEP 第 2 题（HARD）高分：升档后连击重置为 1 → 推进 CLOSING
+        // DEEP 第 2 题（MEDIUM）高分：升档后连击重置为 1 → 推进 CLOSING
         String sse4 = ask(sessionId, token, LONG_ANSWER);
         assertThat(sse4).contains("\"action\":\"ADVANCE\"").contains("\"state\":\"CLOSING\"").contains("考察环节已结束");
 
