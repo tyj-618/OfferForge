@@ -282,6 +282,19 @@ public class KnowledgeService {
     }
 
     /**
+     * 迁移本人条目到指定分组：新分组名即时生效（含新建标签）；
+     * 空白分组回落默认分组；不存在或非本人抛 NOT_FOUND。
+     */
+    @Transactional
+    public void moveOwned(Long userId, Long id, String category) {
+        KnowledgeItem item = repository.findByIdAndOwnerUserId(id, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "资料不存在"));
+        item.setCategory(normalizeCategory(category));
+        repository.save(item);
+        log.info("knowledge moved userId={} itemId={} category={}", userId, id, item.getCategory());
+    }
+
+    /**
      * 可见分组视图：官方分组按固定顺序，自定义分组按首次上传顺序（排除与官方重名的分组）。
      */
     public CategoriesView visibleCategories(Long userId) {

@@ -157,6 +157,8 @@ export const knowledgeApi = {
   // 上传资料：FormData（file + 可选 category），仅支持 .md/.txt，单文件 ≤1MB
   upload: (formData) => http.post('/knowledge/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
   remove: (id) => http.delete(`/knowledge/${id}`),
+  // 迁移本人资料到指定分组：分组名可为已有标签或新建标签
+  updateCategory: (id, category) => http.put(`/knowledge/${id}/category`, { category }),
   // 批量删除本人资料：后端仅删归属本人的 id，返回实际删除条数
   batchRemove: (ids) => http.post('/knowledge/batch-delete', { ids })
 }

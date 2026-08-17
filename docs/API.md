@@ -103,6 +103,12 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
 
 响应 data：`{ "deleted": 3 }`
 
+### PUT /knowledge/{id}/category
+
+迁移本人资料到指定标签；标签名可为已有分组或新建分组，空白回落默认分组；非本人返回 40400。
+
+请求：`{ "category": "新标签" }`
+
 ---
 
 ## 问答 `/api/qa`

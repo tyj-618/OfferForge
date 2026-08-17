@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -123,9 +124,23 @@ public class KnowledgeController {
         return ApiResponse.success(null);
     }
 
+    /** 迁移本人资料到指定分组：分组名可为已有标签或新建标签；不存在或非本人返回 NOT_FOUND */
+    @PutMapping("/{id}/category")
+    public ApiResponse<Void> updateCategory(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @PathVariable Long id,
+            @RequestBody CategoryUpdateRequest request) {
+        Long userId = currentUserService.requireUserId(authorization);
+        knowledgeService.moveOwned(userId, id, request == null ? null : request.category());
+        return ApiResponse.success(null);
+    }
+
     public record BatchDeleteRequest(List<Long> ids) {
     }
 
     public record BatchDeleteResult(int deleted) {
+    }
+
+    public record CategoryUpdateRequest(String category) {
     }
 }

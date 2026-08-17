@@ -15,6 +15,13 @@ const selectedIds = ref([])
 const loading = ref(false)
 const deleting = ref(false)
 
+// 迁移状态：当前打开迁移面板的条目、目标分组（已有标签选择或新建标签输入）
+const moveTargetId = ref(null)
+const moveCategory = ref('')
+const moveNewName = ref('')
+const moving = ref(false)
+const categoryOptions = ref([])
+
 const currentItems = computed(() => (tab.value === 'official' ? officialItems.value : myItems.value))
 
 // 当前标签下的分组列表：按条目实际分组去重，保持首次出现顺序
@@ -64,16 +71,27 @@ async function loadAll() {
   }
 }
 
+// 迁移目标标签候选：官方分组 + 本人自定义分组
+async function loadCategoryOptions() {
+  try {
+    const view = await knowledgeApi.categories()
+    categoryOptions.value = [...(view?.official || []), ...(view?.custom || [])]
+  } catch (e) {
+    notifyError(e)
+  }
+}
+
 function switchTab(nextTab) {
   if (tab.value === nextTab) {
     return
   }
   tab.value = nextTab
-  // 切标签时重置筛选与勾选，避免分组/选中跨标签串用
+  // 切标签时重置筛选、勾选与迁移面板，避免跨标签串用
   activeCategory.value = ''
   keyword.value = ''
   expandedId.value = null
   selectedIds.value = []
+  moveTargetId.value = null
 }
 
 function pickCategory(category) {
@@ -137,7 +155,45 @@ async function batchRemove() {
   }
 }
 
-onMounted(loadAll)
+// 打开/关闭迁移面板：默认选中当前分组，新建标签输入优先于下拉选择
+function openMove(item) {
+  if (moveTargetId.value === item.id) {
+    moveTargetId.value = null
+    return
+  }
+  moveTargetId.value = item.id
+  moveCategory.value = item.category
+  moveNewName.value = ''
+}
+
+async function submitMove(item) {
+  const target = moveNewName.value.trim() || moveCategory.value
+  if (!target) {
+    toast.info('请选择或输入目标标签')
+    return
+  }
+  if (target === item.category) {
+    toast.info('该资料已在目标标签中')
+    moveTargetId.value = null
+    return
+  }
+  moving.value = true
+  try {
+    await knowledgeApi.updateCategory(item.id, target)
+    toast.success(`已迁移到「${target}」`)
+    moveTargetId.value = null
+    await Promise.all([loadAll(), loadCategoryOptions()])
+  } catch (e) {
+    notifyError(e)
+  } finally {
+    moving.value = false
+  }
+}
+
+onMounted(() => {
+  loadAll()
+  loadCategoryOptions()
+})
 </script>
 
 <template>
@@ -241,7 +297,27 @@ onMounted(loadAll)
           <div v-if="expandedId === item.id" class="item-body">
             <pre class="answer-block">{{ item.answer }}</pre>
             <div v-if="tab === 'mine'" class="item-actions">
+              <button type="button" class="ghost" @click="openMove(item)">
+                {{ moveTargetId === item.id ? '收起迁移' : '迁移' }}
+              </button>
               <button type="button" class="ghost danger-text" @click="removeOne(item)">删除</button>
+            </div>
+            <!-- 迁移面板：选已有标签或输入新建标签（新建优先） -->
+            <div v-if="tab === 'mine' && moveTargetId === item.id" class="move-panel">
+              <span class="move-label">迁移到标签：</span>
+              <select v-model="moveCategory" class="move-select" :disabled="moving">
+                <option v-for="name in categoryOptions" :key="name" :value="name">{{ name }}</option>
+              </select>
+              <input
+                v-model="moveNewName"
+                class="move-input"
+                maxlength="64"
+                placeholder="或输入新标签名（优先生效）"
+                :disabled="moving"
+              />
+              <button type="button" :disabled="moving" @click="submitMove(item)">
+                {{ moving ? '迁移中…' : '确认迁移' }}
+              </button>
             </div>
           </div>
         </div>
@@ -367,7 +443,10 @@ onMounted(loadAll)
 }
 
 .item-check {
+  /* 复选框固定在行首顶部，避免长题面换行后垂直居中显得突兀 */
   flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 4px;
 }
 
 .item-question {
@@ -427,6 +506,40 @@ onMounted(loadAll)
 .item-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 迁移面板：标签选择 + 新建输入横向排列，窄屏自动换行 */
+.move-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px dashed var(--primary);
+  border-radius: 10px;
+}
+
+.move-label {
+  font-size: 13px;
+  color: var(--text-light);
+}
+
+.move-select {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-width: 180px;
+}
+
+.move-input {
+  flex: 1;
+  min-width: 160px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 .danger-text {
@@ -449,6 +562,10 @@ onMounted(loadAll)
 
   .item-body {
     padding-left: 4px;
+  }
+
+  .move-select {
+    max-width: 100%;
   }
 }
 </style>

@@ -166,6 +166,29 @@ class KnowledgeOwnershipTests {
     }
 
     @Test
+    void moveOwnedChangesCategoryAndRejectsOtherUsers() {
+        knowledgeService.uploadKnowledge(USER_A, "a.md", MARKED_CONTENT, null);
+        Long itemId = knowledgeService.listMine(USER_A).get(0).id();
+
+        // 他人迁移无效：NOT_FOUND，条目分组不变
+        assertThatThrownBy(() -> knowledgeService.moveOwned(USER_B, itemId, "Java基础"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).errorCode())
+                .isEqualTo(ErrorCode.NOT_FOUND);
+        assertThat(knowledgeService.listMine(USER_A).get(0).category())
+                .isEqualTo(KnowledgeService.DEFAULT_CUSTOM_CATEGORY);
+
+        // 本人迁移到新建标签即时生效
+        knowledgeService.moveOwned(USER_A, itemId, "新标签");
+        assertThat(knowledgeService.listMine(USER_A).get(0).category()).isEqualTo("新标签");
+
+        // 空白分组回落默认分组
+        knowledgeService.moveOwned(USER_A, itemId, "  ");
+        assertThat(knowledgeService.listMine(USER_A).get(0).category())
+                .isEqualTo(KnowledgeService.DEFAULT_CUSTOM_CATEGORY);
+    }
+
+    @Test
     void recommendCategoriesScoresByResumeKeywords() {
         resumeService.save(USER_A, new ResumeRequest(null, "张三", null,
                 "Java 并发编程、MySQL 索引优化、Redis 缓存、Spring Boot 微服务", null, null, null, null));
