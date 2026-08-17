@@ -91,7 +91,7 @@ class FollowUpStrategyTests {
         @Override
         public AnswerEvaluation evaluateAnswerDetail(String question, String knowledgePoint,
                                                      String candidateAnswer, String userAnswer) {
-            return new AnswerEvaluation(5, 5, 5, 5, 5, List.of(), List.of(), List.of(), "stub");
+            return new AnswerEvaluation(5, 5, 5, 5, 5, List.of(), List.of(), List.of(), "stub", null, null, null);
         }
 
         @Override

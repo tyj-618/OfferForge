@@ -60,7 +60,7 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
 请求：同 register。响应 data：
 
 ```json
-{ "token": "eyJ...", "expiresIn": 7200, "refreshToken": "...", "refreshExpiresIn": 604800, "user": { } }
+{ "token": "eyJ...", "expiresIn": 7200, "refreshToken": "...", "refreshExpiresIn": 604800, "user": { "id": 1, "username": "alice", "nickname": "Candidate_1" } }
 ```
 
 同时下发 httpOnly refresh cookie（路径 `/api/auth`）。
@@ -72,6 +72,12 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
 ### POST /auth/logout
 
 清除 refresh cookie。
+
+### GET /auth/me
+
+当前登录用户摘要（顶栏展示用户名；刷新恢复时 token 在而登录缓存丢失的场景）。未登录返回 40100。
+
+响应 data：`{ "id": 1, "username": "alice", "nickname": "Candidate_1" }`
 
 ---
 
@@ -133,15 +139,24 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
   "currentQuestionFollowUp": false,
   "followUpsUsed": 0,
   "followUpLimit": 2,
+  "lastScore": 6.5,
   "averageScore": 6.5,
   "mode": "training",
-  "followUpChoiceRequired": false
+  "followUpChoiceRequired": false,
+  "deepTrainingActive": false,
+  "deepTrainingAsked": 0,
+  "deepTrainingPassStreak": 0,
+  "returnState": null
 }
 ```
 
-`state` 枚举：`OPENING | BASICS | PROJECT | DEEP | CLOSING | FINISHED`；
+`state` 枚举：`OPENING | BASICS | PROJECT | DEEP | CLOSING | FINISHED | DEEP_TRAINING`；
 `mode` 枚举：`training | practice`；
-`followUpChoiceRequired`：训练模式下后端暂存了追问、等待用户选择「继续深入」/「下一题」时为 `true`。
+`followUpChoiceRequired`：训练模式下后端暂存了追问、等待用户选择「深度训练」/「下一板块」时为 `true`；
+实战模式过程免评分：`lastScore`/`averageScore` 为 `null`（评分仍完整入库供结束报告使用）；
+`deepTrainingActive`：是否处于深度训练子流程；`deepTrainingAsked`：已出递进题数（上限 5）；
+`deepTrainingPassStreak`：连续达标（≥6 分）题数，达 2 自动返回主面试；
+`returnState`：深度训练进入前的主面试阶段（前端阶段进度条据此定位）。
 
 ### POST /interview/{sessionId}/ask （SSE）
 
@@ -156,10 +171,25 @@ event:message
 data:面试官的下一段话（分块多次下发）
 
 event:done
-data:{"score":7,"evaluationComment":"……","status":{...},"action":"CONTINUE"}
+data:{"score":7,"evaluationComment":"……","evaluation":{...},"status":{...},"action":"NEW_QUESTION"}
 ```
 
-`action` 为 `CONTINUE` 或 `FINISH`（`status.state=FINISHED` 时前端跳转报告）。
+`action` 枚举：`ADVANCE`（推进阶段）/ `NEW_QUESTION`（同阶段换题）/ `FOLLOW_UP`（追问）/ `FINISH`（`status.state=FINISHED` 时前端跳转报告），无评分轮次为 `null`。
+
+训练模式 done 载荷携带 `evaluation` 详细评估（实战模式为 null）：
+
+```json
+{
+  "overall": 7, "accuracy": 8, "completeness": 7, "clarity": 7, "depth": 6,
+  "keyPoints": ["……"], "missedPoints": ["……"], "wrongPoints": [],
+  "feedback": "一句话点评",
+  "goodPoints": ["回答中的亮点"],
+  "badPoints": ["回答中的不足"],
+  "improvedAnswer": "改进后的参考回答"
+}
+```
+
+实战模式过程免评分：`score`/`evaluationComment`/`evaluation` 均为 `null`，面试官仅以极简中性过渡语衔接；无效回答（「不知道/不清楚」类短句）由服务端直接判低档。
 
 错误帧：
 
@@ -171,17 +201,25 @@ data:{"code":40900,"message":"面试尚未开始"}
 ### POST /interview/{sessionId}/skip （SSE）
 
 跳过当前题（计 0 分并推进状态机），无请求体，事件流契约与 ask 一致。
-仅 `BASICS/PROJECT/DEEP` 环节可用，开场/收尾环节返回 40900。
+仅 `BASICS/PROJECT/DEEP` 环节可用，开场/收尾环节返回 40900；深度训练中拒绝跳过（40900，引导使用退出按钮）。
 
-### POST /interview/{sessionId}/followup （SSE）
+### POST /interview/{sessionId}/deep-training （SSE）
 
-训练模式「继续深入」：发出后端暂存的追问（计入追问次数），无请求体，事件流契约与 ask 一致（`score`/`evaluationComment` 为 null）。
-仅训练模式且存在暂存追问时可用，否则 error 事件返回 40900。
+训练模式「深度训练」：丢弃暂存追问，进入 `DEEP_TRAINING` 子流程并发出第 1 道递进题，无请求体，事件流契约与 ask 一致。
+递进题围绕薄弱知识点逐题递进（上限 5 题），连续 2 题 ≥6 分达标后自动返回主面试；不计入主流程已问题数/平均分。
+仅训练模式且存在暂存追问（`followUpChoiceRequired=true`）时可用，否则 error 事件返回 40900。
+
+### POST /interview/{sessionId}/deep-training/exit （SSE）
+
+主动退出深度训练：恢复主面试阶段并出下一题（题量已满则推进），无请求体，事件流契约与 ask 一致。
+仅 `DEEP_TRAINING` 状态下可用，否则 error 事件返回 40900。
 
 ### POST /interview/{sessionId}/next-question （SSE）
 
-训练模式「下一题」：放弃暂存追问（原低分已入账，不额外计分）并推进到下一题，无请求体，事件流契约与 ask 一致。
+训练模式「下一板块」：放弃深度训练机会（原低分已入账，不额外计分）并推进到下一题，无请求体，事件流契约与 ask 一致。
 仅训练模式且存在暂存追问时可用，否则 error 事件返回 40900。
+
+> 原 `POST /interview/{sessionId}/followup` 端点已移除，由深度训练子流程取代。
 
 ### POST /interview/{sessionId}/finish
 

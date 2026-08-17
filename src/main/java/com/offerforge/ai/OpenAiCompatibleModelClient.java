@@ -217,6 +217,19 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
 
     @Override
     public AnswerEvaluation evaluateAnswerDetail(String question, String knowledgePoint, String candidateAnswer, String userAnswer) {
+        return evaluateAnswerDetail(question, knowledgePoint, candidateAnswer, userAnswer, false);
+    }
+
+    @Override
+    public AnswerEvaluation evaluateAnswerDetail(String question, String knowledgePoint, String candidateAnswer,
+                                                 String userAnswer, boolean detailed) {
+        String detailedRequirement = detailed ? """
+
+                另外请提供详细反馈字段：
+                - "goodPoints"：回答中的亮点/说对的关键点（字符串数组，可为空）
+                - "badPoints"：回答中的不足/错误/遗漏点（字符串数组，可为空）
+                - "improvedAnswer"：一份完整的参考改进回答（字符串，针对原问题给出条理清晰的标准回答）
+                """ : "";
         String prompt = """
                 你是一个资深技术面试官，正在评估候选人的回答。
 
@@ -225,13 +238,15 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
                 标准答案要点：%s
                 候选人回答：%s
 
-                请从以下维度评分（0-10）：
+                评分规则：
                 1. 准确性（accuracy）：回答中的技术事实是否正确，有无明显错误
                 2. 完整性（completeness）：是否覆盖了标准答案中的关键要点
                 3. 表达清晰度（clarity）：回答是否条理清晰、逻辑连贯
                 4. 深度（depth）：是否有深入分析、原理剖析或延伸思考，而非仅停留在表面
+                5. 若候选人回答是“不知道/不清楚/不了解/不会/忘了”等无效回答，
+                   各维度应给低分（0-2），不得给出任何正面评价，feedback 应指出未提供有效回答并给出学习方向
 
-                请返回 JSON 格式：
+                请返回 JSON 格式（分值均为 0-10 数字）：
                 {
                   "accuracy": 数字,
                   "completeness": 数字,
@@ -241,20 +256,22 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
                   "keyPoints": ["应覆盖的关键要点1"],
                   "missedPoints": ["遗漏的要点1"],
                   "wrongPoints": ["错误的说法1"],
-                  "feedback": "2-3句话的综合点评，指出亮点和不足"
+                  "feedback": "2-3句话的综合点评，指出亮点和不足"%s
                 }
                 只输出 JSON 本身，不要输出其他内容。
                 """.formatted(
                 question,
                 knowledgePoint == null || knowledgePoint.isBlank() ? "（未指定）" : knowledgePoint,
                 referenceText(candidateAnswer),
-                userAnswer == null ? "" : userAnswer);
+                userAnswer == null ? "" : userAnswer,
+                detailedRequirement);
         AiTextResult result = generateText(List.of(ChatMessage.user(prompt)));
         AnswerEvaluation parsed = parseAnswerEvaluation(result.content());
         if (parsed == null) {
             log.warn("qa stage=llm mode=evaluate-detail status=unparsable model={} requestId={}",
                     properties.getModel(), result.requestId());
-            return new AnswerEvaluation(5, 5, 5, 5, 5, List.of(), List.of(), List.of(), "评估结果解析失败，按中等处理");
+            return new AnswerEvaluation(5, 5, 5, 5, 5, List.of(), List.of(), List.of(),
+                    "评估结果解析失败，按中等处理", null, null, null);
         }
         return parsed;
     }
@@ -357,9 +374,14 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
             double overall = Math.round(
                     (accuracy * 0.35 + completeness * 0.25 + clarity * 0.20 + depth * 0.20) * 10.0) / 10.0;
             String feedback = node.path("feedback").asText("");
+            // 详细反馈字段仅训练模式详细评估时产出，缺失置 null（使用处判空）
+            List<String> goodPoints = node.has("goodPoints") ? readPoints(node, "goodPoints") : null;
+            List<String> badPoints = node.has("badPoints") ? readPoints(node, "badPoints") : null;
+            String improvedAnswer = node.path("improvedAnswer").asText("");
             return new AnswerEvaluation(accuracy, completeness, clarity, depth, overall,
                     readPoints(node, "keyPoints"), readPoints(node, "missedPoints"), readPoints(node, "wrongPoints"),
-                    feedback.isBlank() ? "评估完成" : feedback);
+                    feedback.isBlank() ? "评估完成" : feedback,
+                    goodPoints, badPoints, improvedAnswer.isBlank() ? null : improvedAnswer);
         } catch (JsonProcessingException exception) {
             return null;
         }

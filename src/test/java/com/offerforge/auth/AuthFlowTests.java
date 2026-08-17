@@ -73,6 +73,26 @@ class AuthFlowTests {
         assertCode(result, 40000);
     }
 
+    @Test
+    void meReturnsCurrentUserSummary() throws Exception {
+        String username = "me_user_" + System.nanoTime();
+        assertCode(post("/api/auth/register", Map.of("username", username, "password", "123456")), 0);
+        JsonNode login = post("/api/auth/login", Map.of("username", username, "password", "123456"));
+        assertCode(login, 0);
+        String token = login.at("/data/token").asText();
+        // 登录响应本身携带用户摘要（前端登录时缓存）
+        assertThat(login.at("/data/user/username").asText()).isEqualTo(username);
+
+        // /api/auth/me：刷新恢复场景（token 在而登录缓存丢失）补齐用户名
+        JsonNode me = get("/api/auth/me", "Bearer " + token);
+        assertCode(me, 0);
+        assertThat(me.at("/data/username").asText()).isEqualTo(username);
+        assertThat(me.at("/data/nickname").asText()).startsWith("Candidate_");
+
+        // 未登录访问 → 40100
+        assertCode(get("/api/auth/me", null), 40100);
+    }
+
     private JsonNode post(String path, Map<String, Object> body) throws Exception {
         return post(path, body, null);
     }
@@ -82,6 +102,17 @@ class AuthFlowTests {
                 .uri(URI.create("http://localhost:" + port + path))
                 .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
                 .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body), StandardCharsets.UTF_8));
+        if (authorization != null) {
+            builder.header("Authorization", authorization);
+        }
+        HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+        return objectMapper.readTree(response.body());
+    }
+
+    private JsonNode get(String path, String authorization) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + port + path))
+                .GET();
         if (authorization != null) {
             builder.header("Authorization", authorization);
         }

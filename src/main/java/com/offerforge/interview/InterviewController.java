@@ -106,22 +106,38 @@ public class InterviewController {
     }
 
     /**
-     * 训练模式“继续深入”：发出暂存的追问，事件结构与 ask 一致；非训练模式或无暂存追问走 error 事件。
+     * 训练模式“深度训练”：丢弃暂存追问进入 DEEP_TRAINING 子流程并发出第 1 道递进题，
+     * 事件结构与 ask 一致；非训练模式或无待选追问走 error 事件。
      */
-    @PostMapping(value = "/{sessionId}/followup", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter followUp(@RequestHeader(value = "Authorization", required = false) String authorization,
-                               @PathVariable String sessionId) {
+    @PostMapping(value = "/{sessionId}/deep-training", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter deepTraining(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                   @PathVariable String sessionId) {
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
         emitter.onTimeout(emitter::complete);
         emitter.onError(throwable -> emitter.complete());
         interviewStreamExecutor.execute(() -> writeChoiceTurn(
-                emitter, authorization, sessionId, "followup",
-                (userId, chunkConsumer) -> interviewService.chooseFollowUp(userId, sessionId, chunkConsumer)));
+                emitter, authorization, sessionId, "deep-training",
+                (userId, chunkConsumer) -> interviewService.enterDeepTraining(userId, sessionId, chunkConsumer)));
         return emitter;
     }
 
     /**
-     * 训练模式“下一题”：放弃暂存追问并推进到下一题，事件结构与 ask 一致。
+     * 退出深度训练：恢复主面试并出下一题，事件结构与 ask 一致；非深度训练状态走 error 事件。
+     */
+    @PostMapping(value = "/{sessionId}/deep-training/exit", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter deepTrainingExit(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                       @PathVariable String sessionId) {
+        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
+        emitter.onTimeout(emitter::complete);
+        emitter.onError(throwable -> emitter.complete());
+        interviewStreamExecutor.execute(() -> writeChoiceTurn(
+                emitter, authorization, sessionId, "deep-training-exit",
+                (userId, chunkConsumer) -> interviewService.exitDeepTraining(userId, sessionId, chunkConsumer)));
+        return emitter;
+    }
+
+    /**
+     * 训练模式“下一板块”：放弃深度训练机会并推进到下一题/下一阶段，事件结构与 ask 一致。
      */
     @PostMapping(value = "/{sessionId}/next-question", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter nextQuestion(@RequestHeader(value = "Authorization", required = false) String authorization,
@@ -180,7 +196,7 @@ public class InterviewController {
     }
 
     /**
-     * 无请求体的流式回合统一模板（skip / followup / next-question）：鉴权后委托服务层执行，
+     * 无请求体的流式回合统一模板（skip / deep-training / deep-training/exit / next-question）：鉴权后委托服务层执行，
      * 业务/IO/运行时异常均以 error 事件收尾，避免连接悬挂到超时。
      */
     private void writeChoiceTurn(SseEmitter emitter, String authorization, String sessionId, String turnName,

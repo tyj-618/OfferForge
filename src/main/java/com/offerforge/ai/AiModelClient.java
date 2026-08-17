@@ -52,6 +52,16 @@ public interface AiModelClient {
     AnswerEvaluation evaluateAnswerDetail(String question, String knowledgePoint, String candidateAnswer, String userAnswer);
 
     /**
+     * 带详细反馈的结构化评估：detailed=true 时要求模型额外产出
+     * goodPoints/badPoints/improvedAnswer（训练模式详细反馈与深度训练使用），
+     * 解析失败时置 null/空。默认实现忽略 detailed，Mock 等实现无需感知。
+     */
+    default AnswerEvaluation evaluateAnswerDetail(String question, String knowledgePoint, String candidateAnswer,
+                                                  String userAnswer, boolean detailed) {
+        return evaluateAnswerDetail(question, knowledgePoint, candidateAnswer, userAnswer);
+    }
+
+    /**
      * 追问生成：基于原题与评估发现的遗漏/错误要点，生成同知识点换角度的追问题面（纯文本）。
      */
     String generateFollowUpQuestion(String prompt);

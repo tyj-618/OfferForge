@@ -1,5 +1,6 @@
 package com.offerforge.interview;
 
+import com.offerforge.ai.AiGeneratedQuestion;
 import com.offerforge.ai.AiModelClient;
 import com.offerforge.ai.AiStreamChunkConsumer;
 import com.offerforge.ai.AnswerEvaluation;
@@ -159,7 +160,10 @@ public class InterviewService {
                     messageStore.append(sessionId, List.of(ChatMessage.user(userMessage)));
 
                     InterviewTurnResult result;
-                    if (context.getState() == InterviewState.OPENING) {
+                    if (context.getState() == InterviewState.DEEP_TRAINING) {
+                        // 深度训练子流程：递进题评估 + 达标/上限判定，不走主状态机
+                        result = answerDeepTraining(context, sessionId, userMessage, chunkConsumer);
+                    } else if (context.getState() == InterviewState.OPENING) {
                         // 开场后的首次作答（自我介绍）不评分，直接进入基础考察
                         advance(context, sessionId, chunkConsumer);
                         result = new InterviewTurnResult(null, null, StateTransitionStrategy.Action.ADVANCE, statusView(context));
@@ -228,12 +232,15 @@ public class InterviewService {
                     if (phase == InterviewState.OPENING || phase == InterviewState.CLOSING) {
                         throw new BusinessException(ErrorCode.CONFLICT, "当前环节无需跳题，直接回复即可");
                     }
+                    if (phase == InterviewState.DEEP_TRAINING) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "深度训练中请作答当前题，可点击“退出深度训练”返回主面试");
+                    }
                     log.info("interview sessionId={} phase={} question skipped", sessionId, phase);
                     messageStore.append(sessionId, List.of(ChatMessage.user("（跳过此题）")));
 
                     // 记 0 分并纳入平均分，连续低分连击照常累计（可能触发降难度）
                     AnswerEvaluation skipped = new AnswerEvaluation(
-                            0, 0, 0, 0, 0, List.of(), List.of(), List.of(), "候选人跳过了该题");
+                            0, 0, 0, 0, 0, List.of(), List.of(), List.of(), "候选人跳过了该题", null, null, null);
                     context.recordAnswer(context.getCurrentQuestion(), "", skipped);
                     updateScoreStreaks(context, 0);
                     if (context.getConsecutiveLowScores() >= 2 && context.getCurrentDifficulty() != Difficulty.EASY) {
@@ -252,7 +259,11 @@ public class InterviewService {
                         askNextQuestion(context, sessionId, phase, chunkConsumer);
                     }
                     sessionStore.save(context);
-                    return new InterviewTurnResult(0.0, "已跳过该题，计 0 分", action, statusView(context));
+                    // 实战模式过程免评分：不向前端暴露 0 分与计分明细，点评改中性
+                    if (context.isTrainingMode()) {
+                        return new InterviewTurnResult(0.0, "已跳过该题，计 0 分", action, statusView(context));
+                    }
+                    return new InterviewTurnResult(null, "已跳过该题", action, statusView(context));
                 } finally {
                     LlmCallContext.clear();
                 }
@@ -266,9 +277,10 @@ public class InterviewService {
                                                       String userMessage, AiStreamChunkConsumer chunkConsumer)
             throws IOException {
         InterviewState phase = context.getState();
+        // 训练模式要求详细反馈（goodPoints/badPoints/improvedAnswer），实战模式常规评估即可
         AnswerEvaluation evaluation = evaluationService.evaluate(
                 context.getCurrentQuestion(), context.getCurrentKnowledgePoint(),
-                context.getCurrentCandidateAnswer(), userMessage);
+                context.getCurrentCandidateAnswer(), userMessage, context.isTrainingMode());
         double overall = evaluation.overall();
         context.recordAnswer(context.getCurrentQuestion(), userMessage, evaluation);
         updateScoreStreaks(context, overall);
@@ -295,7 +307,8 @@ public class InterviewService {
                 String followUpQuestion = followUpStrategy.generateFollowUpQuestion(
                         context.getCurrentQuestion(), evaluation.missedPoints(), evaluation.wrongPoints());
                 if (context.isTrainingMode()) {
-                    // 训练模式：追问暂不发出，暂存等用户选择“继续深入”或“下一题”（前端据 followUpChoiceRequired 展示按钮）
+                    // 训练模式：追问暂不发出，暂存作为“深度训练”触发信号（前端据 followUpChoiceRequired 展示按钮），
+                    // 用户选择“深度训练”后丢弃暂存追问进入子流程
                     context.setPendingFollowUpQuestion(followUpQuestion);
                     log.info("interview sessionId={} follow-up pending user choice", sessionId);
                 } else {
@@ -314,13 +327,18 @@ public class InterviewService {
             case ADVANCE -> advance(context, sessionId, chunkConsumer);
             case FINISH -> finish(context, sessionId);
         }
-        return new InterviewTurnResult(overall, evaluation.feedback(), action, statusView(context));
+        // 实战模式过程免评分：评分照常入库（状态机/报告依赖），但不向前端返回评分与点评
+        if (context.isTrainingMode()) {
+            return new InterviewTurnResult(overall, evaluation.feedback(), action, statusView(context), evaluation);
+        }
+        return new InterviewTurnResult(null, null, action, statusView(context));
     }
 
     /**
-     * 训练模式“继续深入”：将暂存的追问正式发出（计入追问次数）；非训练模式或无暂存追问时报冲突。
+     * 训练模式“深度训练”：丢弃暂存追问（仅保留为触发信号），进入 DEEP_TRAINING 子流程并发出第 1 道递进题。
+     * 仅训练模式且有待选追问时可用；递进题不计主流程已问题数/平均分。
      */
-    public InterviewTurnResult chooseFollowUp(Long userId, String sessionId, AiStreamChunkConsumer chunkConsumer)
+    public InterviewTurnResult enterDeepTraining(Long userId, String sessionId, AiStreamChunkConsumer chunkConsumer)
             throws IOException {
         Object lock = lockFor(sessionId);
         try {
@@ -333,14 +351,18 @@ public class InterviewService {
                         throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，请勿继续作答");
                     }
                     if (!context.isTrainingMode() || context.getPendingFollowUpQuestion() == null) {
-                        throw new BusinessException(ErrorCode.CONFLICT, "当前无可深入的追问");
+                        throw new BusinessException(ErrorCode.CONFLICT, "当前无可深度训练的知识点");
                     }
-                    String followUpQuestion = context.getPendingFollowUpQuestion();
                     context.setPendingFollowUpQuestion(null);
-                    log.info("interview sessionId={} user chose follow-up deep dive", sessionId);
-                    askFollowUpQuestion(context, sessionId, followUpQuestion, chunkConsumer);
+                    context.setDeepTrainingReturnState(context.getState());
+                    context.setDeepTrainingAsked(0);
+                    context.setDeepTrainingConsecutivePass(0);
+                    context.setState(InterviewState.DEEP_TRAINING);
+                    log.info("interview sessionId={} entered deep training, return state={}",
+                            sessionId, context.getDeepTrainingReturnState());
+                    askDeepTrainingQuestion(context, sessionId, chunkConsumer);
                     sessionStore.save(context);
-                    return new InterviewTurnResult(null, null, StateTransitionStrategy.Action.FOLLOW_UP, statusView(context));
+                    return new InterviewTurnResult(null, null, null, statusView(context));
                 } finally {
                     LlmCallContext.clear();
                 }
@@ -351,7 +373,149 @@ public class InterviewService {
     }
 
     /**
-     * 训练模式“下一题”：放弃暂存追问（原低分已入账，不额外计分），推进到同阶段下一题或下一阶段。
+     * 主动退出深度训练：恢复主面试阶段并出下一题（题量已满则推进）。
+     */
+    public InterviewTurnResult exitDeepTraining(Long userId, String sessionId, AiStreamChunkConsumer chunkConsumer)
+            throws IOException {
+        Object lock = lockFor(sessionId);
+        try {
+            synchronized (lock) {
+                InterviewContext context = requireOwnedSession(userId, sessionId);
+                LlmCallContext.bind(credentialResolver.resolveFor(userId));
+                LlmCallContext.setUsageListener(context::addTokenUsage);
+                try {
+                    if (context.getState().terminal()) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，请勿继续作答");
+                    }
+                    if (context.getState() != InterviewState.DEEP_TRAINING) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "当前不在深度训练中");
+                    }
+                    log.info("interview sessionId={} deep training exited after {} questions",
+                            sessionId, context.getDeepTrainingAsked());
+                    emitPlain(sessionId, "好的，我们退出深度训练，回到主面试。", chunkConsumer);
+                    StateTransitionStrategy.Action action = resumeFromDeepTraining(context, sessionId, chunkConsumer);
+                    sessionStore.save(context);
+                    return new InterviewTurnResult(null, null, action, statusView(context));
+                } finally {
+                    LlmCallContext.clear();
+                }
+            }
+        } finally {
+            releaseLockIfTerminal(sessionId, lock);
+        }
+    }
+
+    /**
+     * 深度训练中的作答：详细评估 + 连续达标累计；
+     * 连续 2 题 ≥ 6 分达标或达上限 5 题后均自动返回主面试（防无限循环）。
+     */
+    private InterviewTurnResult answerDeepTraining(InterviewContext context, String sessionId,
+                                                   String userMessage, AiStreamChunkConsumer chunkConsumer)
+            throws IOException {
+        AnswerEvaluation evaluation = evaluationService.evaluate(
+                context.getCurrentQuestion(), context.getCurrentKnowledgePoint(), null, userMessage, true);
+        double overall = evaluation.overall();
+        // 深度训练题标记 followUp + deepTraining：不计入主流程已问题数/平均分/追问统计
+        context.recordAnswer(context.getCurrentQuestion(), userMessage, evaluation, true);
+        boolean pass = overall >= properties.getDeepTrainingPassScore();
+        context.setDeepTrainingConsecutivePass(pass ? context.getDeepTrainingConsecutivePass() + 1 : 0);
+        boolean achieved = context.getDeepTrainingConsecutivePass() >= properties.getDeepTrainingPassStreak();
+        boolean usedUp = context.getDeepTrainingAsked() >= properties.getMaxDeepTrainingQuestions();
+        log.info("interview sessionId={} deep training answer score={} pass={} streak={} asked={}",
+                sessionId, overall, pass, context.getDeepTrainingConsecutivePass(), context.getDeepTrainingAsked());
+
+        StateTransitionStrategy.Action action = null;
+        if (achieved) {
+            emitPlain(sessionId, "很棒！你已连续 " + properties.getDeepTrainingPassStreak()
+                    + " 题达标，这个知识点已经得到强化，我们回到主面试继续。", chunkConsumer);
+            action = resumeFromDeepTraining(context, sessionId, chunkConsumer);
+        } else if (usedUp) {
+            emitPlain(sessionId, "深度训练已完成 " + properties.getMaxDeepTrainingQuestions()
+                    + " 题，我们先回到主面试，建议面试结束后针对该知识点再巩固。", chunkConsumer);
+            action = resumeFromDeepTraining(context, sessionId, chunkConsumer);
+        } else {
+            askDeepTrainingQuestion(context, sessionId, chunkConsumer);
+        }
+        return new InterviewTurnResult(overall, evaluation.feedback(), action, statusView(context), evaluation);
+    }
+
+    /**
+     * 发出深度训练递进题：生成题面后经话术包装流式发出；题序与已问题清单传入防重复。
+     */
+    private void askDeepTrainingQuestion(InterviewContext context, String sessionId,
+                                         AiStreamChunkConsumer chunkConsumer) throws IOException {
+        int index = context.getDeepTrainingAsked() + 1;
+        String question = generateDeepTrainingQuestion(context, index);
+        context.setCurrentQuestion(question);
+        context.setCurrentQuestionFollowUp(true);
+        context.setCurrentQuestionPhase(InterviewState.DEEP_TRAINING);
+        context.setDeepTrainingAsked(index);
+        List<ChatMessage> messages = promptBuilder.buildDeepTrainingMessages(
+                messageStore.list(sessionId), question, index);
+        streamAndRecord(sessionId, messages, chunkConsumer);
+    }
+
+    /**
+     * 生成深度训练递进题：锚点题取主流程最近一道非追问题；生成失败降级为通用递进话术。
+     */
+    private String generateDeepTrainingQuestion(InterviewContext context, int index) {
+        String anchor = context.getQuestionHistory().stream()
+                .filter(record -> !record.isFollowUp())
+                .reduce((ignored, latest) -> latest)
+                .map(QuestionRecord::getQuestion)
+                .orElse(context.getCurrentQuestion());
+        Set<String> asked = context.getQuestionHistory().stream()
+                .filter(QuestionRecord::isDeepTraining)
+                .map(QuestionRecord::getQuestion)
+                .collect(java.util.stream.Collectors.toSet());
+        try {
+            String prompt = promptBuilder.buildDeepTrainingQuestionPrompt(
+                    context.getCurrentKnowledgePoint(), anchor, index, asked);
+            AiGeneratedQuestion generated = aiModelClient.generateDeepQuestion(prompt);
+            if (generated != null && generated.question() != null && !generated.question().isBlank()) {
+                return generated.question().trim();
+            }
+        } catch (RuntimeException exception) {
+            log.warn("deep training question generation failed, fallback to generic prompt sessionId={}",
+                    context.getSessionId(), exception);
+        }
+        String knowledgePoint = context.getCurrentKnowledgePoint() == null ? "该知识点" : context.getCurrentKnowledgePoint();
+        return "关于「" + knowledgePoint + "」，请换一个角度再深入讲讲你的理解（深度训练第 " + index + " 题）。";
+    }
+
+    /**
+     * 从深度训练返回主面试：恢复阶段与题目标记，出该阶段下一题；题量已满则推进下一阶段。
+     */
+    private StateTransitionStrategy.Action resumeFromDeepTraining(InterviewContext context, String sessionId,
+                                                                  AiStreamChunkConsumer chunkConsumer)
+            throws IOException {
+        InterviewState returnState = context.getDeepTrainingReturnState();
+        if (returnState == null || !returnState.questioning()) {
+            // 防御：旧会话缺字段时降级回基础考察，避免卡在子流程
+            returnState = InterviewState.BASICS;
+        }
+        context.setState(returnState);
+        context.setDeepTrainingReturnState(null);
+        context.setDeepTrainingAsked(0);
+        context.setDeepTrainingConsecutivePass(0);
+        context.setCurrentQuestionFollowUp(false);
+        context.setCurrentFollowUpCount(0);
+        if (context.questionsInPhase(returnState) >= properties.maxQuestionsFor(returnState)) {
+            advance(context, sessionId, chunkConsumer);
+            return StateTransitionStrategy.Action.ADVANCE;
+        }
+        askNextQuestion(context, sessionId, returnState, chunkConsumer);
+        return StateTransitionStrategy.Action.NEW_QUESTION;
+    }
+
+    /** 非 LLM 的固定话术：直接入消息库并推给前端 */
+    private void emitPlain(String sessionId, String text, AiStreamChunkConsumer chunkConsumer) throws IOException {
+        messageStore.append(sessionId, List.of(ChatMessage.assistant(text)));
+        chunkConsumer.accept(text);
+    }
+
+    /**
+     * 训练模式“下一板块”：放弃暂存追问（原低分已入账，不额外计分），推进到同阶段下一题或下一阶段。
      */
     public InterviewTurnResult chooseNextQuestion(Long userId, String sessionId, AiStreamChunkConsumer chunkConsumer)
             throws IOException {
@@ -458,7 +622,7 @@ public class InterviewService {
                 sessionId, phase, context.getCurrentDifficulty(), context.isCurrentQuestionFollowUp(),
                 preview(question.question()));
         List<ChatMessage> messages = promptBuilder.buildInterviewerMessages(
-                messageStore.list(sessionId), phase, question.question());
+                messageStore.list(sessionId), phase, question.question(), context.getMode());
         streamAndRecord(sessionId, messages, chunkConsumer);
     }
 
@@ -525,8 +689,12 @@ public class InterviewService {
     }
 
     private String closingText(InterviewContext context) {
-        return "本次面试的所有考察环节已结束。共作答 %d 题，平均得分 %.1f。感谢参与，回复任意内容即可结束本次会话。"
-                .formatted(context.totalQuestionsAsked(), context.averageScore());
+        if (context.isTrainingMode()) {
+            return "本次面试的所有考察环节已结束。共作答 %d 题，平均得分 %.1f。感谢参与，回复任意内容即可结束本次会话。"
+                    .formatted(context.totalQuestionsAsked(), context.averageScore());
+        }
+        // 实战模式过程免评分：收尾不透露平均分，完整反馈在结束后统一报告
+        return "本次面试的所有考察环节已结束，感谢参与。回复任意内容即可结束本次会话，结束后将生成完整的反馈报告。";
     }
 
     private InterviewStatusResponse statusView(InterviewContext context) {

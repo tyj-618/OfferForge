@@ -36,8 +36,14 @@ public class InterviewContext {
     private boolean currentQuestionFollowUp;
     /** 当前题目的追问次数（每道题上限 maxFollowUps） */
     private int currentFollowUpCount;
-    /** 训练模式暂存的待追问问题：用户选择“继续深入”后才正式发出 */
+    /** 训练模式暂存的待追问问题：用户选择“深度训练”的触发信号，进入子流程后丢弃 */
     private String pendingFollowUpQuestion;
+    /** 深度训练：进入前的主面试阶段，退出/达标后恢复 */
+    private InterviewState deepTrainingReturnState;
+    /** 深度训练：已出递进题数（上限 maxDeepTrainingQuestions） */
+    private int deepTrainingAsked;
+    /** 深度训练：连续达标题数（≥ deepTrainingPassScore 累计，低分清零） */
+    private int deepTrainingConsecutivePass;
     /** 连续高分（>=7）次数，用于难度提升判定 */
     private int consecutiveHighScores;
     /** 连续低分（<4）次数，用于难度降低判定 */
@@ -169,6 +175,30 @@ public class InterviewContext {
         this.pendingFollowUpQuestion = pendingFollowUpQuestion;
     }
 
+    public InterviewState getDeepTrainingReturnState() {
+        return deepTrainingReturnState;
+    }
+
+    public void setDeepTrainingReturnState(InterviewState deepTrainingReturnState) {
+        this.deepTrainingReturnState = deepTrainingReturnState;
+    }
+
+    public int getDeepTrainingAsked() {
+        return deepTrainingAsked;
+    }
+
+    public void setDeepTrainingAsked(int deepTrainingAsked) {
+        this.deepTrainingAsked = deepTrainingAsked;
+    }
+
+    public int getDeepTrainingConsecutivePass() {
+        return deepTrainingConsecutivePass;
+    }
+
+    public void setDeepTrainingConsecutivePass(int deepTrainingConsecutivePass) {
+        this.deepTrainingConsecutivePass = deepTrainingConsecutivePass;
+    }
+
     public int getConsecutiveHighScores() {
         return consecutiveHighScores;
     }
@@ -278,9 +308,18 @@ public class InterviewContext {
      * 记录一次作答评估：主问题记原知识点，追问沿用当前知识点。
      */
     public void recordAnswer(String question, String userAnswer, AnswerEvaluation evaluation) {
+        recordAnswer(question, userAnswer, evaluation, false);
+    }
+
+    /**
+     * 记录一次作答评估；deepTraining=true 时标记为深度训练题，不计入主流程统计。
+     */
+    public void recordAnswer(String question, String userAnswer, AnswerEvaluation evaluation, boolean deepTraining) {
         String knowledgePoint = currentKnowledgePoint == null ? "" : currentKnowledgePoint;
-        questionHistory.add(new QuestionRecord(
-                question, userAnswer, evaluation, knowledgePoint, currentQuestionFollowUp, currentQuestionPhase));
+        QuestionRecord record = new QuestionRecord(
+                question, userAnswer, evaluation, knowledgePoint, currentQuestionFollowUp, currentQuestionPhase);
+        record.setDeepTraining(deepTraining);
+        questionHistory.add(record);
     }
 
     /**
@@ -291,10 +330,12 @@ public class InterviewContext {
     }
 
     /**
-     * 总共使用的追问次数。
+     * 总共使用的追问次数（深度训练题不计入）。
      */
     public int totalFollowUpsUsed() {
-        return (int) questionHistory.stream().filter(QuestionRecord::isFollowUp).count();
+        return (int) questionHistory.stream()
+                .filter(record -> record.isFollowUp() && !record.isDeepTraining())
+                .count();
     }
 
     /**

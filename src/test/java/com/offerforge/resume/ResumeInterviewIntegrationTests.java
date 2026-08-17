@@ -105,13 +105,13 @@ class ResumeInterviewIntegrationTests {
         ask(sessionId, token, "自我介绍：熟悉 Java。");
         String sseBasics = ask(sessionId, token, LONG_ANSWER);
         assertThat(sseBasics).contains("\"state\":\"PROJECT\"");
-        // 无简历：PROJECT 阶段使用题库通用项目题（不携带具体项目名）
-        assertThat(sseBasics).doesNotContain("秒杀系统").contains("参与度最高的项目");
+        // 无简历：PROJECT 阶段使用题库通用项目题（不携带具体项目名；选题随机，不断言具体题面）
+        assertThat(sseBasics).doesNotContain("秒杀系统");
 
         String sseProject = ask(sessionId, token, LONG_ANSWER);
         assertThat(sseProject).contains("\"state\":\"DEEP\"");
         // DEEP 仍基于 PROJECT 阶段的通用项目题回答生成深挖（不携带具体项目名）
-        assertThat(sseProject).contains("深挖追问").contains("参与度最高的项目");
+        assertThat(sseProject).contains("深挖追问").doesNotContain("秒杀系统");
 
         ask(sessionId, token, LONG_ANSWER);
         ask(sessionId, token, "结束");

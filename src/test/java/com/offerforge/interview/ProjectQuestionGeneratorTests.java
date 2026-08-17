@@ -124,7 +124,7 @@ class ProjectQuestionGeneratorTests {
 
     private QuestionRecord projectRecord(String question, String answer, double score, List<String> missedPoints) {
         AnswerEvaluation evaluation = new AnswerEvaluation(score, score, score, score, score,
-                List.of(), missedPoints, List.of(), "点评");
+                List.of(), missedPoints, List.of(), "点评", null, null, null);
         return new QuestionRecord(question, answer, evaluation, "项目经历 · 秒杀系统", false, InterviewState.PROJECT);
     }
 }

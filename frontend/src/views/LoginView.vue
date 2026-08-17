@@ -1,7 +1,7 @@
 <script setup>
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { authApi, setToken } from '../api'
+import { authApi, setCurrentUser, setToken } from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,6 +24,8 @@ async function submit() {
     }
     const data = await authApi.login(form.username.trim(), form.password)
     setToken(data.token)
+    // 缓存登录响应的用户信息，供顶栏展示用户名（刷新恢复时降级经 /api/auth/me 补齐）
+    setCurrentUser(data.user)
     router.push(route.query.redirect || '/')
   } catch (e) {
     error.value = e.message

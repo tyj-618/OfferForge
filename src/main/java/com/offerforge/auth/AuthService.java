@@ -97,6 +97,15 @@ public class AuthService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED, "登录状态已失效"));
     }
 
+    /**
+     * 按 userId 查当前登录用户摘要（顶栏展示用户名）；不存在时 NOT_FOUND。
+     */
+    public UserSummary userSummary(Long userId) {
+        UserEntity user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "用户不存在"));
+        return new UserSummary(user.getId(), user.getUsername(), user.getNickname());
+    }
+
     private String generateDefaultNickname() {
         return "Candidate_" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 8);
     }

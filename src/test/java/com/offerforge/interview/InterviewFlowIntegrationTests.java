@@ -63,9 +63,11 @@ class InterviewFlowIntegrationTests {
         // 基础题已发出（待作答），剩余 = PROJECT 1 + DEEP 1
         assertThat(status.at("/data/remaining").asInt()).isEqualTo(2);
 
-        // 第 2 轮：长回答评分 8 → 推进 PROJECT
+        // 第 2 轮：长回答评分 8 照常入库，实战模式过程免评分（done 载荷 score/点评/评估均为 null）→ 推进 PROJECT
         String sse2 = ask(sessionId, token, LONG_ANSWER);
-        assertThat(sse2).contains("\"score\":8").contains("\"action\":\"ADVANCE\"").contains("\"state\":\"PROJECT\"");
+        assertThat(sse2).contains("\"score\":null").contains("\"evaluationComment\":null")
+                .doesNotContain("\"score\":8")
+                .contains("\"action\":\"ADVANCE\"").contains("\"state\":\"PROJECT\"");
 
         // 第 3 轮：PROJECT → DEEP
         String sse3 = ask(sessionId, token, LONG_ANSWER);
@@ -104,9 +106,9 @@ class InterviewFlowIntegrationTests {
         String sessionId = post("/api/interview/start", token, Map.of()).at("/data/sessionId").asText();
         ask(sessionId, token, "自我介绍：熟悉 Java。");
 
-        // 第 1 次低分 → 追问（同知识点换角度）
+        // 第 1 次低分 → 追问（同知识点换角度）；实战模式过程免评分，done 载荷不含分数
         String sse1 = ask(sessionId, token, "嗯。");
-        assertThat(sse1).contains("\"score\":3").contains("\"action\":\"FOLLOW_UP\"").contains("模拟追问");
+        assertThat(sse1).contains("\"score\":null").contains("\"action\":\"FOLLOW_UP\"").contains("模拟追问");
         JsonNode status1 = get("/api/interview/" + sessionId + "/status", token);
         assertThat(status1.at("/data/state").asText()).isEqualTo("BASICS");
         assertThat(status1.at("/data/followUpsUsed").asInt()).isEqualTo(1);
@@ -121,7 +123,7 @@ class InterviewFlowIntegrationTests {
         assertThat(status2.at("/data/followUpsUsed").asInt()).isEqualTo(2);
         assertThat(status2.at("/data/difficultyLabel").asText()).isEqualTo("简单");
 
-        // 第 3 次低分：追问已用尽且阶段题量达上限 → 推进 PROJECT
+        // 第 3 次低分（“不会”命中无效回答检测，服务端直接判低档）：追问已用尽且阶段题量达上限 → 推进 PROJECT
         String sse3 = ask(sessionId, token, "不会。");
         assertThat(sse3).contains("\"action\":\"ADVANCE\"").contains("\"state\":\"PROJECT\"");
     }
@@ -150,7 +152,7 @@ class InterviewFlowIntegrationTests {
     }
 
     @Test
-    void trainingModePausesFollowUpForUserChoice() throws Exception {
+    void trainingModeDeepTrainingAchievesAndReturnsToInterview() throws Exception {
         String token = newUser();
         assertCode(post("/api/knowledge/import", token, Map.of()), 0);
 
@@ -161,38 +163,74 @@ class InterviewFlowIntegrationTests {
         assertThat(start.at("/data/status/mode").asText()).isEqualTo("training");
         ask(sessionId, token, "自我介绍：熟悉 Java。");
 
-        // 低分 → FOLLOW_UP 暂存：不流式追问话术，done/status 标记 followUpChoiceRequired
+        // 低分 → FOLLOW_UP 暂存：不流式追问话术，done 携带详细评估，status 标记 followUpChoiceRequired
         String sse1 = ask(sessionId, token, "嗯。");
         assertThat(sse1).contains("\"score\":3").contains("\"action\":\"FOLLOW_UP\"")
                 .doesNotContain("模拟追问")
-                .contains("\"followUpChoiceRequired\":true");
+                .contains("\"followUpChoiceRequired\":true")
+                .contains("\"goodPoints\"").contains("\"improvedAnswer\"");
         JsonNode status1 = get("/api/interview/" + sessionId + "/status", token);
         assertThat(status1.at("/data/followUpsUsed").asInt()).isZero();
         assertThat(status1.at("/data/followUpChoiceRequired").asBoolean()).isTrue();
 
-        // “继续深入”：发出暂存追问，追问计数递增
-        String sse2 = ssePost("/api/interview/" + sessionId + "/followup", token);
-        assertThat(sse2).contains("模拟追问").contains("\"action\":\"FOLLOW_UP\"")
-                .contains("\"followUpChoiceRequired\":false");
+        // “深度训练”：进入子流程并发出第 1 道递进题，暂存追问丢弃
+        String sse2 = ssePost("/api/interview/" + sessionId + "/deep-training", token);
+        assertThat(sse2).contains("深度训练").contains("event:done");
         JsonNode status2 = get("/api/interview/" + sessionId + "/status", token);
-        assertThat(status2.at("/data/followUpsUsed").asInt()).isEqualTo(1);
-        assertThat(status2.at("/data/currentQuestionFollowUp").asBoolean()).isTrue();
+        assertThat(status2.at("/data/state").asText()).isEqualTo("DEEP_TRAINING");
+        assertThat(status2.at("/data/deepTrainingActive").asBoolean()).isTrue();
+        assertThat(status2.at("/data/deepTrainingAsked").asInt()).isEqualTo(1);
+        assertThat(status2.at("/data/returnState").asText()).isEqualTo("BASICS");
+        assertThat(status2.at("/data/followUpChoiceRequired").asBoolean()).isFalse();
+        // 深度训练中跳过被拒绝（引导使用退出按钮）
+        assertThat(ssePost("/api/interview/" + sessionId + "/skip", token))
+                .contains("event:error").contains("40900");
 
-        // 再次低分 → 追问再次暂存；“下一题”放弃追问并推进（基础阶段题量已满 → ADVANCE）
-        ask(sessionId, token, "不太清楚。");
-        String sse3 = ssePost("/api/interview/" + sessionId + "/next-question", token);
-        assertThat(sse3).contains("模拟面试官").contains("\"action\":\"ADVANCE\"").contains("\"state\":\"PROJECT\"");
-        JsonNode status3 = get("/api/interview/" + sessionId + "/status", token);
-        assertThat(status3.at("/data/followUpChoiceRequired").asBoolean()).isFalse();
+        // 第 1 道递进题达标（长回答 → 8 分 ≥ 6）：继续出第 2 题，连续达标计数 1
+        String sse3 = ask(sessionId, token, LONG_ANSWER);
+        assertThat(sse3).contains("\"score\":8")
+                .contains("\"deepTrainingPassStreak\":1").contains("\"deepTrainingAsked\":2");
+
+        // 连续第 2 题达标 → 达标话术 + 返回主面试（BASICS 题量已满 → 推进 PROJECT 出新题）
+        String sse4 = ask(sessionId, token, LONG_ANSWER);
+        assertThat(sse4).contains("\"score\":8").contains("已连续")
+                .contains("\"action\":\"ADVANCE\"").contains("\"state\":\"PROJECT\"");
+        JsonNode status4 = get("/api/interview/" + sessionId + "/status", token);
+        assertThat(status4.at("/data/deepTrainingActive").asBoolean()).isFalse();
+        // 深度训练题不计入主流程已问题数（仍为基础阶段那 1 题）
+        assertThat(status4.at("/data/askedCount").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    void trainingModeDeepTrainingExitReturnsToInterview() throws Exception {
+        String token = newUser();
+        assertCode(post("/api/knowledge/import", token, Map.of()), 0);
+        String sessionId = post("/api/interview/start", token, Map.of("mode", "training"))
+                .at("/data/sessionId").asText();
+        ask(sessionId, token, "自我介绍：熟悉 Java。");
+        // 低分触发追问暂存后进入深度训练
+        ask(sessionId, token, "嗯。");
+        ssePost("/api/interview/" + sessionId + "/deep-training", token);
+
+        // 主动退出：回到主面试（BASICS 题量已满 → 推进 PROJECT）
+        String exit = ssePost("/api/interview/" + sessionId + "/deep-training/exit", token);
+        assertThat(exit).contains("退出深度训练")
+                .contains("\"action\":\"ADVANCE\"").contains("\"state\":\"PROJECT\"");
+        JsonNode status = get("/api/interview/" + sessionId + "/status", token);
+        assertThat(status.at("/data/deepTrainingActive").asBoolean()).isFalse();
+
+        // 非深度训练状态再次退出 → error 事件
+        assertThat(ssePost("/api/interview/" + sessionId + "/deep-training/exit", token)).contains("event:error");
     }
 
     @Test
     void practiceModeRejectsChoiceEndpoints() throws Exception {
         String token = newUser();
         assertCode(post("/api/knowledge/import", token, Map.of()), 0);
-        // 缺省模式 = practice
+        // 缺省模式 = practice：选择类端点（深度训练/退出/下一板块）均走 error 事件
         String sessionId = post("/api/interview/start", token, Map.of()).at("/data/sessionId").asText();
-        assertThat(ssePost("/api/interview/" + sessionId + "/followup", token)).contains("event:error");
+        assertThat(ssePost("/api/interview/" + sessionId + "/deep-training", token)).contains("event:error");
+        assertThat(ssePost("/api/interview/" + sessionId + "/deep-training/exit", token)).contains("event:error");
         assertThat(ssePost("/api/interview/" + sessionId + "/next-question", token)).contains("event:error");
     }
 
@@ -226,7 +264,7 @@ class InterviewFlowIntegrationTests {
     }
 
     /**
-     * 无请求体的 SSE 端点（followup / next-question）：返回完整事件流文本。
+     * 无请求体的 SSE 端点（skip / deep-training / deep-training/exit / next-question）：返回完整事件流文本。
      */
     private String ssePost(String path, String token) throws Exception {
         HttpRequest.Builder builder = HttpRequest.newBuilder()

@@ -1,7 +1,8 @@
 package com.offerforge.interview;
 
 /**
- * 面试进度视图，供前端展示当前阶段、已问/剩余题数、追问进度与当前难度。
+ * 面试进度视图，供前端展示当前阶段、已问/剩余题数、追问进度、当前难度与深度训练状态。
+ * 实战模式过程免评分：lastScore/averageScore 返回 null（评分仍入库供结束报告）。
  */
 public record InterviewStatusResponse(
         String sessionId,
@@ -16,12 +17,18 @@ public record InterviewStatusResponse(
         boolean currentQuestionFollowUp,
         String difficultyLabel,
         Double lastScore,
-        double averageScore,
+        Double averageScore,
         String mode,
-        boolean followUpChoiceRequired
+        boolean followUpChoiceRequired,
+        boolean deepTrainingActive,
+        int deepTrainingAsked,
+        int deepTrainingPassStreak,
+        InterviewState returnState
 ) {
 
     static InterviewStatusResponse from(InterviewContext context, InterviewProperties properties) {
+        boolean training = context.isTrainingMode();
+        boolean deepTrainingActive = context.getState() == InterviewState.DEEP_TRAINING;
         return new InterviewStatusResponse(
                 context.getSessionId(),
                 context.getState(),
@@ -34,14 +41,22 @@ public record InterviewStatusResponse(
                 properties.getMaxFollowUps(),
                 context.isCurrentQuestionFollowUp(),
                 context.getCurrentDifficulty() == null ? null : context.getCurrentDifficulty().label(),
-                context.lastScore(),
-                context.averageScore(),
+                training ? context.lastScore() : null,
+                training ? context.averageScore() : null,
                 context.getMode(),
-                context.isTrainingMode() && context.getPendingFollowUpQuestion() != null);
+                training && context.getPendingFollowUpQuestion() != null,
+                deepTrainingActive,
+                context.getDeepTrainingAsked(),
+                context.getDeepTrainingConsecutivePass(),
+                context.getDeepTrainingReturnState());
     }
 
     private static int remainingQuestions(InterviewContext context, InterviewProperties properties) {
         InterviewState state = context.getState();
+        if (state == InterviewState.DEEP_TRAINING) {
+            // 深度训练中按进入前的主面试阶段计算剩余题数
+            state = context.getDeepTrainingReturnState() == null ? InterviewState.FINISHED : context.getDeepTrainingReturnState();
+        }
         if (!state.questioning() && state != InterviewState.OPENING) {
             return 0;
         }

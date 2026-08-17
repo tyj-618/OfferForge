@@ -53,9 +53,9 @@ class InterviewDifficultyIntegrationTests {
         // 自我介绍 → BASICS
         ask(sessionId, token, "自我介绍：熟悉 Java 后端。");
 
-        // BASICS 第 1 题高分：连击=1 不足 2 → 推进 PROJECT（即使 BASICS 上限=2）
+        // BASICS 第 1 题高分：连击=1 不足 2 → 推进 PROJECT（即使 BASICS 上限=2）；实战模式 done 不返回分数
         String sse1 = ask(sessionId, token, LONG_ANSWER);
-        assertThat(sse1).contains("\"score\":8").contains("\"action\":\"ADVANCE\"").contains("\"state\":\"PROJECT\"");
+        assertThat(sse1).contains("\"action\":\"ADVANCE\"").contains("\"state\":\"PROJECT\"");
 
         // PROJECT 高分：连击=2 但阶段上限=1 已达 → 推进 DEEP
         String sse2 = ask(sessionId, token, LONG_ANSWER);

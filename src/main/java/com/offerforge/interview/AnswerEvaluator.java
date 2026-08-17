@@ -32,7 +32,8 @@ public class AnswerEvaluator {
         AnswerEvaluation evaluation = aiModelClient.evaluateAnswerDetail(question, null, candidateAnswer, userAnswer);
         if (evaluation == null) {
             log.warn("interview evaluate fallback question={}", question);
-            return new AnswerEvaluation(5, 5, 5, 5, 5, java.util.List.of(), java.util.List.of(), java.util.List.of(), "评估服务异常，按中等处理");
+            return new AnswerEvaluation(5, 5, 5, 5, 5, java.util.List.of(), java.util.List.of(), java.util.List.of(),
+                    "评估服务异常，按中等处理", null, null, null);
         }
         return evaluation;
     }

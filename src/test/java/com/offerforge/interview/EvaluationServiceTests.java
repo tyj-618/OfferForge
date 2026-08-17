@@ -16,7 +16,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 单题评估服务单元测试：四维度评分透传、模型异常兜底、好坏分档阈值。
+ * 单题评估服务单元测试：四维度评分透传、无效回答前置检测、模型异常兜底、好坏分档阈值。
  */
 class EvaluationServiceTests {
 
@@ -60,6 +60,36 @@ class EvaluationServiceTests {
         assertThat(evaluation.accuracy()).isEqualTo(5.0);
         assertThat(evaluation.missedPoints()).isEmpty();
         assertThat(evaluation.wrongPoints()).isEmpty();
+    }
+
+    @Test
+    void invalidAnswerShortCircuitsToFixedLowScore() {
+        EvaluationService service = new EvaluationService(new MockAiModelClient());
+
+        // “不知道”类短句不进 LLM，服务端直接固定低档（overall=1）
+        AnswerEvaluation evaluation = service.evaluate("q", "HashMap 原理", "参考答案", "不知道");
+        assertThat(evaluation.overall()).isEqualTo(1.0);
+        assertThat(evaluation.feedback()).contains("未提供实质内容");
+        assertThat(evaluation.missedPoints()).contains("未提供有效回答");
+        // 非 detailed 调用不携带详细反馈字段
+        assertThat(evaluation.goodPoints()).isNull();
+        assertThat(evaluation.improvedAnswer()).isNull();
+
+        // detailed=true 时附结构化反馈（训练模式/深度训练）
+        AnswerEvaluation detailed = service.evaluate("q", "HashMap 原理", null, "不清楚，没了解过这块", true);
+        assertThat(detailed.overall()).isEqualTo(1.0);
+        assertThat(detailed.badPoints()).isNotEmpty();
+        assertThat(detailed.improvedAnswer()).isNotBlank();
+    }
+
+    @Test
+    void longAnswerWithInvalidMarkerIsNotShortCircuited() {
+        EvaluationService service = new EvaluationService(new MockAiModelClient());
+
+        // 超过 20 字的回答即使命中关键词也正常走评估，避免误伤欲抑先扬的长回答
+        AnswerEvaluation evaluation = service.evaluate("q", "知识点", null,
+                "虽然我一时想不起具体细节，但可以从原理层面展开说明这个问题的核心思路与关键约束。");
+        assertThat(evaluation.overall()).isEqualTo(8.0);
     }
 
     @Test

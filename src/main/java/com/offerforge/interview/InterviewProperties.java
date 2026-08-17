@@ -17,6 +17,12 @@ public class InterviewProperties {
     private int messageWindow = 12;
     /** 会话 TTL（秒），用于 Redis 存储过期，默认 30 分钟 */
     private long sessionTtlSeconds = 1800;
+    /** 深度训练子流程：最多递进题数，达上限未达标也返回主面试 */
+    private int maxDeepTrainingQuestions = 5;
+    /** 深度训练达标分数线（单题 ≥ 该分计一次达标） */
+    private int deepTrainingPassScore = 6;
+    /** 深度训练达标所需连续达标题数 */
+    private int deepTrainingPassStreak = 2;
 
     public int maxQuestionsFor(InterviewState state) {
         return switch (state) {
@@ -77,5 +83,29 @@ public class InterviewProperties {
 
     public void setSessionTtlSeconds(long sessionTtlSeconds) {
         this.sessionTtlSeconds = sessionTtlSeconds;
+    }
+
+    public int getMaxDeepTrainingQuestions() {
+        return maxDeepTrainingQuestions;
+    }
+
+    public void setMaxDeepTrainingQuestions(int maxDeepTrainingQuestions) {
+        this.maxDeepTrainingQuestions = maxDeepTrainingQuestions;
+    }
+
+    public int getDeepTrainingPassScore() {
+        return deepTrainingPassScore;
+    }
+
+    public void setDeepTrainingPassScore(int deepTrainingPassScore) {
+        this.deepTrainingPassScore = deepTrainingPassScore;
+    }
+
+    public int getDeepTrainingPassStreak() {
+        return deepTrainingPassStreak;
+    }
+
+    public void setDeepTrainingPassStreak(int deepTrainingPassStreak) {
+        this.deepTrainingPassStreak = deepTrainingPassStreak;
     }
 }

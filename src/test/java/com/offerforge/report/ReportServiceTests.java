@@ -146,7 +146,7 @@ class ReportServiceTests {
         context.setCurrentKnowledgePoint(knowledgePoint);
         context.setCurrentQuestionFollowUp(followUp);
         AnswerEvaluation evaluation = new AnswerEvaluation(score, score, score, score, score,
-                List.of("核心要点"), List.of(), List.of(), "点评");
+                List.of("核心要点"), List.of(), List.of(), "点评", null, null, null);
         context.recordAnswer(question, "回答：" + question, evaluation);
     }
 }

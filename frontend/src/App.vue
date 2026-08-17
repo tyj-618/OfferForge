@@ -1,13 +1,23 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ToastHub from './components/ToastHub.vue'
-import { authApi, authState, clearToken } from './api'
+import { authApi, authState, clearToken, currentUser, fetchCurrentUser } from './api'
 
 const route = useRoute()
 const router = useRouter()
 // 依赖响应式 authState：登录后顶栏立即出现，登出/401 后立即消失
 const loggedIn = computed(() => !!authState.token && route.name !== 'login')
+
+// 顶栏用户名：优先昵称，无昵称时显示用户名
+const displayUsername = computed(() => currentUser.nickname || currentUser.username || '')
+
+// 刷新恢复：token 在而登录缓存丢失时，经 /api/auth/me 补齐用户名
+onMounted(() => {
+  if (authState.token && !currentUser.username) {
+    fetchCurrentUser().catch(() => {})
+  }
+})
 
 // 报告详情需 interviewId 参数，从历史记录列表进入；报告详情路由也高亮历史记录
 const navItems = [
@@ -48,6 +58,7 @@ async function logout() {
           {{ item.label }}
         </RouterLink>
       </nav>
+      <span v-if="displayUsername" class="user-chip">👤 {{ displayUsername }} |</span>
       <button class="ghost" @click="logout">退出登录</button>
     </header>
     <RouterView />
@@ -86,6 +97,12 @@ async function logout() {
 
 .nav a.is-active {
   color: var(--primary);
+}
+
+.user-chip {
+  font-size: 14px;
+  color: var(--text-light);
+  white-space: nowrap;
 }
 
 @media (max-width: 767px) {

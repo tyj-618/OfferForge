@@ -6,6 +6,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.web.bind.annotation.CookieValue;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -20,10 +21,13 @@ public class AuthController {
 
     private final AuthService authService;
     private final AuthProperties authProperties;
+    private final CurrentUserService currentUserService;
 
-    public AuthController(AuthService authService, AuthProperties authProperties) {
+    public AuthController(AuthService authService, AuthProperties authProperties,
+                          CurrentUserService currentUserService) {
         this.authService = authService;
         this.authProperties = authProperties;
+        this.currentUserService = currentUserService;
     }
 
     @PostMapping("/register")
@@ -57,6 +61,15 @@ public class AuthController {
         authService.logout(authorization, refreshToken);
         clearRefreshCookie(response);
         return ApiResponse.success(true);
+    }
+
+    /**
+     * 当前登录用户摘要：供前端顶栏展示用户名（刷新恢复时 token 在而登录响应丢失的场景）。
+     */
+    @GetMapping("/me")
+    public ApiResponse<UserSummary> me(@RequestHeader(value = "Authorization", required = false) String authorization) {
+        Long userId = currentUserService.requireUserId(authorization);
+        return ApiResponse.success(authService.userSummary(userId));
     }
 
     private void writeRefreshCookie(HttpServletResponse response, String token, long expiresIn) {

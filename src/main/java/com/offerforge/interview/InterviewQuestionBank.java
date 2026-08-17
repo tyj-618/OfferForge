@@ -15,11 +15,13 @@ import java.io.InputStream;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * 面试题库：BASICS/DEEP 从知识库按分类取题，PROJECT 用内置项目类问题。
- * 按 id/文件顺序取第一道未问题目，保证选择确定性；BASICS/DEEP 优先按当前难度筛选，
+ * 从未问过的候选题中随机取一道，避免题目顺序固定；BASICS/DEEP 优先按当前难度筛选，
  * 该难度无未问题目时回退任意难度，避免题库未耗尽却误判枯竭。
+ * 难度优先筛选逻辑不变，阶段题量分布由状态机保证。
  */
 @Component
 public class InterviewQuestionBank {
@@ -42,23 +44,35 @@ public class InterviewQuestionBank {
     }
 
     /**
-     * 取指定阶段下一道未问过的题；题库耗尽返回 empty。
+     * 取指定阶段下一道未问过的题（候选集内随机选取）；题库耗尽返回 empty。
      */
     public Optional<InterviewQuestion> nextQuestion(InterviewState phase, Set<String> askedQuestions, Difficulty difficulty) {
         if (phase == InterviewState.PROJECT) {
             // 项目类问题不按难度筛选，知识点固定为项目经历
-            return projectEntries.stream()
+            List<String> candidates = projectEntries.stream()
                     .map(ProjectEntry::question)
                     .filter(question -> !askedQuestions.contains(question))
-                    .findFirst()
-                    .map(question -> new InterviewQuestion(question, null, PROJECT_KNOWLEDGE_POINT, null));
+                    .toList();
+            return candidates.isEmpty()
+                    ? Optional.empty()
+                    : Optional.of(new InterviewQuestion(pickRandom(candidates), null, PROJECT_KNOWLEDGE_POINT, null));
         }
         Set<String> categories = phase == InterviewState.BASICS ? BASICS_CATEGORIES : DEEP_CATEGORIES;
-        return findByDifficulty(categories, difficulty).stream()
+        List<KnowledgeItem> candidates = findByDifficulty(categories, difficulty).stream()
                 .filter(item -> !askedQuestions.contains(item.getQuestion()))
-                .findFirst()
-                .map(item -> new InterviewQuestion(item.getQuestion(), item.getAnswer(),
-                        item.getCategory(), item.getDifficulty()));
+                .toList();
+        return candidates.isEmpty()
+                ? Optional.empty()
+                : Optional.of(toQuestion(pickRandom(candidates)));
+    }
+
+    private static <T> T pickRandom(List<T> candidates) {
+        return candidates.get(ThreadLocalRandom.current().nextInt(candidates.size()));
+    }
+
+    private static InterviewQuestion toQuestion(KnowledgeItem item) {
+        return new InterviewQuestion(item.getQuestion(), item.getAnswer(),
+                item.getCategory(), item.getDifficulty());
     }
 
     /**

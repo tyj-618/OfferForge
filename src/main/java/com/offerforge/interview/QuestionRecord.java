@@ -25,6 +25,8 @@ public class QuestionRecord {
     private List<String> wrongPoints = new ArrayList<>();
     private String knowledgePoint;
     private boolean followUp;
+    /** 深度训练子流程题目（followUp 同为 true）：不计入主流程已问题数/平均分/追问统计；旧数据缺省 false */
+    private boolean deepTraining;
     private InterviewState state;
 
     public QuestionRecord() {
@@ -150,6 +152,14 @@ public class QuestionRecord {
 
     public void setFollowUp(boolean followUp) {
         this.followUp = followUp;
+    }
+
+    public boolean isDeepTraining() {
+        return deepTraining;
+    }
+
+    public void setDeepTraining(boolean deepTraining) {
+        this.deepTraining = deepTraining;
     }
 
     public InterviewState getState() {

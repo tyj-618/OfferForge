@@ -2,6 +2,7 @@ import axios from 'axios'
 import { reactive } from 'vue'
 
 const TOKEN_KEY = 'offerforge_token'
+const USER_KEY = 'offerforge_user'
 
 /**
  * 响应式认证状态：localStorage 读写本身非响应式，
@@ -11,6 +12,44 @@ const TOKEN_KEY = 'offerforge_token'
 export const authState = reactive({
   token: localStorage.getItem(TOKEN_KEY) || ''
 })
+
+/** 响应式当前用户：登录时缓存 login 响应的 user，刷新恢复时经 /api/auth/me 补齐 */
+export const currentUser = reactive({ username: '', nickname: '' })
+
+export function setCurrentUser(user) {
+  currentUser.username = user?.username || ''
+  currentUser.nickname = user?.nickname || ''
+  if (user) {
+    localStorage.setItem(USER_KEY, JSON.stringify(user))
+  }
+}
+
+function restoreCachedUser() {
+  try {
+    const cached = localStorage.getItem(USER_KEY)
+    if (cached) {
+      const user = JSON.parse(cached)
+      currentUser.username = user?.username || ''
+      currentUser.nickname = user?.nickname || ''
+    }
+  } catch {
+    localStorage.removeItem(USER_KEY)
+  }
+}
+restoreCachedUser()
+
+export function clearCurrentUser() {
+  currentUser.username = ''
+  currentUser.nickname = ''
+  localStorage.removeItem(USER_KEY)
+}
+
+export function fetchCurrentUser() {
+  return authApi.me().then((user) => {
+    setCurrentUser(user)
+    return user
+  })
+}
 
 export function getToken() {
   return authState.token
@@ -24,6 +63,7 @@ export function setToken(token) {
 export function clearToken() {
   authState.token = ''
   localStorage.removeItem(TOKEN_KEY)
+  clearCurrentUser()
 }
 
 /**
@@ -103,7 +143,8 @@ function refreshTokenOnce() {
 export const authApi = {
   register: (username, password) => http.post('/auth/register', { username, password }),
   login: (username, password) => http.post('/auth/login', { username, password }),
-  logout: () => http.post('/auth/logout', null)
+  logout: () => http.post('/auth/logout', null),
+  me: () => http.get('/auth/me')
 }
 
 // ---------- 知识库 / 问答 ----------
@@ -275,12 +316,17 @@ export function skipStream(sessionId, callbacks) {
   return sseRequest(`/api/interview/${sessionId}/skip`, null, callbacks)
 }
 
-// 训练模式“继续深入”：发出暂存的追问，SSE 契约与 ask 一致
-export function followupStream(sessionId, callbacks) {
-  return sseRequest(`/api/interview/${sessionId}/followup`, null, callbacks)
+// 训练模式“深度训练”：丢弃暂存追问进入深度训练子流程，SSE 契约与 ask 一致
+export function deepTrainingStream(sessionId, callbacks) {
+  return sseRequest(`/api/interview/${sessionId}/deep-training`, null, callbacks)
 }
 
-// 训练模式“下一题”：放弃追问并推进到下一题，SSE 契约与 ask 一致
+// 退出深度训练：恢复主面试并出下一题，SSE 契约与 ask 一致
+export function deepTrainingExitStream(sessionId, callbacks) {
+  return sseRequest(`/api/interview/${sessionId}/deep-training/exit`, null, callbacks)
+}
+
+// 训练模式“下一板块”：放弃深度训练机会并推进到下一题/下一阶段，SSE 契约与 ask 一致
 export function nextQuestionStream(sessionId, callbacks) {
   return sseRequest(`/api/interview/${sessionId}/next-question`, null, callbacks)
 }

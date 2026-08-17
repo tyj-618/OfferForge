@@ -71,22 +71,38 @@ public class MockAiModelClient implements AiModelClient {
 
     @Override
     public AnswerEvaluation evaluateAnswerDetail(String question, String knowledgePoint, String candidateAnswer, String userAnswer) {
-        // 确定性分档与 evaluateAnswer 一致，四维度同值（加权后 overall 不变），便于测试按回答长度控制状态机分支
+        return evaluateAnswerDetail(question, knowledgePoint, candidateAnswer, userAnswer, false);
+    }
+
+    @Override
+    public AnswerEvaluation evaluateAnswerDetail(String question, String knowledgePoint, String candidateAnswer,
+                                                 String userAnswer, boolean detailed) {
+        // 确定性分档与 evaluateAnswer 一致，四维度同值（加权后 overall 不变），便于测试按回答长度控制状态机分支；
+        // detailed=true 时补充 goodPoints/badPoints/improvedAnswer（训练模式详细反馈与深度训练）
         if (userAnswer == null || userAnswer.isBlank()) {
             return new AnswerEvaluation(0, 0, 0, 0, 0,
-                    List.of(), List.of("未提供有效回答"), List.of(), "未作答");
+                    List.of(), List.of("未提供有效回答"), List.of(), "未作答",
+                    detailed ? List.of() : null, detailed ? List.of("未提供有效回答") : null,
+                    detailed ? "（参考回答）请围绕该知识点给出条理清晰的标准回答。" : null);
         }
         int length = userAnswer.trim().length();
         if (length < 10) {
             return new AnswerEvaluation(3, 3, 3, 3, 3,
-                    List.of("核心原理与关键要点"), List.of("关键要点展开不足"), List.of(), "回答过于简短，需要展开说明");
+                    List.of("核心原理与关键要点"), List.of("关键要点展开不足"), List.of(), "回答过于简短，需要展开说明",
+                    detailed ? List.of() : null, detailed ? List.of("回答过于简短，关键要点展开不足") : null,
+                    detailed ? "（参考回答）应先说明核心原理，再逐条展开关键要点并结合场景举例。" : null);
         }
         if (length < 30) {
             return new AnswerEvaluation(5, 5, 5, 5, 5,
-                    List.of("核心原理与关键要点"), List.of("部分关键要点未覆盖"), List.of(), "回答覆盖部分要点，但不够完整");
+                    List.of("核心原理与关键要点"), List.of("部分关键要点未覆盖"), List.of(), "回答覆盖部分要点，但不够完整",
+                    detailed ? List.of("覆盖了核心原理") : null,
+                    detailed ? List.of("部分关键要点未覆盖") : null,
+                    detailed ? "（参考回答）在现有回答基础上补齐遗漏要点，并补充原理层面的分析。" : null);
         }
         return new AnswerEvaluation(8, 8, 8, 8, 8,
-                List.of("核心原理与关键要点"), List.of(), List.of(), "回答覆盖主要要点，表达清晰");
+                List.of("核心原理与关键要点"), List.of(), List.of(), "回答覆盖主要要点，表达清晰",
+                detailed ? List.of("覆盖主要要点，表达清晰") : null, detailed ? List.of() : null,
+                detailed ? "（参考回答）回答已基本达标，可进一步补充边界情况与设计权衡。" : null);
     }
 
     @Override
@@ -208,6 +224,9 @@ public class MockAiModelClient implements AiModelClient {
         }
         if (userPrompt.contains("<task>followup</task>")) {
             return "【模拟追问】请换个角度继续阐述：" + question;
+        }
+        if (userPrompt.contains("<task>deep-training</task>")) {
+            return "【深度训练】请回答：" + question;
         }
         if (userPrompt.contains("<task>followup-gen</task>")) {
             return generateFollowUpQuestion(userPrompt);

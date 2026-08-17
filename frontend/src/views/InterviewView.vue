@@ -4,7 +4,8 @@ import { useRouter } from 'vue-router'
 import { marked } from 'marked'
 import {
   askStream,
-  followupStream,
+  deepTrainingExitStream,
+  deepTrainingStream,
   interviewApi,
   nextQuestionStream,
   quotaApi,
@@ -38,7 +39,7 @@ const sending = ref(false)
 const thinking = ref(false)
 const error = ref('')
 const mode = ref('practice') // training | practice
-const followUpChoice = ref(false) // 训练模式：追问待用户选择「继续深入」/「下一题」
+const followUpChoice = ref(false) // 训练模式：低分/无效回答后待用户选择「深度训练」/「下一板块」
 
 const resumes = ref([])
 const selectedResumeId = ref(null)
@@ -57,14 +58,21 @@ let phaseBannerTimer = null
 const STAGES = ['OPENING', 'BASICS', 'PROJECT', 'DEEP', 'CLOSING']
 
 const stageIndex = computed(() => {
-  const index = STAGES.indexOf(status.value?.state)
+  // 深度训练中用进入前的主面试阶段（returnState）定位，避免进度条跳到末尾
+  const state = status.value?.state === 'DEEP_TRAINING'
+    ? status.value?.returnState || 'BASICS'
+    : status.value?.state
+  const index = STAGES.indexOf(state)
   return index < 0 ? STAGES.length - 1 : index
 })
 
 const stagePercent = computed(() => ((stageIndex.value + 1) / STAGES.length) * 100)
 
-// 仅出题环节可跳过；开场（自我介绍）与收尾环节必须正常作答
+// 仅出题环节可跳过；开场（自我介绍）、收尾与深度训练中不可跳过
 const canSkip = computed(() => ['BASICS', 'PROJECT', 'DEEP'].includes(status.value?.state))
+
+// 深度训练子流程进行中（徽章 + 退出按钮 + 禁用跳过）
+const deepTrainingActive = computed(() => status.value?.deepTrainingActive === true)
 
 const progressText = computed(() => {
   if (!status.value) {
@@ -232,15 +240,23 @@ function skipQuestion() {
   runStreamingTurn((callbacks) => skipStream(sessionId.value, callbacks), skipQuestion)
 }
 
-// 训练模式「继续深入」：发出后端暂存的追问
-function chooseFollowUp() {
+// 训练模式「深度训练」：丢弃暂存追问，进入针对薄弱知识点的递进训练子流程
+function enterDeepTraining() {
   if (sending.value || isFinished.value) {
     return
   }
-  runStreamingTurn((callbacks) => followupStream(sessionId.value, callbacks), chooseFollowUp)
+  runStreamingTurn((callbacks) => deepTrainingStream(sessionId.value, callbacks), enterDeepTraining)
 }
 
-// 训练模式「下一题」：放弃追问，推进到下一题
+// 主动退出深度训练：恢复主面试并出下一题
+function exitDeepTraining() {
+  if (sending.value || isFinished.value || !deepTrainingActive.value) {
+    return
+  }
+  runStreamingTurn((callbacks) => deepTrainingExitStream(sessionId.value, callbacks), exitDeepTraining)
+}
+
+// 训练模式「下一板块」：放弃深度训练机会，推进到下一题/下一阶段
 function chooseNextQuestion() {
   if (sending.value || isFinished.value) {
     return
@@ -248,7 +264,8 @@ function chooseNextQuestion() {
   runStreamingTurn((callbacks) => nextQuestionStream(sessionId.value, callbacks), chooseNextQuestion)
 }
 
-// ---------- SSE 流式渲染：chunk 队列 + 10~30ms 节流，营造逐字输出感 ----------
+// ---------- SSE 流式渲染：chunk 拆单字符入队 + 5~15ms 节流，营造逐字输出感 ----------
+// 后端按 delta 即时推送，但单个 chunk 可能包含多字；拆成单字符后无论上游 chunk 多大都呈逐字效果
 const chunkQueue = []
 let queueTimer = null
 let activeStreamMessage = null
@@ -284,7 +301,10 @@ async function runStreamingTurn(request, retry) {
 }
 
 function enqueueChunk(chunk) {
-  chunkQueue.push(chunk)
+  // 拆成单字符入队：队列天然按字符节流，渲染节奏与上游 chunk 大小解耦
+  for (const char of chunk) {
+    chunkQueue.push(char)
+  }
   scheduleDrain()
 }
 
@@ -292,7 +312,7 @@ function scheduleDrain() {
   if (queueTimer) {
     return
   }
-  queueTimer = setTimeout(drainNext, 10 + Math.random() * 20)
+  queueTimer = setTimeout(drainNext, 5 + Math.random() * 10)
 }
 
 function drainNext() {
@@ -352,13 +372,15 @@ function endStream() {
 async function handleAskDone(assistantMessage, result) {
   assistantMessage.score = result.score
   assistantMessage.comment = result.evaluationComment
-  // 刚发出的题目若为追问，气泡打上标识
+  // 训练模式详细反馈卡片（得分/亮点/不足/改进回答）；实战模式后端不返回 evaluation
+  assistantMessage.evaluation = result.evaluation
+  // 刚发出的题目若为追问/深度训练题，气泡打上标识
   assistantMessage.followUp = !!result.status?.currentQuestionFollowUp
   status.value = result.status
   if (result.status?.mode) {
     mode.value = result.status.mode
   }
-  // 训练模式下后端暂存了追问 → 展示「继续深入」/「下一题」选择
+  // 训练模式下后端暂存了追问（低分/无效回答触发）→ 展示「深度训练」/「下一板块」选择
   followUpChoice.value = !!result.status?.followUpChoiceRequired
   if (result.action === 'FINISH' || result.status?.state === 'FINISHED') {
     await finishAndShowReport()
@@ -462,13 +484,13 @@ function scrollDown() {
         <button type="button" class="mode-card" :disabled="sending" @click="startInterview('training')">
           <span class="mode-name">🎓 训练模式</span>
           <span class="muted mode-desc">
-            每题给出评分与改进建议；面试官认为可以深入时，由你选择「继续深入」或「下一题」，适合针对性复习。
+            每题给出详细反馈（亮点/不足/改进回答）；回答不佳时由你选择「深度训练」专项强化或「下一板块」，适合针对性复习。
           </span>
         </button>
         <button type="button" class="mode-card" :disabled="sending" @click="startInterview('practice')">
           <span class="mode-name">⚔️ 实战模式</span>
           <span class="muted mode-desc">
-            模拟真实面试节奏，面试官只作必要点评并按表现自动追问；完整面试结束后给出详尽报告。
+            模拟真实面试节奏，过程中不作评价与评分，按表现自动追问；完整面试结束后给出详尽报告。
           </span>
         </button>
       </div>
@@ -496,13 +518,27 @@ function scrollDown() {
             <span class="badge">{{ status?.phaseLabel || '—' }}</span>
             <span :class="['badge', difficultyClass]">难度：{{ status?.difficultyLabel || '—' }}</span>
             <span
-              v-if="status?.currentQuestionFollowUp"
+              v-if="status?.currentQuestionFollowUp && !deepTrainingActive"
               class="badge warning"
             >
               🔄 追问 {{ status?.followUpsUsed }}/{{ status?.followUpLimit }}
             </span>
+            <span v-if="deepTrainingActive" class="badge deep-badge">
+              🎯 深度训练 · 达标 {{ status?.deepTrainingPassStreak ?? 0 }}/2 · 第 {{ status?.deepTrainingAsked ?? 0 }}/5 题
+            </span>
+            <button
+              v-if="deepTrainingActive"
+              type="button"
+              class="ghost deep-exit-btn"
+              :disabled="sending"
+              @click="exitDeepTraining"
+            >
+              退出深度训练
+            </button>
             <span class="muted progress">进度 {{ progressText }} 题</span>
-            <span v-if="status?.averageScore" class="muted">平均 {{ status.averageScore.toFixed(1) }} 分</span>
+            <span v-if="mode === 'training' && status?.averageScore != null" class="muted">
+              平均 {{ status.averageScore.toFixed(1) }} 分
+            </span>
             <button v-if="!isFinished" class="ghost finish-btn" :disabled="phase === 'finishing'" @click="requestFinish">
               结束面试
             </button>
@@ -522,6 +558,25 @@ function scrollDown() {
               <span :class="['badge', scoreClass(item.score)]">得分 {{ item.score }}</span>
               <span v-if="item.comment" class="muted comment">{{ item.comment }}</span>
             </div>
+            <!-- 训练模式详细反馈卡片：亮点/不足/改进回答（实战模式后端不返回 evaluation） -->
+            <div v-if="mode === 'training' && item.evaluation" class="eval-card">
+              <div v-if="item.evaluation.goodPoints?.length" class="eval-section good">
+                <div class="eval-title">✅ 亮点</div>
+                <ul>
+                  <li v-for="(point, idx) in item.evaluation.goodPoints" :key="'g' + idx">{{ point }}</li>
+                </ul>
+              </div>
+              <div v-if="item.evaluation.badPoints?.length" class="eval-section bad">
+                <div class="eval-title">❌ 不足</div>
+                <ul>
+                  <li v-for="(point, idx) in item.evaluation.badPoints" :key="'b' + idx">{{ point }}</li>
+                </ul>
+              </div>
+              <div v-if="item.evaluation.improvedAnswer" class="eval-section improved">
+                <div class="eval-title">💡 改进回答</div>
+                <blockquote class="md" v-html="renderMarkdown(item.evaluation.improvedAnswer)"></blockquote>
+              </div>
+            </div>
           </div>
         </div>
         <div v-if="thinking" class="bubble-row assistant">
@@ -531,12 +586,12 @@ function scrollDown() {
         </div>
       </div>
 
-      <!-- 训练模式：追问选择（后端暂存了追问时显示） -->
+      <!-- 训练模式：回答不佳（低分/无效回答）时的选择 -->
       <div v-if="followUpChoice && mode === 'training' && !isFinished" class="card followup-choice">
-        <span>💡 这道题还可以深入讲解，你想：</span>
+        <span>💡 这道题可以专项强化，你想：</span>
         <div class="choice-actions">
-          <button type="button" :disabled="sending" @click="chooseFollowUp">继续深入</button>
-          <button type="button" class="secondary" :disabled="sending" @click="chooseNextQuestion">下一题</button>
+          <button type="button" :disabled="sending" @click="enterDeepTraining">深度训练</button>
+          <button type="button" class="secondary" :disabled="sending" @click="chooseNextQuestion">下一板块</button>
         </div>
       </div>
 
@@ -552,8 +607,8 @@ function scrollDown() {
           <button
             type="button"
             class="ghost skip-btn"
-            title="跳过当前题（本题计 0 分）"
-            :disabled="sending || !canSkip"
+            :title="mode === 'training' ? '跳过当前题（本题计 0 分）' : '跳过当前题'"
+            :disabled="sending || !canSkip || deepTrainingActive"
             @click="skipQuestion"
           >
             跳过此题
@@ -586,9 +641,13 @@ function scrollDown() {
             <span class="muted">题目进度</span>
             <span>{{ progressText || '—' }} 题</span>
           </div>
-          <div class="side-row">
+          <div v-if="mode === 'training'" class="side-row">
             <span class="muted">平均分</span>
-            <span>{{ status?.averageScore ? status.averageScore.toFixed(1) : '—' }}</span>
+            <span>{{ status?.averageScore != null ? status.averageScore.toFixed(1) : '—' }}</span>
+          </div>
+          <div v-if="deepTrainingActive" class="side-row">
+            <span class="muted">深度训练</span>
+            <span class="badge deep-badge">达标 {{ status?.deepTrainingPassStreak ?? 0 }}/2 · {{ status?.deepTrainingAsked ?? 0 }}/5 题</span>
           </div>
           <button
             v-if="!isFinished"
@@ -630,9 +689,13 @@ function scrollDown() {
               <span class="muted">题目进度</span>
               <span>{{ progressText || '—' }} 题</span>
             </div>
-            <div class="side-row">
+            <div v-if="mode === 'training'" class="side-row">
               <span class="muted">平均分</span>
-              <span>{{ status?.averageScore ? status.averageScore.toFixed(1) : '—' }}</span>
+              <span>{{ status?.averageScore != null ? status.averageScore.toFixed(1) : '—' }}</span>
+            </div>
+            <div v-if="deepTrainingActive" class="side-row">
+              <span class="muted">深度训练</span>
+              <span class="badge deep-badge">达标 {{ status?.deepTrainingPassStreak ?? 0 }}/2 · {{ status?.deepTrainingAsked ?? 0 }}/5 题</span>
             </div>
             <button
               v-if="!isFinished"
@@ -888,6 +951,58 @@ function scrollDown() {
 
 .skip-btn:hover:not(:disabled) {
   color: var(--warning);
+}
+
+/* ---------- 深度训练徽章与退出按钮 ---------- */
+.deep-badge {
+  background: #fff3e0;
+  color: #b26a00;
+  white-space: nowrap;
+}
+
+.deep-exit-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ---------- 训练模式详细反馈卡片 ---------- */
+.eval-card {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #f8f9fc;
+  border: 1px solid #e6e9f2;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.eval-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.eval-section ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.eval-section.good .eval-title {
+  color: var(--success);
+}
+
+.eval-section.bad .eval-title {
+  color: var(--danger, #e5484d);
+}
+
+.eval-section.improved blockquote {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--primary);
+  background: #fff;
+  border-radius: 0 6px 6px 0;
+  color: var(--text-light);
 }
 
 .confirm-dialog {
