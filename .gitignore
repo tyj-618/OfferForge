@@ -14,3 +14,4 @@ data/
 full-bundle.tar
 update-bundle.tar
 deploy-bundle.tar
+*.png
