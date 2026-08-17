@@ -37,7 +37,7 @@ async function importOfficial() {
   importing.value = true
   try {
     const summary = await knowledgeApi.importBuiltin()
-    toast(`官方题库导入完成：新增 ${summary.inserted} 题，已存在 ${summary.skipped} 题`)
+    toast.success(`官方题库导入完成：新增 ${summary.inserted} 题，已存在 ${summary.skipped} 题`)
     await loadAll()
   } catch (e) {
     notifyError(e)
@@ -55,13 +55,13 @@ function onFileChange(event) {
   if (file) {
     const name = file.name.toLowerCase()
     if (!name.endsWith('.md') && !name.endsWith('.txt')) {
-      toast('仅支持 .md / .txt 格式的资料文件')
+      toast.info('仅支持 .md / .txt 格式的资料文件')
       event.target.value = ''
       selectedFile.value = null
       return
     }
     if (file.size > 1024 * 1024) {
-      toast('文件大小不能超过 1MB')
+      toast.info('文件大小不能超过 1MB')
       event.target.value = ''
       selectedFile.value = null
       return
@@ -73,7 +73,7 @@ function onFileChange(event) {
 // 上传资料：支持 Q:/A:（问:/答:）标记或 Markdown 标题两种问答格式
 async function upload() {
   if (!selectedFile.value) {
-    toast('请先选择要上传的文件')
+    toast.info('请先选择要上传的文件')
     return
   }
   uploading.value = true
@@ -84,7 +84,7 @@ async function upload() {
       formData.append('category', uploadCategory.value.trim())
     }
     const summary = await knowledgeApi.upload(formData)
-    toast(`上传完成：识别 ${summary.parsed} 题，入库 ${summary.inserted} 题，重复跳过 ${summary.skipped} 题`)
+    toast.success(`上传完成：识别 ${summary.parsed} 题，入库 ${summary.inserted} 题，重复跳过 ${summary.skipped} 题`)
     uploadCategory.value = ''
     selectedFile.value = null
     if (fileInput.value) {
@@ -104,7 +104,7 @@ async function removeItem(item) {
   }
   try {
     await knowledgeApi.remove(item.id)
-    toast('已删除')
+    toast.success('已删除')
     await loadAll()
   } catch (e) {
     notifyError(e)
@@ -160,8 +160,8 @@ A: 建立可靠连接并同步双方初始序号…
         </div>
       </div>
       <div class="upload-row">
-        <button type="button" class="ghost" @click="pickFile">
-          {{ selectedFile ? selectedFile.name : '选择文件（.md / .txt）' }}
+        <button type="button" class="pick-file-btn" @click="pickFile">
+          📄 {{ selectedFile ? selectedFile.name : '选择文件（.md / .txt）' }}
         </button>
         <input
           ref="fileInput"
@@ -236,6 +236,17 @@ A: 建立可靠连接并同步双方初始序号…
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
+}
+
+/* 选择文件：主色调实心按钮，比 ghost 更醒目 */
+.pick-file-btn {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .upload-row {
