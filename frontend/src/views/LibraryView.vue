@@ -401,16 +401,17 @@ onMounted(() => {
       </div>
       <div v-else class="item-list">
         <div v-for="item in filteredItems" :key="item.id" class="item">
-          <div class="item-head" @click="toggleExpand(item)">
-            <!-- 勾选框固定在最左侧头部，其余内容在 item-main 内自由换行 -->
-            <input
-              v-if="tab === 'mine'"
-              type="checkbox"
-              class="item-check"
-              :checked="selectedIds.includes(item.id)"
-              @click.stop
-              @change="toggleSelect(item.id)"
-            />
+          <div :class="['item-head', tab === 'mine' ? 'with-check' : '']" @click="toggleExpand(item)">
+            <!-- 勾选框独占行首最左列（网格定位），任何换行/对齐都不影响其位置 -->
+            <span v-if="tab === 'mine'" class="item-check-col">
+              <input
+                type="checkbox"
+                class="item-check"
+                :checked="selectedIds.includes(item.id)"
+                @click.stop
+                @change="toggleSelect(item.id)"
+              />
+            </span>
             <div class="item-main">
               <span class="item-question">{{ item.question }}</span>
               <span class="badges">
@@ -587,19 +588,35 @@ onMounted(() => {
 }
 
 .item-head {
-  display: flex;
-  flex-wrap: wrap;
-  /* 头部顶对齐：勾选框始终钉在行首左上角 */
-  align-items: flex-start;
-  gap: 10px;
+  /* 默认单列（官方标签页无勾选框） */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: 10px;
   padding: 12px 4px;
   cursor: pointer;
   min-width: 0;
 }
 
-/* 勾选框之外的全部内容：在右侧区域自由换行，不影响勾选框位置 */
+/* 我的资料：双列网格，勾选框独占最左列，位置结构上不可偏移 */
+.item-head.with-check {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+/* 勾选框列：顶对齐并微调与首行文字的视觉对齐 */
+.item-check-col {
+  display: flex;
+  align-items: flex-start;
+  padding-top: 4px;
+}
+
+.item-check {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+/* 勾选框之外的全部内容：在右侧列内自由换行 */
 .item-main {
-  flex: 1;
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
@@ -609,13 +626,6 @@ onMounted(() => {
 
 .item-head:hover {
   background: #fafbff;
-}
-
-.item-check {
-  /* 复选框固定在行首顶部，避免长题面换行后垂直居中显得突兀 */
-  flex-shrink: 0;
-  align-self: flex-start;
-  margin-top: 4px;
 }
 
 .item-question {
