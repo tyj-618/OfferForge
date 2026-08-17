@@ -294,6 +294,11 @@ onMounted(loadAll)
   background: #fff;
   font-size: 13px;
   color: var(--text-light);
+  /* 自定义分组 chip 超长时截断，不撑破筛选栏 */
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chip.active {
@@ -305,6 +310,7 @@ onMounted(loadAll)
 
 .search-input {
   min-width: 220px;
+  max-width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -312,6 +318,7 @@ onMounted(loadAll)
 
 .batch-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
   padding: 10px 12px;
@@ -336,6 +343,9 @@ onMounted(loadAll)
 
 .item-list {
   border-top: 1px solid var(--border);
+  /* 防止长内容撑破列表容器导致页面横向滚动 */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .item {
@@ -344,10 +354,12 @@ onMounted(loadAll)
 
 .item-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 12px 4px;
   cursor: pointer;
+  min-width: 0;
 }
 
 .item-head:hover {
@@ -359,15 +371,27 @@ onMounted(loadAll)
 }
 
 .item-question {
-  flex: 1;
+  flex: 1 1 240px;
   min-width: 0;
   font-size: 14px;
+  /* 题面可能是超长无空格字符串，强制断行避免撑破行容器 */
+  overflow-wrap: anywhere;
 }
 
 .badges {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  flex-shrink: 0;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.badges .badge {
+  /* 自定义分组名最长 64 字，超长截断避免单枚标撑爆整行 */
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .badge.outline {
@@ -384,6 +408,7 @@ onMounted(loadAll)
 
 .item-body {
   padding: 0 4px 14px 28px;
+  min-width: 0;
 }
 
 .answer-block {
@@ -395,6 +420,7 @@ onMounted(loadAll)
   font-size: 13px;
   line-height: 1.8;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
