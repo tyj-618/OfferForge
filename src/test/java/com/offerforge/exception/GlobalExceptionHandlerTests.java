@@ -4,8 +4,12 @@ import com.offerforge.common.ApiResponse;
 import com.offerforge.common.ErrorCode;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -54,6 +58,25 @@ class GlobalExceptionHandlerTests {
         assertThat(response.getBody().code()).isEqualTo(50301);
         // 不向前端暴露底层技术细节
         assertThat(response.getBody().message()).doesNotContain("connection refused");
+    }
+
+    @Test
+    void unmappedResourceMapsTo404() {
+        ResponseEntity<ApiResponse<Void>> response = handler.handleNoResourceFound(
+                new NoResourceFoundException(HttpMethod.POST, "api/interview/nonexist/followup", "No static resource"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody().code()).isEqualTo(40400);
+        assertThat(response.getBody().message()).isEqualTo("资源不存在");
+    }
+
+    @Test
+    void noHandlerFoundMapsTo404() {
+        ResponseEntity<ApiResponse<Void>> response = handler.handleNoHandlerFound(
+                new NoHandlerFoundException("GET", "/api/unknown", new HttpHeaders()));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody().code()).isEqualTo(40400);
     }
 
     @Test

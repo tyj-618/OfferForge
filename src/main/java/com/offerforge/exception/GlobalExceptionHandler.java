@@ -11,11 +11,14 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 全局异常处理：业务码 + HTTP 状态双重表达。
  * 存量业务码保持 HTTP 200（前端拦截器按 body.code 分流），
  * 限流/不可用类新增码同步返回 429/503，便于网关与监控识别。
+ * 未映射路径统一返回 404（code=40400），不再落入 500 兜底。
  * 未知异常记录完整堆栈，不向前端暴露技术细节。
  */
 @RestControllerAdvice
@@ -53,6 +56,22 @@ public class GlobalExceptionHandler {
         log.error("data access error", exception);
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(ApiResponse.fail(ErrorCode.SERVICE_UNAVAILABLE.code(), ErrorCode.SERVICE_UNAVAILABLE.message()));
+    }
+
+    /** 未映射路径（含已下线端点如 /followup）：默认静态资源处理器找不到资源时抛出，统一 404 + 40400 */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResourceFound(NoResourceFoundException exception) {
+        log.warn("no resource found: {} {}", exception.getHttpMethod(), exception.getResourcePath());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail(ErrorCode.NOT_FOUND.code(), ErrorCode.NOT_FOUND.message()));
+    }
+
+    /** 未映射路径（throw-exception-if-no-handler-found 场景）：同样 404 + 40400 */
+    @ExceptionHandler(NoHandlerFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoHandlerFound(NoHandlerFoundException exception) {
+        log.warn("no handler found: {} {}", exception.getHttpMethod(), exception.getRequestURL());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail(ErrorCode.NOT_FOUND.code(), ErrorCode.NOT_FOUND.message()));
     }
 
     @ExceptionHandler(Exception.class)
