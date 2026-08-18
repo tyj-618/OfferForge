@@ -67,8 +67,9 @@ public class TrainingController {
                              @PathVariable String sessionId,
                              @RequestBody TrainingAskRequest request) {
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
-        emitter.onTimeout(emitter::complete);
-        emitter.onError(throwable -> emitter.complete());
+        // 超时/异常时及时结束 emitter；回调自身也需容错，否则对已失效连接 flush 会再招异常日志
+        emitter.onTimeout(() -> safeComplete(emitter));
+        emitter.onError(throwable -> safeComplete(emitter));
         interviewStreamExecutor.execute(() -> writeTurn(emitter, authorization, sessionId, request.message()));
         return emitter;
     }
@@ -132,23 +133,50 @@ public class TrainingController {
         }
     }
 
+    /**
+     * 断连容忍的 SSE sink：客户端中途刷新/离开后，推送静默降级为 no-op，
+     * 回合在服务端照常走完（评估、归档、出题）并落库，刷新后可恢复最新进度，
+     * 避免 IOException 中断回合导致进度丢失、用户被迫重新开局消耗额度。
+     */
     private static InterviewStreamSink sseSink(SseEmitter emitter) {
         return new InterviewStreamSink() {
+            private volatile boolean clientGone = false;
+
             @Override
-            public void chunk(String text) throws IOException {
-                emitter.send(SseEmitter.event().name("message").data(text));
+            public void chunk(String text) {
+                sendQuietly("message", text);
             }
 
             @Override
-            public void segment() throws IOException {
-                emitter.send(SseEmitter.event().name("segment").data(""));
+            public void segment() {
+                sendQuietly("segment", "");
             }
 
             @Override
-            public void progress(String text) throws IOException {
-                emitter.send(SseEmitter.event().name("progress").data(text));
+            public void progress(String text) {
+                sendQuietly("progress", text);
+            }
+
+            private void sendQuietly(String name, Object data) {
+                if (clientGone) {
+                    return;
+                }
+                try {
+                    emitter.send(SseEmitter.event().name(name).data(data));
+                } catch (IOException | IllegalStateException exception) {
+                    clientGone = true;
+                    log.info("training SSE client disconnected mid-turn, turn continues server-side");
+                }
             }
         };
+    }
+
+    private static void safeComplete(SseEmitter emitter) {
+        try {
+            emitter.complete();
+        } catch (Exception ignored) {
+            // 连接已失效时 complete 内部的 flush 会抛 AsyncRequestNotUsableException，无需处理
+        }
     }
 
     private void validateMessage(String message) {
@@ -163,11 +191,7 @@ public class TrainingController {
         } catch (IOException | IllegalStateException ignored) {
             // 客户端可能已断开或 emitter 已超时结束，下方统一收尾
         }
-        try {
-            emitter.complete();
-        } catch (IllegalStateException ignored) {
-            // emitter 已被超时回调结束
-        }
+        safeComplete(emitter);
     }
 
     private record StreamError(int code, String message) {

@@ -64,8 +64,9 @@ export function clearToken() {
   authState.token = ''
   localStorage.removeItem(TOKEN_KEY)
   clearCurrentUser()
-  // 快捷提问历史仅在当前登录期间临时保存，退出登录即清除
+  // 快捷提问历史仅在当前登录期间临时保存，退出登录即清除；训练会话指针同理
   sessionStorage.removeItem('offerforge_qa_session')
+  sessionStorage.removeItem('offerforge_training_session')
 }
 
 /**

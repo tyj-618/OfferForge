@@ -72,6 +72,15 @@ function ask(textOverride) {
   sendQaQuestion(text)
 }
 
+function onEnterSend(event) {
+  // Enter 发送，Shift+Enter 换行（与面试/训练页一致）
+  if (event.shiftKey) {
+    return
+  }
+  event.preventDefault()
+  ask()
+}
+
 // 清空会话确认：应用内居中模态窗（替代浏览器原生 confirm，保持 UI 风格一致）
 const clearConfirmVisible = ref(false)
 
@@ -146,11 +155,13 @@ function confirmClear() {
       </p>
 
       <form class="ask-row" @submit.prevent="ask()">
-        <input
+        <textarea
           v-model="question"
-          placeholder="例如：HashMap 的底层原理是什么？"
+          rows="2"
+          placeholder="例如：HashMap 的底层原理是什么？（Enter 发送，Shift+Enter 换行）"
           :disabled="qaSession.asking || overLimit"
-        />
+          @keydown.enter="onEnterSend"
+        ></textarea>
         <button type="submit" :disabled="qaSession.asking || overLimit || !question.trim()">
           {{ qaSession.asking ? '回答中…' : '提问' }}
         </button>
@@ -354,7 +365,14 @@ function confirmClear() {
 
 .ask-row {
   display: flex;
+  align-items: flex-end;
   gap: 10px;
   padding-top: 16px;
+}
+
+.ask-row textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
 }
 </style>

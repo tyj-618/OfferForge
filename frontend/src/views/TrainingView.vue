@@ -1,16 +1,20 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   knowledgeApi,
   trainingApi,
-  trainingAnswerStream,
   quotaApi
 } from '../api'
 import { classifyError } from '../utils/errors'
 import { toast } from '../toast'
-
-const SESSION_KEY = 'offerforge_training_session'
+import {
+  trainingSession,
+  startTrainingSession,
+  submitTrainingAnswer,
+  restoreTrainingSession,
+  clearTrainingSession
+} from '../store/trainingSession'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,14 +25,17 @@ const phase = ref('select') // select | active | summary
 const categoryOptions = ref([])
 const records = ref([])
 const quotaInfo = ref(null)
-const error = ref('')
+const localError = ref('')
 
-const sessionId = ref('')
-const status = ref(null)
-const messages = ref([])
+// 会话状态全部来自全局 store：切标签/流式回合进行中都不丢失
+const status = computed(() => trainingSession.status)
+const messages = computed(() => trainingSession.messages)
+const thinkingText = computed(() => trainingSession.thinkingText)
+const starting = ref(false)
+const sending = computed(() => trainingSession.sending || starting.value)
+const error = computed(() => localError.value || trainingSession.error)
+
 const answer = ref('')
-const sending = ref(false)
-const thinkingText = ref('')
 const chatBox = ref(null)
 
 // 「具体分析」小窗：同一时刻最多展开一个，锚定在对应得分徽章旁
@@ -95,28 +102,12 @@ onMounted(async () => {
   loadCategories()
   loadRecords()
   refreshQuota()
-  // 刷新页面后恢复进行中的训练会话（历史消息不回放，展示当前题）
-  const saved = sessionStorage.getItem(SESSION_KEY)
-  if (saved) {
-    try {
-      const restored = await trainingApi.status(saved)
-      if (restored?.finished) {
-        sessionStorage.removeItem(SESSION_KEY)
-      } else {
-        sessionId.value = saved
-        status.value = restored
-        phase.value = 'active'
-        messages.value = [{
-          role: 'assistant',
-          content: restored.currentQuestion || '欢迎回来，请继续作答当前题目。',
-          restored: true
-        }]
-        scrollDown()
-        return
-      }
-    } catch {
-      sessionStorage.removeItem(SESSION_KEY)
-    }
+  // 恢复会话：切标签回来直接沿用模块级消息；刷新页面按后端状态恢复当前题
+  const restored = await restoreTrainingSession()
+  if (restored) {
+    phase.value = 'active'
+    scrollDown()
+    return
   }
   // 任务 4：带目标分组跳转而来（面试「深入该模块」）：自动开启该分组专项训练
   const targetCategory = route.query.category
@@ -124,6 +115,26 @@ onMounted(async () => {
     startTraining(targetCategory.trim())
   }
 })
+
+// 流式内容/新消息/阶段提示变化时滚到底部，保证最新内容可见
+watch(
+  () => [trainingSession.messages.length, trainingSession.messages.at(-1)?.content, trainingSession.thinkingText],
+  () => {
+    if (phase.value === 'active') {
+      scrollDown()
+    }
+  }
+)
+
+// 回合结束（达到题数/题库耗尽）：store 更新 status.finished 后转入成绩页
+watch(
+  () => trainingSession.status?.finished,
+  (finished) => {
+    if (finished && phase.value === 'active') {
+      endSession()
+    }
+  }
+)
 
 async function loadCategories() {
   try {
@@ -158,138 +169,71 @@ async function refreshQuota() {
 }
 
 async function startTraining(category) {
-  error.value = ''
-  sending.value = true
+  localError.value = ''
+  starting.value = true
   try {
-    const data = await trainingApi.start(category, assistantStyle.value)
-    sessionId.value = data.sessionId
-    status.value = data.status
-    sessionStorage.setItem(SESSION_KEY, data.sessionId)
-    messages.value = [{ role: 'assistant', content: data.openingMessage }]
+    await startTrainingSession(category, assistantStyle.value)
     phase.value = 'active'
     refreshQuota()
     scrollDown()
   } catch (e) {
     if (e.code === 'QUOTA_EXCEEDED') {
-      error.value = '今日免费额度已用完，可前往「设置」配置自己的 API Key 继续使用'
+      localError.value = '今日免费额度已用完，可前往「设置」配置自己的 API Key 继续使用'
       toast.error(e.message || '今日免费额度已用完')
       refreshQuota()
     } else {
-      error.value = classifyError(e).message
+      localError.value = classifyError(e).message
     }
   } finally {
-    sending.value = false
+    starting.value = false
   }
 }
 
-// 提交作答：SSE 流式渲染导师点评与下一题，done 帧携带评分与详细评估
-async function submitAnswer() {
+// 提交作答：流式回合挂在全局 store，切标签后台继续，评价与回复不丢失
+function submitAnswer() {
   const text = answer.value.trim()
-  if (!text || sending.value || !sessionId.value || status.value?.finished) {
+  if (!text || sending.value) {
     return
   }
-  sending.value = true
-  error.value = ''
   answer.value = ''
-  messages.value.push({ role: 'user', content: text })
-  const assistantMessage = { role: 'assistant', content: '' }
-  messages.value.push(assistantMessage)
-  // 当前承接流式内容的气泡：segment 帧后重指向新气泡
-  let currentBubble = assistantMessage
-  thinkingText.value = '正在评估你的回答…'
-  scrollDown()
-  try {
-    await trainingAnswerStream(sessionId.value, text, {
-      onMessage: (chunk) => {
-        thinkingText.value = ''
-        currentBubble.content += chunk
-        scrollDown()
-      },
-      onSegment: () => {
-        const bubble = { role: 'assistant', content: '' }
-        messages.value.push(bubble)
-        currentBubble = bubble
-      },
-      onProgress: (text2) => {
-        thinkingText.value = text2
-      },
-      onDone: (result) => {
-        attachScore(result)
-        status.value = result.status
-        if (result.finished) {
-          endSession()
-        }
-        sending.value = false
-        thinkingText.value = ''
-        scrollDown()
-      },
-      onError: (e) => failStream(assistantMessage, e)
-    })
-  } catch (e) {
-    failStream(assistantMessage, e)
-  } finally {
-    if (sending.value && !thinkingText.value) {
-      // 连接结束但无 done 事件：释放输入状态
-      sending.value = false
-    }
-    scrollDown()
-  }
+  submitTrainingAnswer(text)
 }
 
-function attachScore(result) {
-  // 得分徽章挂在最近一个有内容的气泡上（导师点评气泡），附带详细评估供「具体分析」展开
-  for (let i = messages.value.length - 1; i >= 0; i--) {
-    const item = messages.value[i]
-    if (item.role === 'assistant' && item.content && item.score == null) {
-      item.score = result.score
-      item.evaluation = result.evaluation || null
-      break
-    }
+function onEnterSend(event) {
+  // Enter 发送，Shift+Enter 换行
+  if (event.shiftKey) {
+    return
   }
-}
-
-function failStream(assistantMessage, e) {
-  sending.value = false
-  thinkingText.value = ''
-  const classified = classifyError(e)
-  if (assistantMessage.content) {
-    assistantMessage.comment = '连接已中断，请刷新页面查看最新进度'
-  } else {
-    messages.value.pop()
-  }
-  error.value = classified.message
-  toast.error(classified.message)
+  event.preventDefault()
+  submitAnswer()
 }
 
 function endSession() {
-  sessionStorage.removeItem(SESSION_KEY)
   phase.value = 'summary'
   loadRecords()
 }
 
 // 主动结束训练：归档已作答成绩后展示成绩卡
 async function quitTraining() {
-  if (sending.value) {
+  if (sending.value || !trainingSession.sessionId) {
     return
   }
-  sending.value = true
+  starting.value = true
   try {
-    const result = await trainingApi.finish(sessionId.value)
-    status.value = result
+    const result = await trainingApi.finish(trainingSession.sessionId)
+    trainingSession.status = result
     endSession()
   } catch (e) {
-    error.value = classifyError(e).message
+    localError.value = classifyError(e).message
   } finally {
-    sending.value = false
+    starting.value = false
   }
 }
 
 function backToSelect() {
+  clearTrainingSession()
   phase.value = 'select'
-  sessionId.value = ''
-  status.value = null
-  messages.value = []
-  error.value = ''
+  selectedCategory.value = ''
   loadCategories()
   loadRecords()
 }
@@ -437,9 +381,9 @@ function scrollDown() {
           v-model="answer"
           class="answer-input"
           rows="3"
-          placeholder="输入你的回答…（Ctrl+Enter 发送）"
+          placeholder="输入你的回答…（Enter 发送，Shift+Enter 换行）"
           :disabled="sending || status?.finished"
-          @keydown.ctrl.enter="submitAnswer"
+          @keydown.enter="onEnterSend"
         ></textarea>
         <button :disabled="sending || !answer.trim() || status?.finished" @click="submitAnswer">
           {{ sending ? '评估中…' : '提交回答' }}
