@@ -72,13 +72,18 @@ function ask(textOverride) {
   sendQaQuestion(text)
 }
 
+// 清空会话确认：应用内居中模态窗（替代浏览器原生 confirm，保持 UI 风格一致）
+const clearConfirmVisible = ref(false)
+
 function clearSession() {
   if (qaSession.conversations.length === 0) {
     return
   }
-  if (!window.confirm('确定清空全部对话历史吗？')) {
-    return
-  }
+  clearConfirmVisible.value = true
+}
+
+function confirmClear() {
+  clearConfirmVisible.value = false
   clearQaSession()
   toast.success('会话已清空')
 }
@@ -151,6 +156,21 @@ function clearSession() {
         </button>
       </form>
     </div>
+
+    <!-- 清空会话确认弹窗：全屏遮罩 + 屏幕居中卡片 -->
+    <div v-if="clearConfirmVisible" class="modal-overlay" @click.self="clearConfirmVisible = false">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-label="清空会话确认">
+        <h3>清空会话</h3>
+        <p class="muted">
+          确定清空全部对话历史吗？共 {{ qaSession.conversations.length }} 条消息，
+          清除后无法恢复。
+        </p>
+        <div class="modal-actions">
+          <button type="button" class="ghost" @click="clearConfirmVisible = false">取消</button>
+          <button type="button" class="danger" @click="confirmClear">确认清空</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -170,6 +190,52 @@ function clearSession() {
 
 .clear-btn {
   flex-shrink: 0;
+}
+
+/* 清空会话确认弹窗：遮罩全屏，卡片屏幕居中 */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.modal-card {
+  width: min(420px, calc(100vw - 48px));
+  padding: 22px 24px;
+  background: var(--card, #fff);
+  border: 1px solid var(--border, #e4e8f0);
+  border-radius: var(--radius, 12px);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+}
+
+.modal-card h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.modal-card p {
+  margin: 0 0 18px;
+  line-height: 1.6;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.modal-actions .danger {
+  background: #ef4444;
+  border: 1px solid #ef4444;
+  color: #fff;
+}
+
+.modal-actions .danger:hover {
+  background: #dc2626;
 }
 
 /* 聊天区高度钉在视口内：进入页面即可看到输入框，历史消息在内部滚动 */

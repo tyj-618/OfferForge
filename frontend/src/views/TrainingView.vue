@@ -597,9 +597,9 @@ function scrollDown() {
   padding: 14px;
   border: 1px solid var(--border, #e3e6ef);
   border-radius: 10px;
-  background: var(--bg-card, #fff);
+  background: #f5f6fa;
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
 }
 
 .category-card:hover:not(:disabled) {
@@ -621,7 +621,7 @@ function scrollDown() {
   border: 1px solid var(--border, #e3e6ef);
   border-left: 3px solid var(--primary, #4f6ef7);
   border-radius: 10px;
-  background: var(--bg-subtle, #f7f8fc);
+  background: #f7f8fc;
 }
 
 .confirm-panel p {
