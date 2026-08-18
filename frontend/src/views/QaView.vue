@@ -1,33 +1,25 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { knowledgeApi, qaApi } from '../api'
 import { notifyError } from '../utils/errors'
-import { toast } from '../toast'
-import UploadModal from '../components/UploadModal.vue'
-
-const importSummary = ref(null)
-const importing = ref(false)
 
 const question = ref('')
 const asking = ref(false)
 const conversations = ref([])
+const chatScroll = ref(null)
 
-// 知识库构成：官方题库 + 本人上传资料，两者都会参与快捷提问检索
+// 知识库构成：官方题库 + 本人上传资料，快捷提问默认参考资源库全部资料作答
 const officialCount = ref(0)
 const myCount = ref(0)
-const uploadOpen = ref(false)
-const customCategoryList = ref([])
 
 async function loadCounts() {
   try {
-    const [official, mine, view] = await Promise.all([
+    const [official, mine] = await Promise.all([
       knowledgeApi.official(),
-      knowledgeApi.mine(),
-      knowledgeApi.categories()
+      knowledgeApi.mine()
     ])
     officialCount.value = official?.length || 0
     myCount.value = mine?.length || 0
-    customCategoryList.value = view?.custom || []
   } catch (e) {
     notifyError(e)
   }
@@ -35,24 +27,15 @@ async function loadCounts() {
 
 onMounted(loadCounts)
 
-async function importKnowledge() {
-  importing.value = true
-  try {
-    importSummary.value = await knowledgeApi.importBuiltin()
-    toast.success(`官方题库导入完成：新增 ${importSummary.value.inserted} 条，已存在 ${importSummary.value.skipped} 条`)
-    await loadCounts()
-  } catch (e) {
-    notifyError(e, importKnowledge)
-  } finally {
-    importing.value = false
-  }
-}
-
-// 上传成功后刷新知识库计数
-function onUploaded() {
-  importSummary.value = null
-  loadCounts()
-}
+// 新消息/思考中气泡出现后自动滚到底部，保证最新内容可见
+watch([conversations, asking], () => {
+  nextTick(() => {
+    const el = chatScroll.value
+    if (el) {
+      el.scrollTop = el.scrollHeight
+    }
+  })
+})
 
 async function ask(textOverride) {
   const text = (textOverride ?? question.value).trim()
@@ -83,42 +66,28 @@ async function ask(textOverride) {
     <h1 class="page-title">快捷提问</h1>
 
     <div class="card knowledge-card">
-      <div class="knowledge-row">
-        <div>
-          <strong>知识库</strong>
-          <p class="muted">
-            快捷提问基于你的知识库作答：官方题库 {{ officialCount }} 条 + 我的资料 {{ myCount }} 条，
-            两者都会参与检索。
-          </p>
-        </div>
-        <div class="knowledge-actions">
-          <button :disabled="importing" @click="importKnowledge">
-            {{ importing ? '导入中…' : '导入官方题库' }}
-          </button>
-          <button type="button" @click="uploadOpen = true">上传我的资料</button>
-        </div>
-      </div>
-      <p v-if="importSummary" class="muted import-result">
-        ✅ 导入完成：共 {{ importSummary.total }} 条，新增 {{ importSummary.inserted }} 条，跳过
-        {{ importSummary.skipped }} 条（已存在）
+      <p class="muted knowledge-hint">
+        回答默认参考资源库全部资料：官方题库 {{ officialCount }} 条 + 我的资料 {{ myCount }} 条
       </p>
     </div>
 
     <div class="card qa-card">
-      <div v-if="conversations.length === 0" class="empty">
-        向 AI 教练提问任何技术面试题，回答将基于你的知识库生成
-      </div>
-      <div v-for="(item, index) in conversations" :key="index" :class="['bubble-row', item.role]">
-        <div class="bubble">
-          <div class="bubble-content">{{ item.content }}</div>
-          <div v-if="item.refs && item.refs.length" class="muted refs">
-            引用知识条目：{{ item.refs.join(', ') }}
+      <div ref="chatScroll" class="chat-scroll">
+        <div v-if="conversations.length === 0" class="empty">
+          向 AI 教练提问任何技术面试题，回答将基于你的知识库生成
+        </div>
+        <div v-for="(item, index) in conversations" :key="index" :class="['bubble-row', item.role]">
+          <div class="bubble">
+            <div class="bubble-content">{{ item.content }}</div>
+            <div v-if="item.refs && item.refs.length" class="muted refs">
+              引用知识条目：{{ item.refs.join(', ') }}
+            </div>
           </div>
         </div>
-      </div>
-      <div v-if="asking" class="bubble-row assistant">
-        <div class="bubble typing-bubble" aria-label="AI 教练思考中">
-          <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+        <div v-if="asking" class="bubble-row assistant">
+          <div class="bubble typing-bubble" aria-label="AI 教练思考中">
+            <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+          </div>
         </div>
       </div>
 
@@ -129,44 +98,32 @@ async function ask(textOverride) {
         </button>
       </form>
     </div>
-
-    <!-- 上传我的资料小窗 -->
-    <UploadModal
-      v-if="uploadOpen"
-      :custom-categories="customCategoryList"
-      @close="uploadOpen = false"
-      @uploaded="onUploaded"
-    />
   </div>
 </template>
 
 <style scoped>
 .knowledge-card {
   margin-bottom: 16px;
+  padding: 12px 20px;
 }
 
-.knowledge-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+.knowledge-hint {
+  margin: 0;
 }
 
-.knowledge-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.import-result {
-  margin-top: 10px;
-}
-
+/* 聊天区高度钉在视口内：进入页面即可看到输入框，历史消息在内部滚动 */
 .qa-card {
   display: flex;
   flex-direction: column;
-  min-height: 420px;
+  height: calc(100vh - 300px);
+  min-height: 300px;
+  overflow: hidden;
+}
+
+.chat-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .bubble-row {
@@ -203,7 +160,6 @@ async function ask(textOverride) {
 .ask-row {
   display: flex;
   gap: 10px;
-  margin-top: auto;
   padding-top: 16px;
 }
 </style>
