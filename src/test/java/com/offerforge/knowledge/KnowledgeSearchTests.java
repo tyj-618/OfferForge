@@ -1,6 +1,5 @@
 package com.offerforge.knowledge;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.offerforge.ai.SearchProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -66,7 +65,7 @@ class KnowledgeSearchTests {
         properties.setBaseUrl("http://localhost:9201");
         properties.setKnowledgeIndex("offerforge-knowledge-test");
         properties.setEmbeddingDimensions(8);
-        KnowledgeIndexClient client = new KnowledgeIndexClient(properties, new ObjectMapper());
+        KnowledgeIndexClient client = new KnowledgeIndexClient(properties);
 
         KnowledgeItem item = new KnowledgeItem();
         item.setId(7L);
@@ -89,7 +88,7 @@ class KnowledgeSearchTests {
     void esIndexDefinitionUsesDenseVectorWithConfiguredDimensions() {
         SearchProperties properties = new SearchProperties();
         properties.setEmbeddingDimensions(64);
-        KnowledgeIndexClient client = new KnowledgeIndexClient(properties, new ObjectMapper());
+        KnowledgeIndexClient client = new KnowledgeIndexClient(properties);
 
         Map<String, Object> definition = client.indexDefinition();
 

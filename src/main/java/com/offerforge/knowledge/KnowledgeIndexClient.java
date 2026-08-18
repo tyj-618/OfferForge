@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
@@ -30,16 +31,23 @@ public class KnowledgeIndexClient {
     private static final Logger log = LoggerFactory.getLogger(KnowledgeIndexClient.class);
 
     private final SearchProperties properties;
-    private final ObjectMapper objectMapper;
     private final RestClient restClient;
     private volatile boolean initialized;
 
-    public KnowledgeIndexClient(SearchProperties properties, ObjectMapper objectMapper) {
+    public KnowledgeIndexClient(SearchProperties properties) {
         this.properties = properties;
-        this.objectMapper = objectMapper;
+        // 专用干净 ObjectMapper：全局 bean 经 findAndRegisterModules 注册的 jsonSchema 模块
+        // 会在序列化 JsonNode 时报 Type definition error，导致 ES 写入全部失败
+        MappingJackson2HttpMessageConverter jsonConverter =
+                new MappingJackson2HttpMessageConverter(new ObjectMapper());
+        jsonConverter.setSupportedMediaTypes(List.of(MediaType.ALL));
         this.restClient = RestClient.builder()
                 .baseUrl(properties.getBaseUrl())
                 .requestFactory(requestFactory(properties.getRequestTimeoutSeconds()))
+                .messageConverters(converters -> {
+                    converters.clear();
+                    converters.add(jsonConverter);
+                })
                 .build();
     }
 
