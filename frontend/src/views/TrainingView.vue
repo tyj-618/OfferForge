@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { marked } from 'marked'
 import {
   knowledgeApi,
   trainingApi,
@@ -16,6 +17,16 @@ import {
   clearTrainingSession,
   TRAINING_SESSION_KEY
 } from '../store/trainingSession'
+
+// 教练/导师话术含 Markdown（粗体/斜体/列表等），与面试页同款渲染配置；html 默认关闭，原始 HTML 会被转义
+marked.use({ gfm: true, breaks: true })
+
+function renderMarkdown(content) {
+  if (!content) {
+    return ''
+  }
+  return marked.parse(content)
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -362,7 +373,12 @@ function scrollDown() {
       <div ref="chatBox" class="card chat-box">
         <div v-for="(item, index) in messages" :key="index" :class="['bubble-row', item.role]">
           <div class="bubble">
-            <div class="bubble-content">{{ item.content }}<span v-if="item.restored" class="muted">（刷新恢复）</span></div>
+            <div class="bubble-content">
+              <!-- eslint-disable-next-line vue/no-v-html -->
+              <div v-if="item.role === 'assistant'" class="md" v-html="renderMarkdown(item.content)"></div>
+              <template v-else>{{ item.content }}</template>
+              <span v-if="item.restored" class="muted">（刷新恢复）</span>
+            </div>
             <span v-if="item.comment" class="muted comment">{{ item.comment }}</span>
             <div v-if="item.score != null" class="score-line">
               <span :class="['badge', scoreClass(item.score)]">得分 {{ item.score }}</span>
@@ -381,7 +397,8 @@ function scrollDown() {
                   </div>
                   <div v-if="item.evaluation.improvedAnswer">
                     <strong>改进后的回答：</strong>
-                    <p>{{ item.evaluation.improvedAnswer }}</p>
+                    <!-- eslint-disable-next-line vue/no-v-html -->
+                    <blockquote class="md" v-html="renderMarkdown(item.evaluation.improvedAnswer)"></blockquote>
                   </div>
                 </div>
               </div>
@@ -453,6 +470,64 @@ function scrollDown() {
 .restoring-card {
   padding: 48px 20px;
   text-align: center;
+}
+
+/* 气泡内 Markdown 渲染（与面试页同配置）：v-html 内容需穿透 scoped 样式 */
+.md :deep(p) {
+  margin: 0 0 8px;
+}
+
+.md :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.md :deep(strong) {
+  font-weight: 600;
+}
+
+.md :deep(ul),
+.md :deep(ol) {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+
+.md :deep(li) {
+  margin-bottom: 2px;
+}
+
+.md :deep(code) {
+  background: #e5eaf6;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.md :deep(pre) {
+  background: #eef1f8;
+  padding: 8px 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 6px 0;
+}
+
+.md :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+
+.md :deep(blockquote) {
+  border-left: 3px solid #c8d2f5;
+  padding-left: 10px;
+  color: var(--text-light);
+  margin: 6px 0;
+}
+
+.md :deep(h1),
+.md :deep(h2),
+.md :deep(h3) {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 8px 0 6px;
 }
 
 .from-interview-hint {
