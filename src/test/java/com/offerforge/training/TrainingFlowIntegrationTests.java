@@ -97,11 +97,19 @@ class TrainingFlowIntegrationTests {
         String sessionId = start.at("/data/sessionId").asText();
         answer(sessionId, token, LONG_ANSWER);
 
-        // 刷新恢复：status 端点返回既有进度
+        // 刷新恢复：status 端点返回既有进度，history 携带已作答回合供前端完整重建对话
         JsonNode status = get("/api/training/" + sessionId + "/status", token);
         assertCode(status, 0);
         assertThat(status.at("/data/askedCount").asInt()).isEqualTo(1);
         assertThat(status.at("/data/finished").asBoolean()).isFalse();
+        assertThat(status.at("/data/evaluating").asBoolean()).isFalse();
+        assertThat(status.at("/data/currentQuestion").asText()).isNotBlank();
+        JsonNode history = status.at("/data/history/0");
+        assertThat(history.at("/question").asText()).isNotBlank();
+        assertThat(history.at("/answer").asText()).isEqualTo(LONG_ANSWER);
+        assertThat(history.at("/comment").asText()).isNotBlank();
+        assertThat(history.at("/score").asDouble()).isEqualTo(8.0);
+        assertThat(history.at("/evaluation/improvedAnswer").asText()).isNotBlank();
 
         // 主动结束：归档已作答成绩
         JsonNode finish = post("/api/training/" + sessionId + "/finish", token, Map.of());

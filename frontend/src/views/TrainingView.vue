@@ -13,7 +13,8 @@ import {
   startTrainingSession,
   submitTrainingAnswer,
   restoreTrainingSession,
-  clearTrainingSession
+  clearTrainingSession,
+  TRAINING_SESSION_KEY
 } from '../store/trainingSession'
 
 const route = useRoute()
@@ -21,7 +22,19 @@ const router = useRouter()
 // 任务 4：由模拟面试「深入该模块」跳转而来，训练结束后引导回面试页续考
 const fromInterview = route.query.from === 'interview'
 
-const phase = ref('select') // select | active | summary
+// 存在会话指针时先进恢复中占位，避免刷新后先闪选择页再跳回对话
+function hasSessionMarker() {
+  if (trainingSession.sessionId) {
+    return true
+  }
+  try {
+    return Boolean(sessionStorage.getItem(TRAINING_SESSION_KEY))
+  } catch {
+    return false
+  }
+}
+
+const phase = ref(hasSessionMarker() ? 'restoring' : 'select') // restoring | select | active | summary
 const categoryOptions = ref([])
 const records = ref([])
 const quotaInfo = ref(null)
@@ -102,13 +115,15 @@ onMounted(async () => {
   loadCategories()
   loadRecords()
   refreshQuota()
-  // 恢复会话：切标签回来直接沿用模块级消息；刷新页面按后端状态恢复当前题
+  // 恢复会话：切标签回来直接沿用模块级消息；刷新页面按后端历史完整重建对话
   const restored = await restoreTrainingSession()
   if (restored) {
     phase.value = 'active'
     scrollDown()
     return
   }
+  // 无可恢复会话：回到选题页
+  phase.value = 'select'
   // 任务 4：带目标分组跳转而来（面试「深入该模块」）：自动开启该分组专项训练
   const targetCategory = route.query.category
   if (typeof targetCategory === 'string' && targetCategory.trim()) {
@@ -347,7 +362,7 @@ function scrollDown() {
       <div ref="chatBox" class="card chat-box">
         <div v-for="(item, index) in messages" :key="index" :class="['bubble-row', item.role]">
           <div class="bubble">
-            <div class="bubble-content">{{ item.content }}<span v-if="item.restored" class="muted">（刷新恢复，历史消息不回放）</span></div>
+            <div class="bubble-content">{{ item.content }}<span v-if="item.restored" class="muted">（刷新恢复）</span></div>
             <span v-if="item.comment" class="muted comment">{{ item.comment }}</span>
             <div v-if="item.score != null" class="score-line">
               <span :class="['badge', scoreClass(item.score)]">得分 {{ item.score }}</span>
@@ -393,7 +408,7 @@ function scrollDown() {
     </template>
 
     <!-- 完成成绩 -->
-    <div v-else class="card summary-card">
+    <div v-else-if="phase === 'summary'" class="card summary-card">
       <h2>🎉 专项训练完成</h2>
       <div class="summary-grid">
         <div class="summary-item">
@@ -416,6 +431,11 @@ function scrollDown() {
         <button class="secondary" :disabled="sending" @click="startTraining(status?.category)">再练「{{ status?.category }}」</button>
       </div>
     </div>
+
+    <!-- 恢复中占位：刷新/进入页面时先查后端会话，避免闪回选题页 -->
+    <div v-else class="card restoring-card">
+      <p class="muted">正在恢复训练会话…</p>
+    </div>
   </div>
 </template>
 
@@ -427,6 +447,12 @@ function scrollDown() {
 
 .select-card {
   padding: 20px;
+}
+
+/* 恢复中占位：居中轻提示，不抢视觉 */
+.restoring-card {
+  padding: 48px 20px;
+  text-align: center;
 }
 
 .from-interview-hint {

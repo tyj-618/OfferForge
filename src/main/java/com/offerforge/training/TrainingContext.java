@@ -35,6 +35,8 @@ public class TrainingContext {
     private String currentQuestion;
     private String currentKnowledgePoint;
     private String currentCandidateAnswer;
+    /** 服务端正在评估作答（客户端中途刷新后凭此标记轮询续接未完成回合） */
+    private boolean evaluating;
     /** 已作答题目记录（题面 + 得分），达标题数即完成 */
     private List<TrainingQuestionRecord> questionHistory = new ArrayList<>();
     /** 本场训练达到的最高难度（归档展示用） */
@@ -137,6 +139,14 @@ public class TrainingContext {
 
     public void setCurrentCandidateAnswer(String currentCandidateAnswer) {
         this.currentCandidateAnswer = currentCandidateAnswer;
+    }
+
+    public boolean isEvaluating() {
+        return evaluating;
+    }
+
+    public void setEvaluating(boolean evaluating) {
+        this.evaluating = evaluating;
     }
 
     public List<TrainingQuestionRecord> getQuestionHistory() {

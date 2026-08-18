@@ -147,6 +147,7 @@ public class TrainingService {
 
     /**
      * 作答：详细评估（训练模式同款）+ 导师反馈气泡 + 难度升降档 + 下一题或完成归档。
+     * 回合全程标记 evaluating 并落库：客户端中途刷新后可凭 status 轮询续接未完成回合。
      */
     public TrainingTurnResult answer(Long userId, String sessionId, String userMessage,
                                      InterviewStreamSink sink) throws IOException {
@@ -161,21 +162,25 @@ public class TrainingService {
                 log.info("training answer received sessionId={} category={} length={} preview={}",
                         sessionId, context.getCategory(), userMessage.length(), preview(userMessage));
                 messageStore.append(sessionId, List.of(ChatMessage.user(userMessage)));
+                // 回合开始即标记评估中并落库：刷新恢复的前端凭此轮询等待未完成回合
+                context.setEvaluating(true);
+                sessionStore.save(context);
 
                 sink.progress("正在评估你的回答…");
                 AnswerEvaluation evaluation = evaluationService.evaluate(
                         context.getCurrentQuestion(), context.getCurrentKnowledgePoint(),
                         context.getCurrentCandidateAnswer(), userMessage, true);
                 double overall = evaluation.overall();
+
+                // 导师反馈独立气泡（复用面试训练模式的导师人设），点评全文随回合记录保存供刷新回放
+                sink.progress("导师点评中…");
+                String comment = streamAndRecordSink(sessionId, mentorPromptBuilder.buildMentorFeedbackMessages(
+                        messageStore.list(sessionId), context.getCurrentQuestion(), evaluation, context.getStyle()), sink);
                 context.getQuestionHistory().add(new TrainingQuestionRecord(
-                        context.getCurrentQuestion(), context.getCurrentKnowledgePoint(), overall));
+                        context.getCurrentQuestion(), context.getCurrentKnowledgePoint(), overall,
+                        userMessage, comment, evaluation));
                 updateScoreStreaks(context, overall);
                 adjustDifficulty(context, sessionId);
-
-                // 导师反馈独立气泡（复用面试训练模式的导师人设）
-                sink.progress("导师点评中…");
-                streamAndRecordSink(sessionId, mentorPromptBuilder.buildMentorFeedbackMessages(
-                        messageStore.list(sessionId), context.getCurrentQuestion(), evaluation, context.getStyle()), sink);
                 sink.segment();
 
                 boolean finished = false;
@@ -202,10 +207,16 @@ public class TrainingService {
                                 context.getCurrentDifficulty().label(), context.getStyle()), sink);
                     }
                 }
+                context.setEvaluating(false);
                 sessionStore.save(context);
                 log.info("training sessionId={} score={} asked={} difficulty={} finished={}",
                         sessionId, overall, context.askedCount(), context.getCurrentDifficulty(), finished);
                 return new TrainingTurnResult(overall, evaluation.feedback(), finished, statusView(context), evaluation);
+            } catch (IOException | RuntimeException exception) {
+                // 回合中途失败：复位评估标记，避免刷新恢复时永久卡在轮询
+                context.setEvaluating(false);
+                sessionStore.save(context);
+                throw exception;
             } finally {
                 LlmCallContext.clear();
                 releaseLockIfTerminal(sessionId, lock);
@@ -312,15 +323,16 @@ public class TrainingService {
         sink.chunk(text);
     }
 
-    /** 流式生成并落库 assistant 消息，同步推给前端 */
-    private void streamAndRecordSink(String sessionId, List<ChatMessage> messages,
-                                     InterviewStreamSink sink) throws IOException {
+    /** 流式生成并落库 assistant 消息，同步推给前端，返回全文（随回合记录保存供刷新回放） */
+    private String streamAndRecordSink(String sessionId, List<ChatMessage> messages,
+                                       InterviewStreamSink sink) throws IOException {
         StringBuilder fullText = new StringBuilder();
         aiModelClient.generateStream(messages, chunk -> {
             fullText.append(chunk);
             sink.chunk(chunk);
         });
         messageStore.append(sessionId, List.of(ChatMessage.assistant(fullText.toString())));
+        return fullText.toString();
     }
 
     /** 流式生成并落库 assistant 消息，返回全文（start 开场用） */

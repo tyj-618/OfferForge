@@ -1,6 +1,7 @@
 // 专项训练会话全局 store：对话消息与进行中的 SSE 请求保存在模块级单例中，
 // 切换标签页（组件卸载）不中断流式回合，回到页面即可看到完整的评价与回复。
-// 刷新页面时消息不回放，仅凭后端 status 恢复当前题目（既有约定）。
+// 刷新页面时按后端 status.history 完整回放历史对话；若刷新时有回合在服务端进行中，
+// 轮询至回合完成后重建，实现「刷新后继续未完成的对话」。
 import { reactive } from 'vue'
 import { trainingApi, trainingAnswerStream } from '../api'
 import { classifyError } from '../utils/errors'
@@ -107,7 +108,8 @@ function failStream(assistantMessage, e) {
 
 /**
  * 页面加载时恢复会话：模块级已有活跃会话（切标签回来）直接沿用；
- * 否则按 sessionStorage 里的会话 id 向后端查状态恢复当前题目。
+ * 否则按 sessionStorage 里的会话 id 向后端查状态，用 history 完整重建历史对话。
+ * 若服务端正在评估上次作答（刷新时回合未完成），轮询至完成后重建续接。
  * 返回 'active' | ''，'' 表示无可恢复会话。
  */
 export async function restoreTrainingSession() {
@@ -131,16 +133,74 @@ export async function restoreTrainingSession() {
     }
     trainingSession.sessionId = saved
     trainingSession.status = restored
-    trainingSession.messages = [{
-      role: 'assistant',
-      content: restored.currentQuestion || '欢迎回来，请继续作答当前题目。',
-      restored: true
-    }]
+    trainingSession.messages = buildMessagesFromStatus(restored)
+    if (restored?.evaluating) {
+      waitForEvaluation(saved)
+    }
     return 'active'
   } catch {
     clearTrainingSession()
     return ''
   }
+}
+
+/**
+ * 按后端状态重建完整对话：每个已作答回合还原为 题目气泡 → 用户回答气泡 →
+ * 导师点评气泡（携带得分与详细评估），末尾追加当前待作答题目。
+ */
+function buildMessagesFromStatus(status) {
+  const rebuilt = []
+  for (const item of status?.history || []) {
+    if (item.question) {
+      rebuilt.push({ role: 'assistant', content: item.question })
+    }
+    if (item.answer) {
+      rebuilt.push({ role: 'user', content: item.answer })
+    }
+    if (item.comment) {
+      rebuilt.push({
+        role: 'assistant',
+        content: item.comment,
+        score: item.score,
+        evaluation: item.evaluation || null
+      })
+    }
+  }
+  if (!status?.finished && status?.currentQuestion) {
+    rebuilt.push({ role: 'assistant', content: status.currentQuestion, restored: true })
+  }
+  return rebuilt
+}
+
+/**
+ * 刷新时上一回合仍在服务端进行中：轮询 status 至 evaluating 结束，
+ * 再用最新 history 重建对话（含本回合的评价与下一题），实现续接。
+ */
+function waitForEvaluation(sessionId) {
+  trainingSession.sending = true
+  trainingSession.thinkingText = '正在续接你上次提交的回答，评估中…'
+  let attempts = 0
+  const MAX_ATTEMPTS = 72 // 2.5s × 72 ≈ 3 分钟，覆盖回合最坏耗时
+  const timer = setInterval(async () => {
+    attempts += 1
+    try {
+      const latest = await trainingApi.status(sessionId)
+      if (!latest?.evaluating || latest?.finished || attempts >= MAX_ATTEMPTS) {
+        clearInterval(timer)
+        trainingSession.status = latest
+        trainingSession.messages = buildMessagesFromStatus(latest)
+        trainingSession.sending = false
+        trainingSession.thinkingText = ''
+      }
+    } catch {
+      // 偶发网络抖动继续重试；连续失败超限则释放输入，保留已重建的历史
+      if (attempts >= MAX_ATTEMPTS) {
+        clearInterval(timer)
+        trainingSession.sending = false
+        trainingSession.thinkingText = ''
+      }
+    }
+  }, 2500)
 }
 
 /** 清空模块级会话与存储（回到选择页 / 训练归档后） */
