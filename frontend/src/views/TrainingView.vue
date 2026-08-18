@@ -637,6 +637,7 @@ function scrollDown() {
 
 .category-name {
   font-weight: 600;
+  color: var(--primary, #4f6ef7);
 }
 
 .category-tag {
