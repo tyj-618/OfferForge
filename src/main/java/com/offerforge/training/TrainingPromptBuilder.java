@@ -1,5 +1,6 @@
 package com.offerforge.training;
 
+import com.offerforge.ai.AssistantStyle;
 import com.offerforge.ai.ChatMessage;
 import org.springframework.stereotype.Component;
 
@@ -22,21 +23,38 @@ public class TrainingPromptBuilder {
             """;
 
     /**
-     * 出题话术：首题带开场引导，后续按题序与难度递进衔接。
+     * 出题话术：首题带开场引导，后续按题序与难度递进衔接；语气风格由 style 决定。
      */
     public List<ChatMessage> buildCoachMessages(List<ChatMessage> history, String category,
-                                                String question, int index, String difficultyLabel) {
-        String instruction = index <= 1
-                ? "<task>training</task>"
-                        + "<instruction>这是「" + category + "」专项训练的第 1 题，先用一两句简短开场说明训练规则"
-                        + "（由浅入深、共需完成若干题），随后自然提出问题。</instruction>"
-                        + "<question>" + question + "</question>"
-                : "<task>training</task>"
-                        + "<instruction>这是「" + category + "」专项训练第 " + index + " 题（当前难度："
-                        + difficultyLabel + "），用一句鼓励性的衔接语直接提出下面的新题，不要点评上一题的作答。</instruction>"
-                        + "<question>" + question + "</question>";
+                                                String question, int index, String difficultyLabel,
+                                                String style) {
+        boolean strict = AssistantStyle.isStrict(style);
+        String instruction;
+        if (index <= 1) {
+            instruction = "<task>training</task>"
+                    + "<instruction>这是「" + category + "」专项训练的第 1 题，"
+                    + (strict
+                            ? "用一两句极简的话说明训练规则（由浅入深、共需完成若干题），随后直接提出问题，不讲客套。"
+                            : "先用一两句简短开场说明训练规则（由浅入深、共需完成若干题），随后自然提出问题。")
+                    + "</instruction>"
+                    + "<question>" + question + "</question>";
+        } else {
+            instruction = "<task>training</task>"
+                    + "<instruction>这是「" + category + "」专项训练第 " + index + " 题（当前难度："
+                    + difficultyLabel + "），"
+                    + (strict
+                            ? "直接提出下面的新题，不需要衔接语与鼓励性话语，不要点评上一题的作答。"
+                            : "用一句鼓励性的衔接语直接提出下面的新题，不要点评上一题的作答。")
+                    + "</instruction>"
+                    + "<question>" + question + "</question>";
+        }
+        String systemPrompt = strict
+                ? SYSTEM_PROMPT
+                        + "语气风格（严肃专业）：讲究效率、铁面无私。不讲客套、不做鼓励性套话，用最少的字传达有效信息。\n"
+                : SYSTEM_PROMPT
+                        + "语气风格（和蔼可亲）：保持温和鼓励的语气，但提高信息浓度，减少空洞铺垫。\n";
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.system(SYSTEM_PROMPT));
+        messages.add(ChatMessage.system(systemPrompt));
         messages.addAll(history);
         messages.add(ChatMessage.user(instruction));
         return messages;

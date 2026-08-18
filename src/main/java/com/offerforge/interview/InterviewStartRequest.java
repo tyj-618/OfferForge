@@ -7,7 +7,8 @@ import java.util.List;
  * mode：training（训练模式）/ practice（实战模式），空或非法值按 practice 处理。
  * categories：勾选的资料分组（可空）；非空时出题仅用这些分组。
  * includeAlgorithm：是否包含算法手写编程题（DEEP 阶段按难度掺入，默认否）。
+ * style：助手语气风格（strict/friendly，缺省 friendly）。
  */
 public record InterviewStartRequest(String position, Long resumeId, String mode, List<String> categories,
-                                    Boolean includeAlgorithm) {
+                                    Boolean includeAlgorithm, String style) {
 }

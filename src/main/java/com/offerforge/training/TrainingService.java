@@ -91,6 +91,13 @@ public class TrainingService {
      * 开场即出第 1 题（EASY 起步），经教练话术包装后随响应返回。
      */
     public TrainingStartResponse start(Long userId, String category) {
+        return start(userId, category, null);
+    }
+
+    /**
+     * 完整参数版：style 为助手语气风格（strict/friendly，缺省 friendly）。
+     */
+    public TrainingStartResponse start(Long userId, String category, String style) {
         String normalized = category == null ? null : category.trim();
         if (normalized == null || normalized.isEmpty()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "请选择要训练的资料分组");
@@ -115,6 +122,7 @@ public class TrainingService {
         context.setSessionId(sessionId);
         context.setUserId(userId);
         context.setCategory(normalized);
+        context.setStyle(style);
         context.setCreatedAtEpochMillis(System.currentTimeMillis());
 
         InterviewQuestionBank.InterviewQuestion first = nextQuestion(context).orElseThrow(
@@ -126,7 +134,7 @@ public class TrainingService {
         try {
             openingMessage = streamAndRecord(sessionId,
                     promptBuilder.buildCoachMessages(messageStore.list(sessionId), normalized,
-                            first.question(), 1, context.getCurrentDifficulty().label()));
+                            first.question(), 1, context.getCurrentDifficulty().label(), context.getStyle()));
         } catch (IOException exception) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "训练开场生成失败，请稍后重试");
         } finally {
@@ -167,7 +175,7 @@ public class TrainingService {
                 // 导师反馈独立气泡（复用面试训练模式的导师人设）
                 sink.progress("导师点评中…");
                 streamAndRecordSink(sessionId, mentorPromptBuilder.buildMentorFeedbackMessages(
-                        messageStore.list(sessionId), context.getCurrentQuestion(), evaluation), sink);
+                        messageStore.list(sessionId), context.getCurrentQuestion(), evaluation, context.getStyle()), sink);
                 sink.segment();
 
                 boolean finished = false;
@@ -191,7 +199,7 @@ public class TrainingService {
                         streamAndRecordSink(sessionId, promptBuilder.buildCoachMessages(
                                 messageStore.list(sessionId), context.getCategory(),
                                 context.getCurrentQuestion(), context.askedCount() + 1,
-                                context.getCurrentDifficulty().label()), sink);
+                                context.getCurrentDifficulty().label(), context.getStyle()), sink);
                     }
                 }
                 sessionStore.save(context);

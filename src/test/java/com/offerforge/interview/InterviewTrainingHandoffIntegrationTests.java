@@ -53,19 +53,33 @@ class InterviewTrainingHandoffIntegrationTests {
         assertCode(none, 0);
         assertThat(none.at("/data").isNull()).isTrue();
 
-        // 开始训练模式面试并作答：开场自我介绍 + 第一道基础题
-        JsonNode start = post("/api/interview/start", token,
-                Map.of("position", "Java 后端工程师", "mode", "training"));
-        assertCode(start, 0);
-        String interviewId = start.at("/data/sessionId").asText();
-        assertDone(doneOf(ask(interviewId, token, SELF_INTRO)));
-        JsonNode firstDone = doneOf(ask(interviewId, token, LONG_ANSWER));
-        assertThat(firstDone.at("/score").asDouble()).isEqualTo(8.0);
+        // 开始训练模式面试并作答：开场自我介绍 + 第一道基础题。
+        // 随机选题可能落到 EASY 档题目不足 3 道的分组（如 Java集合仅 1 道），
+        // 导致专项训练提前完成无法验证 3 题回合，此处重试至命中题量充足的场次。
+        String interviewId = null;
+        String category = null;
+        for (int attempt = 0; attempt < 8 && category == null; attempt++) {
+            if (interviewId != null) {
+                post("/api/interview/" + interviewId + "/finish", token, Map.of());
+            }
+            JsonNode start = post("/api/interview/start", token,
+                    Map.of("position", "Java 后端工程师", "mode", "training"));
+            assertCode(start, 0);
+            interviewId = start.at("/data/sessionId").asText();
+            assertDone(doneOf(ask(interviewId, token, SELF_INTRO)));
+            JsonNode firstDone = doneOf(ask(interviewId, token, LONG_ANSWER));
+            assertThat(firstDone.at("/score").asDouble()).isEqualTo(8.0);
 
-        // 反馈后 status 暴露最近作答题所属分组（BASICS 官方分组之一），即「深入该模块」的跳转目标
-        JsonNode status = get("/api/interview/" + interviewId + "/status", token);
-        String category = status.at("/data/lastAnswerCategory").asText();
-        assertThat(BASICS_CATEGORIES).contains(category);
+            // 反馈后 status 暴露最近作答题所属分组（BASICS 官方分组之一），即「深入该模块」的跳转目标
+            JsonNode status = get("/api/interview/" + interviewId + "/status", token);
+            String candidate = status.at("/data/lastAnswerCategory").asText();
+            assertThat(BASICS_CATEGORIES).contains(candidate);
+            // 计算机网络的 EASY 档有 3 道题，可完整走完 3 题训练；其余分组题量不足时重试
+            if ("计算机网络".equals(candidate)) {
+                category = candidate;
+            }
+        }
+        assertThat(category).as("多次重试仍未抽中题量充足的分组").isNotNull();
 
         // active-session 返回同一场面试，供「继续未完成的面试」恢复
         JsonNode active = get("/api/interview/active-session", token);

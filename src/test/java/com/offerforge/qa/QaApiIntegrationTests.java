@@ -68,6 +68,50 @@ class QaApiIntegrationTests {
         assertCode(result, 40100);
     }
 
+    @Test
+    void askStreamReturnsSseChunksAndDoneWithHistory() throws Exception {
+        String username = "qa_stream_" + System.nanoTime();
+        register(username, "123456");
+        String token = login(username, "123456");
+        JsonNode importResult = post("/api/knowledge/import", token, Map.of());
+        assertCode(importResult, 0);
+
+        String body = "{\"question\":\"HashMap 原理\",\"history\":["
+                + "{\"role\":\"user\",\"content\":\"之前的问题\"},"
+                + "{\"role\":\"assistant\",\"content\":\"之前的回答\"}]}";
+        HttpResponse<String> response = httpClient.send(streamRequest("/api/qa/ask-stream", token, body),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        String sse = response.body();
+        assertThat(sse).contains("event:message");
+        assertThat(sse).contains("event:done");
+        assertThat(sse).contains("referencedKnowledgeIds");
+    }
+
+    @Test
+    void askStreamWithoutTokenReturnsUnauthorizedErrorFrame() throws Exception {
+        HttpResponse<String> response = httpClient.send(
+                streamRequest("/api/qa/ask-stream", null, "{\"question\":\"任意问题\"}"),
+                HttpResponse.BodyHandlers.ofString());
+
+        // SSE 恒返 200，鉴权失败以 error 帧下发
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.body()).contains("event:error").contains("40100");
+    }
+
+    private HttpRequest streamRequest(String path, String token, String body) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + port + path))
+                .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE)
+                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
+        if (token != null) {
+            builder.header("Authorization", "Bearer " + token);
+        }
+        return builder.build();
+    }
+
     private void register(String username, String password) throws Exception {
         JsonNode result = post("/api/auth/register", null, Map.of("username", username, "password", password));
         assertCode(result, 0);

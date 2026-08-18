@@ -1,6 +1,7 @@
 package com.offerforge.interview;
 
 import com.offerforge.ai.AnswerEvaluation;
+import com.offerforge.ai.AssistantStyle;
 import com.offerforge.ai.ChatMessage;
 import org.springframework.stereotype.Component;
 
@@ -29,6 +30,22 @@ public class InterviewPromptBuilder {
             答得好时真诚表扬，答得不好时宽慰鼓励。你不负责提问，也不负责评分。
             """;
 
+    /** 严肃专业风格追加指令：效率优先、铁面无私，减少无关的话，专注有效知识内容 */
+    static final String STRICT_STYLE_NOTE = """
+            语气风格（严肃专业）：讲究效率、铁面无私。不讲客套、不做情绪安抚与鼓励性套话，
+            用最少的字传达有效信息，专注知识内容本身。
+            """;
+
+    /** 和蔼可亲风格追加指令：在原有温柔语气基础上提高有效信息浓度 */
+    static final String FRIENDLY_STYLE_NOTE = """
+            语气风格（和蔼可亲）：语气温柔有礼，但保持高信息浓度：
+            减少寒暄、重复铺垫与空洞鼓励，每句话都承载实质内容。
+            """;
+
+    private static String styleNote(String style) {
+        return AssistantStyle.isStrict(style) ? STRICT_STYLE_NOTE : FRIENDLY_STYLE_NOTE;
+    }
+
     /**
      * 出题话术：进入新阶段或换题时使用，按模式区分过渡方式。
      * practice：真人面试官人设——承接上一轮作答（答得好适度肯定、不透露评分），切换考察方向时借简历信息平稳过渡；
@@ -39,11 +56,16 @@ public class InterviewPromptBuilder {
      */
     public List<ChatMessage> buildInterviewerMessages(List<ChatMessage> history, InterviewState phase,
                                                       String question, String mode,
-                                                      String previousAnswerSummary, String resumeSummary) {
+                                                      String previousAnswerSummary, String resumeSummary,
+                                                      String style) {
+        boolean strict = AssistantStyle.isStrict(style);
         String instruction;
         if (InterviewContext.MODE_TRAINING.equals(mode)) {
             instruction = "<task>interviewer</task><phase>" + phase.label() + "</phase>"
-                    + "<instruction>用一句极简的衔接语（如“接下来我们看这个问题”）直接提出下面的新面试题，不要点评或总结候选人此前的回答。</instruction>"
+                    + "<instruction>" + (strict
+                            ? "直接提出下面的新面试题，不需要衔接语，不要点评或总结候选人此前的回答。"
+                            : "用一句极简的衔接语（如“接下来我们看这个问题”）直接提出下面的新面试题，不要点评或总结候选人此前的回答。")
+                    + "</instruction>"
                     + "<question>" + question + "</question>";
         } else {
             StringBuilder context = new StringBuilder();
@@ -53,18 +75,25 @@ public class InterviewPromptBuilder {
             if (resumeSummary != null && !resumeSummary.isBlank()) {
                 context.append("<resume>").append(resumeSummary).append("</resume>");
             }
-            String persona = "像一位真实面试官那样自然衔接，要求："
-                    + "1. 先用一至两句话承接候选人上一轮作答：若上一轮回答出色，可适度、具体地肯定其答得好的点（只提具体内容，绝不透露分数或“评分/得分”字样）；若上一轮回答一般或不理想，用中性话语平稳过渡，不批评不贬低；"
-                    + (context.indexOf("<resume>") >= 0
-                            ? "2. 本次切换了考察方向，可自然地借候选人简历信息作桥接（如“看你简历提到……，那我们来看看……”），避免生硬转场；"
-                            : "2. 用一句自然的过渡语衔接；")
-                    + "3. 随后提出下面的新面试题，不得自创题目、不得泄露参考答案。";
+            String persona;
+            if (strict) {
+                persona = "像一位高效严谨的面试官：用一句中性、简短的话直接衔接（不表扬、不安抚、不寒暄），"
+                        + (context.indexOf("<resume>") >= 0 ? "必要时可借简历信息一句带过作桥接，" : "")
+                        + "随后直接提出下面的新面试题，不得自创题目、不得泄露参考答案。";
+            } else {
+                persona = "像一位真实面试官那样自然衔接，要求："
+                        + "1. 先用一至两句话承接候选人上一轮作答：若上一轮回答出色，可适度、具体地肯定其答得好的点（只提具体内容，绝不透露分数或“评分/得分”字样）；若上一轮回答一般或不理想，用中性话语平稳过渡，不批评不贬低；"
+                        + (context.indexOf("<resume>") >= 0
+                                ? "2. 本次切换了考察方向，可自然地借候选人简历信息作桥接（如“看你简历提到……，那我们来看看……”），避免生硬转场；"
+                                : "2. 用一句自然的过渡语衔接；")
+                        + "3. 随后提出下面的新面试题，不得自创题目、不得泄露参考答案。";
+            }
             instruction = "<task>interviewer</task><phase>" + phase.label() + "</phase>"
                     + context
                     + "<instruction>" + persona + "</instruction>"
                     + "<question>" + question + "</question>";
         }
-        return build(history, instruction);
+        return build(history, instruction, style);
     }
 
     /**
@@ -72,10 +101,19 @@ public class InterviewPromptBuilder {
      * 不透露分数与评分字样、不给参考答案、不提新问题，作为独立气泡流式输出。
      */
     public List<ChatMessage> buildMentorFeedbackMessages(List<ChatMessage> history, String question,
-                                                         AnswerEvaluation evaluation) {
+                                                         AnswerEvaluation evaluation, String style) {
+        boolean strict = AssistantStyle.isStrict(style);
         double score = evaluation.overall();
         String tone;
-        if (score >= 7) {
+        if (strict) {
+            if (score >= 7) {
+                tone = "回答良好：具体、简练地点出亮点，不需过度赞美";
+            } else if (score >= 4) {
+                tone = "回答基本合格：直接指出做得不错的部分与欠缺之处，给出提升方向";
+            } else {
+                tone = "回答不理想：直指问题所在，指明改进方向与学习路径，不需情绪化责备";
+            }
+        } else if (score >= 7) {
             tone = "回答得很好：真诚、具体地肯定其亮点，表达赞赏，并鼓励保持";
         } else if (score >= 4) {
             tone = "回答基本合格：先肯定做得不错的部分，再温和地点出可以提升的方向，不要指责";
@@ -90,12 +128,13 @@ public class InterviewPromptBuilder {
             hints.append("可提示的改进方向（只说方向不展开答案）：").append(String.join("；", limit(evaluation.missedPoints(), 2))).append('\n');
         }
         String instruction = "<task>mentor-feedback</task>"
-                + "<instruction>候选人刚回答了问题：" + question + "。请针对这个回答给出 2-3 句人性化反馈。"
+                + "<instruction>候选人刚回答了问题：" + question + "。请针对这个回答给出"
+                + (strict ? " 2 句以内简洁" : " 2-3 句人性化") + "反馈。"
                 + "语气要求：" + tone + "。"
                 + (hints.isEmpty() ? "" : hints.toString())
                 + "不要透露任何分数或“评分/得分”字样，不要给出参考答案，不要提出新问题，直接输出反馈文字。</instruction>";
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.system(MENTOR_SYSTEM_PROMPT));
+        messages.add(ChatMessage.system(MENTOR_SYSTEM_PROMPT + styleNote(style)));
         messages.addAll(history);
         messages.add(ChatMessage.user(instruction));
         return messages;
@@ -107,7 +146,7 @@ public class InterviewPromptBuilder {
      */
     public List<ChatMessage> buildFollowUpMessages(List<ChatMessage> history, String question,
                                                    String answerPreview, List<String> missedPoints,
-                                                   List<String> wrongPoints) {
+                                                   List<String> wrongPoints, String style) {
         StringBuilder context = new StringBuilder();
         if (answerPreview != null && !answerPreview.isBlank()) {
             context.append("<candidate-answer>").append(answerPreview).append("</candidate-answer>");
@@ -123,21 +162,26 @@ public class InterviewPromptBuilder {
                 + context
                 + "<instruction>候选人对下面的问题回答不够理想。请像真实面试官那样追问："
                 + "先自然承接候选人的实际作答内容（可点出他刚才提到的具体说法，指出尚欠火候之处），"
-                + "再围绕同一知识点换个角度继续深挖，不要直接给出答案，语气专业且不带批评。"
+                + "再围绕同一知识点换个角度继续深挖，不要直接给出答案，"
+                + (AssistantStyle.isStrict(style) ? "语气直接、简洁，不带任何客套。" : "语气专业且不带批评。")
                 + (findings.isEmpty() ? "" : "评估发现的薄弱点（仅供你组织追问方向，不要原样照念）：" + findings)
                 + "</instruction>"
                 + "<question>" + question + "</question>";
-        return build(history, instruction);
+        return build(history, instruction, style);
     }
 
     /**
      * 深度训练出题话术：训练模式专项强化子流程，语气鼓励，不透露评分。
      */
-    public List<ChatMessage> buildDeepTrainingMessages(List<ChatMessage> history, String question, int index) {
+    public List<ChatMessage> buildDeepTrainingMessages(List<ChatMessage> history, String question, int index,
+                                                       String style) {
         String instruction = "<task>deep-training</task>"
-                + "<instruction>这是针对薄弱知识点的深度训练第 " + index + " 题，语气鼓励、自然递进地提出问题，不要透露参考答案。</instruction>"
+                + "<instruction>这是针对薄弱知识点的深度训练第 " + index + " 题，"
+                + (AssistantStyle.isStrict(style)
+                        ? "直接、简洁地提出问题，不需要鼓励性话语，" : "语气鼓励、自然递进地提出问题，")
+                + "不要透露参考答案。</instruction>"
                 + "<question>" + question + "</question>";
-        return build(history, instruction);
+        return build(history, instruction, style);
     }
 
     /**
@@ -157,9 +201,9 @@ public class InterviewPromptBuilder {
         return prompt.toString();
     }
 
-    private List<ChatMessage> build(List<ChatMessage> history, String instruction) {
+    private List<ChatMessage> build(List<ChatMessage> history, String instruction, String style) {
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.system(SYSTEM_PROMPT));
+        messages.add(ChatMessage.system(SYSTEM_PROMPT + styleNote(style)));
         messages.addAll(history);
         messages.add(ChatMessage.user(instruction));
         return messages;

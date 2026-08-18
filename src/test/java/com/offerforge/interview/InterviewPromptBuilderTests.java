@@ -1,5 +1,6 @@
 package com.offerforge.interview;
 
+import com.offerforge.ai.AssistantStyle;
 import com.offerforge.ai.ChatMessage;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +24,8 @@ class InterviewPromptBuilderTests {
     void practiceModeInjectsLastAnswerAndResumeWithPersonaRequirements() {
         List<ChatMessage> messages = builder.buildInterviewerMessages(
                 List.of(), InterviewState.BASICS, "HashMap 的原理？", InterviewContext.MODE_PRACTICE,
-                "上一轮回答出色。覆盖到的要点：线程状态", "候选人：张三。技能：Java、Spring。项目经历：商城系统。");
+                "上一轮回答出色。覆盖到的要点：线程状态", "候选人：张三。技能：Java、Spring。项目经历：商城系统。",
+                AssistantStyle.FRIENDLY);
 
         assertThat(messages.get(0).content()).contains("AI 面试官");
         String instruction = lastUserContent(messages);
@@ -40,7 +42,7 @@ class InterviewPromptBuilderTests {
     void practiceModeWithoutResumeUsesNeutralTransition() {
         List<ChatMessage> messages = builder.buildInterviewerMessages(
                 List.of(), InterviewState.BASICS, "HashMap 的原理？", InterviewContext.MODE_PRACTICE,
-                "上一轮回答基本合格。", null);
+                "上一轮回答基本合格。", null, AssistantStyle.FRIENDLY);
 
         String instruction = lastUserContent(messages);
         assertThat(instruction).contains("<last-answer>").doesNotContain("<resume>");
@@ -51,7 +53,7 @@ class InterviewPromptBuilderTests {
     void trainingModeKeepsMinimalTransitionWithoutPersonaContext() {
         List<ChatMessage> messages = builder.buildInterviewerMessages(
                 List.of(), InterviewState.PROJECT, "项目里如何做缓存？", InterviewContext.MODE_TRAINING,
-                "上一轮回答出色。", "候选人：张三。");
+                "上一轮回答出色。", "候选人：张三。", AssistantStyle.FRIENDLY);
 
         String instruction = lastUserContent(messages);
         assertThat(instruction).contains("<task>interviewer</task>");
@@ -65,7 +67,7 @@ class InterviewPromptBuilderTests {
     void followUpCarriesCandidateAnswerAndFindings() {
         List<ChatMessage> messages = builder.buildFollowUpMessages(
                 List.of(), "HashMap 的原理？", "只知道是数组存的",
-                List.of("hash 冲突解决"), List.of("链表不会转红黑树"));
+                List.of("hash 冲突解决"), List.of("链表不会转红黑树"), AssistantStyle.FRIENDLY);
 
         String instruction = lastUserContent(messages);
         assertThat(instruction).contains("<task>followup</task>");
@@ -80,7 +82,7 @@ class InterviewPromptBuilderTests {
     @Test
     void followUpWithoutFindingsOmitsFindingsBlock() {
         List<ChatMessage> messages = builder.buildFollowUpMessages(
-                List.of(), "HashMap 的原理？", null, List.of(), List.of());
+                List.of(), "HashMap 的原理？", null, List.of(), List.of(), AssistantStyle.FRIENDLY);
 
         String instruction = lastUserContent(messages);
         assertThat(instruction).doesNotContain("<candidate-answer>").doesNotContain("评估发现的薄弱点");
@@ -92,12 +94,43 @@ class InterviewPromptBuilderTests {
         List<ChatMessage> history = List.of(ChatMessage.assistant("上一题"), ChatMessage.user("我的回答"));
 
         List<ChatMessage> messages = builder.buildInterviewerMessages(
-                history, InterviewState.BASICS, "新题", InterviewContext.MODE_PRACTICE, null, null);
+                history, InterviewState.BASICS, "新题", InterviewContext.MODE_PRACTICE, null, null,
+                AssistantStyle.FRIENDLY);
 
         assertThat(messages).hasSize(4);
         assertThat(messages.get(0).role()).isEqualTo(ChatMessage.Role.SYSTEM);
         assertThat(messages.get(1).content()).isEqualTo("上一题");
         assertThat(messages.get(2).content()).isEqualTo("我的回答");
         assertThat(messages.get(3).role()).isEqualTo(ChatMessage.Role.USER);
+    }
+
+    @Test
+    void strictStyleInjectsEfficiencyNoteAndRemovesSmallTalk() {
+        List<ChatMessage> messages = builder.buildInterviewerMessages(
+                List.of(), InterviewState.BASICS, "HashMap 的原理？", InterviewContext.MODE_PRACTICE,
+                "上一轮回答出色。", null, AssistantStyle.STRICT);
+
+        // 系统人设追加严肃专业风格指令
+        assertThat(messages.get(0).content()).contains("严肃专业").contains("铁面无私");
+        String instruction = lastUserContent(messages);
+        // 严肃风格不要求肯定/寒暄，直接衔接出题
+        assertThat(instruction).contains("不表扬、不安抚、不寒暄").doesNotContain("适度、具体地肯定");
+    }
+
+    @Test
+    void friendlyStyleInjectsInformationDensityNote() {
+        List<ChatMessage> messages = builder.buildInterviewerMessages(
+                List.of(), InterviewState.BASICS, "HashMap 的原理？", InterviewContext.MODE_PRACTICE,
+                null, null, AssistantStyle.FRIENDLY);
+
+        assertThat(messages.get(0).content()).contains("和蔼可亲").contains("信息浓度");
+    }
+
+    @Test
+    void nullStyleFallsBackToFriendly() {
+        List<ChatMessage> messages = builder.buildInterviewerMessages(
+                List.of(), InterviewState.BASICS, "新题", InterviewContext.MODE_PRACTICE, null, null, null);
+
+        assertThat(messages.get(0).content()).contains("和蔼可亲");
     }
 }

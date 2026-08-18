@@ -64,6 +64,8 @@ export function clearToken() {
   authState.token = ''
   localStorage.removeItem(TOKEN_KEY)
   clearCurrentUser()
+  // 快捷提问历史仅在当前登录期间临时保存，退出登录即清除
+  sessionStorage.removeItem('offerforge_qa_session')
 }
 
 /**
@@ -166,15 +168,18 @@ export const knowledgeApi = {
 }
 
 export const qaApi = {
-  ask: (question) => http.post('/qa/ask', { question })
+  ask: (question) => http.post('/qa/ask', { question }),
+  // 流式提问：message/done/error 事件契约与面试/训练一致；history 为最近若干轮对话（追问上下文）
+  askStream: (question, history, callbacks) => sseRequest('/api/qa/ask-stream', { question, history }, callbacks)
 }
 
 // ---------- 面试 ----------
 export const interviewApi = {
   // categories：勾选的资料分组（可空）；非空时出题仅用这些分组
   // includeAlgorithm：开启后 DEEP 阶段掺入算法手写编程题（任务 12）
-  start: (position, resumeId = null, mode = null, categories = null, includeAlgorithm = null) =>
-    http.post('/interview/start', { position, resumeId, mode, categories, includeAlgorithm }),
+  // style：助手语气风格（strict 严肃专业 / friendly 和蔼可亲，缺省 friendly）
+  start: (position, resumeId = null, mode = null, categories = null, includeAlgorithm = null, style = null) =>
+    http.post('/interview/start', { position, resumeId, mode, categories, includeAlgorithm, style }),
   status: (sessionId) => http.get(`/interview/${sessionId}/status`),
   // 暂存续考（任务 4）：取未结束的面试会话，无则返回 null
   activeSession: () => http.get('/interview/active-session'),
@@ -331,7 +336,8 @@ export function askStream(sessionId, message, callbacks) {
 
 // ---------- 专项训练（任务 7）：SSE 契约与面试 ask 一致 ----------
 export const trainingApi = {
-  start: (category) => http.post('/training/start', { category }),
+  // style：助手语气风格（strict/friendly，缺省 friendly）
+  start: (category, style = null) => http.post('/training/start', { category, style }),
   status: (sessionId) => http.get(`/training/${sessionId}/status`),
   finish: (sessionId) => http.post(`/training/${sessionId}/finish`, null),
   records: () => http.get('/training/records')

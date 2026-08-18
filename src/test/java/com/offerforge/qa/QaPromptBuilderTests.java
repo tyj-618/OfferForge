@@ -52,4 +52,37 @@ class QaPromptBuilderTests {
         assertThat(userPrompt).doesNotContain(longAnswer);
         assertThat(userPrompt).contains("长".repeat(800) + "…");
     }
+
+    @Test
+    void historyIsInjectedBetweenSystemAndCurrentQuestion() {
+        List<QaAskStreamRequest.HistoryEntry> history = List.of(
+                new QaAskStreamRequest.HistoryEntry("user", "HashMap 原理"),
+                new QaAskStreamRequest.HistoryEntry("assistant", "数组+链表+红黑树"),
+                new QaAskStreamRequest.HistoryEntry("system", "应忽略的非法角色"));
+
+        List<ChatMessage> messages = promptBuilder.build("那线程安全怎么解决", history, List.of());
+
+        // system + user + assistant + 本轮 user，非法角色与空内容忽略
+        assertThat(messages).hasSize(4);
+        assertThat(messages.get(0).role()).isEqualTo(ChatMessage.Role.SYSTEM);
+        assertThat(messages.get(1).content()).isEqualTo("HashMap 原理");
+        assertThat(messages.get(2).role()).isEqualTo(ChatMessage.Role.ASSISTANT);
+        assertThat(messages.get(3).role()).isEqualTo(ChatMessage.Role.USER);
+        assertThat(messages.get(3).content()).contains("那线程安全怎么解决");
+    }
+
+    @Test
+    void historyKeepsOnlyRecentMessages() {
+        List<QaAskStreamRequest.HistoryEntry> history = new java.util.ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            history.add(new QaAskStreamRequest.HistoryEntry(i % 2 == 0 ? "user" : "assistant", "消息" + i));
+        }
+
+        List<ChatMessage> messages = promptBuilder.build("新问题", history, List.of());
+
+        // system + 最近 6 条历史 + 本轮 user
+        assertThat(messages).hasSize(8);
+        assertThat(messages.get(1).content()).isEqualTo("消息14");
+        assertThat(messages.get(6).content()).isEqualTo("消息19");
+    }
 }

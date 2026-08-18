@@ -125,6 +125,14 @@ public class InterviewService {
      */
     public InterviewStartResponse start(Long userId, String position, Long resumeId, String mode,
                                         List<String> categories, Boolean includeAlgorithm) {
+        return start(userId, position, resumeId, mode, categories, includeAlgorithm, null);
+    }
+
+    /**
+     * 开始面试（完整参数）：style 为助手语气风格（strict/friendly，缺省 friendly）。
+     */
+    public InterviewStartResponse start(Long userId, String position, Long resumeId, String mode,
+                                        List<String> categories, Boolean includeAlgorithm, String style) {
         if (sessionStore.hasActiveSession(userId)) {
             throw new BusinessException(ErrorCode.CONFLICT, "已有一场面试正在进行，请先结束后再开始新面试");
         }
@@ -147,6 +155,7 @@ public class InterviewService {
         context.setPosition(position == null || position.isBlank() ? DEFAULT_POSITION : position.trim());
         context.setResumeId(resumeId);
         context.setMode(InterviewContext.MODE_TRAINING.equals(mode) ? InterviewContext.MODE_TRAINING : InterviewContext.MODE_PRACTICE);
+        context.setStyle(style);
         context.setSelectedCategories(normalizeSelectedCategories(categories));
         context.setIncludeAlgorithm(Boolean.TRUE.equals(includeAlgorithm));
         context.setState(InterviewState.OPENING);
@@ -385,7 +394,7 @@ public class InterviewService {
     private void emitMentorFeedback(InterviewContext context, String sessionId,
                                     AnswerEvaluation evaluation, InterviewStreamSink sink) throws IOException {
         List<ChatMessage> messages = promptBuilder.buildMentorFeedbackMessages(
-                messageStore.list(sessionId), context.getCurrentQuestion(), evaluation);
+                messageStore.list(sessionId), context.getCurrentQuestion(), evaluation, context.getStyle());
         streamAndRecord(sessionId, messages, sink);
     }
 
@@ -508,7 +517,7 @@ public class InterviewService {
         context.setCurrentQuestionPhase(InterviewState.DEEP_TRAINING);
         context.setDeepTrainingAsked(index);
         List<ChatMessage> messages = promptBuilder.buildDeepTrainingMessages(
-                messageStore.list(sessionId), question, index);
+                messageStore.list(sessionId), question, index, context.getStyle());
         streamAndRecord(sessionId, messages, sink);
     }
 
@@ -620,7 +629,8 @@ public class InterviewService {
         context.setCurrentQuestionFollowUp(true);
         context.setCurrentFollowUpCount(context.getCurrentFollowUpCount() + 1);
         List<ChatMessage> messages = promptBuilder.buildFollowUpMessages(
-                messageStore.list(sessionId), followUpQuestion, answerPreview, missedPoints, wrongPoints);
+                messageStore.list(sessionId), followUpQuestion, answerPreview, missedPoints, wrongPoints,
+                context.getStyle());
         streamAndRecord(sessionId, messages, sink);
     }
 
@@ -682,7 +692,7 @@ public class InterviewService {
                 preview(question.question()));
         List<ChatMessage> messages = promptBuilder.buildInterviewerMessages(
                 messageStore.list(sessionId), phase, question.question(), context.getMode(),
-                lastAnswerSummary(context), resumeSummaryFor(context));
+                lastAnswerSummary(context), resumeSummaryFor(context), context.getStyle());
         streamAndRecord(sessionId, messages, sink);
     }
 

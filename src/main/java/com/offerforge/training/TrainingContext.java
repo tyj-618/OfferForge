@@ -23,6 +23,8 @@ public class TrainingContext {
     private long userId;
     /** 训练的资料分组（官方或本人私有） */
     private String category;
+    /** 助手语气风格：strict / friendly（旧会话缺失按 friendly） */
+    private String style;
     private String state = STATE_ACTIVE;
     /** 当前出题难度：EASY 起步，随连续答题表现动态调整 */
     private Difficulty currentDifficulty = Difficulty.EASY;
@@ -62,6 +64,15 @@ public class TrainingContext {
 
     public void setCategory(String category) {
         this.category = category;
+    }
+
+    /** 风格归一化：null/非法值一律按 friendly，兼容旧会话 */
+    public String getStyle() {
+        return com.offerforge.ai.AssistantStyle.normalize(style);
+    }
+
+    public void setStyle(String style) {
+        this.style = style;
     }
 
     public String getState() {

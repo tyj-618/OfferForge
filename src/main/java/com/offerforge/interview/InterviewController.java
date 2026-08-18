@@ -58,7 +58,8 @@ public class InterviewController {
         String mode = request == null ? null : request.mode();
         java.util.List<String> categories = request == null ? null : request.categories();
         Boolean includeAlgorithm = request == null ? null : request.includeAlgorithm();
-        return ApiResponse.success(interviewService.start(userId, position, resumeId, mode, categories, includeAlgorithm));
+        String style = request == null ? null : request.style();
+        return ApiResponse.success(interviewService.start(userId, position, resumeId, mode, categories, includeAlgorithm, style));
     }
 
     /**

@@ -30,6 +30,8 @@ public class InterviewContext {
     private String resumeSummary;
     /** 面试模式：training / practice（旧会话反序列化为 null 时按 practice 处理） */
     private String mode;
+    /** 助手语气风格：strict / friendly（旧会话缺失按 friendly） */
+    private String style;
     /** 勾选的资料分组（可空）：非空时 BASICS/DEEP 出题仅用这些分组（旧会话为 null 按阶段默认） */
     private List<String> selectedCategories;
     /** 是否包含算法手写编程题：开启后 DEEP 阶段按难度掺入算法分组（旧会话缺失默认 false） */
@@ -117,6 +119,15 @@ public class InterviewContext {
 
     public void setMode(String mode) {
         this.mode = mode;
+    }
+
+    /** 风格归一化：null/非法值一律按 friendly，兼容旧会话 */
+    public String getStyle() {
+        return com.offerforge.ai.AssistantStyle.normalize(style);
+    }
+
+    public void setStyle(String style) {
+        this.style = style;
     }
 
     public List<String> getSelectedCategories() {

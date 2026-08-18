@@ -101,6 +101,10 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         if ("POST".equalsIgnoreCase(method) && uri.equals("/api/qa/ask")) {
             return new Route("qa-ask", qaAskLimit, false);
         }
+        // 快捷提问流式端点：同为重 LLM 开销，共用 qa 限额；429 需以 SSE error 帧下发
+        if ("POST".equalsIgnoreCase(method) && uri.equals("/api/qa/ask-stream")) {
+            return new Route("qa-ask", qaAskLimit, true);
+        }
         // 仅报告详情限流；history/progress 是页面加载必需的纯 DB 分页读，不限流
         if ("GET".equalsIgnoreCase(method) && uri.matches("/api/report/(?!history$|progress$)[^/]+")) {
             return new Route("report", reportLimit, false);

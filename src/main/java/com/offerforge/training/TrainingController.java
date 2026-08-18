@@ -54,7 +54,8 @@ public class TrainingController {
             @RequestBody(required = false) TrainingStartRequest request) {
         Long userId = currentUserService.requireUserId(authorization);
         String category = request == null ? null : request.category();
-        return ApiResponse.success(trainingService.start(userId, category));
+        String style = request == null ? null : request.style();
+        return ApiResponse.success(trainingService.start(userId, category, style));
     }
 
     /**
