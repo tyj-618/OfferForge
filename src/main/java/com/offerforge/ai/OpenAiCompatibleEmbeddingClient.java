@@ -1,12 +1,14 @@
 package com.offerforge.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.offerforge.common.ErrorCode;
 import com.offerforge.exception.BusinessException;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
@@ -30,11 +32,20 @@ public class OpenAiCompatibleEmbeddingClient implements EmbeddingClient {
 
     public OpenAiCompatibleEmbeddingClient(SearchProperties properties) {
         this.properties = properties;
+        // Spring Boot 4 RestClient 默认转换器基于 Jackson 3，无法读写 Jackson 2 的
+        // JsonNode（报 Type definition error），须显式指定干净的 Jackson 2 转换器
+        MappingJackson2HttpMessageConverter jsonConverter =
+                new MappingJackson2HttpMessageConverter(new ObjectMapper());
+        jsonConverter.setSupportedMediaTypes(List.of(MediaType.ALL));
         this.restClient = RestClient.builder()
                 .baseUrl(require(properties.getEmbeddingBaseUrl(), "OFFERFORGE_SEARCH_EMBEDDING_BASE_URL"))
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + require(
                         properties.getEmbeddingApiKey(), "OFFERFORGE_SEARCH_EMBEDDING_API_KEY"))
                 .requestFactory(requestFactory(properties.getEmbeddingTimeoutSeconds()))
+                .messageConverters(converters -> {
+                    converters.clear();
+                    converters.add(jsonConverter);
+                })
                 .build();
     }
 
