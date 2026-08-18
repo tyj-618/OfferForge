@@ -1,7 +1,9 @@
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { knowledgeApi, qaApi } from '../api'
 import { notifyError } from '../utils/errors'
+import { toast } from '../toast'
+import UploadModal from '../components/UploadModal.vue'
 
 const importSummary = ref(null)
 const importing = ref(false)
@@ -10,15 +12,46 @@ const question = ref('')
 const asking = ref(false)
 const conversations = ref([])
 
+// 知识库构成：官方题库 + 本人上传资料，两者都会参与快捷提问检索
+const officialCount = ref(0)
+const myCount = ref(0)
+const uploadOpen = ref(false)
+const customCategoryList = ref([])
+
+async function loadCounts() {
+  try {
+    const [official, mine, view] = await Promise.all([
+      knowledgeApi.official(),
+      knowledgeApi.mine(),
+      knowledgeApi.categories()
+    ])
+    officialCount.value = official?.length || 0
+    myCount.value = mine?.length || 0
+    customCategoryList.value = view?.custom || []
+  } catch (e) {
+    notifyError(e)
+  }
+}
+
+onMounted(loadCounts)
+
 async function importKnowledge() {
   importing.value = true
   try {
     importSummary.value = await knowledgeApi.importBuiltin()
+    toast.success(`官方题库导入完成：新增 ${importSummary.value.inserted} 条，已存在 ${importSummary.value.skipped} 条`)
+    await loadCounts()
   } catch (e) {
     notifyError(e, importKnowledge)
   } finally {
     importing.value = false
   }
+}
+
+// 上传成功后刷新知识库计数
+function onUploaded() {
+  importSummary.value = null
+  loadCounts()
 }
 
 async function ask(textOverride) {
@@ -53,11 +86,17 @@ async function ask(textOverride) {
       <div class="knowledge-row">
         <div>
           <strong>知识库</strong>
-          <p class="muted">快捷提问与模拟面试基于你的个人知识库出题，首次使用请先导入内置题库。</p>
+          <p class="muted">
+            快捷提问基于你的知识库作答：官方题库 {{ officialCount }} 条 + 我的资料 {{ myCount }} 条，
+            两者都会参与检索。
+          </p>
         </div>
-        <button :disabled="importing" @click="importKnowledge">
-          {{ importing ? '导入中…' : '导入内置知识库' }}
-        </button>
+        <div class="knowledge-actions">
+          <button :disabled="importing" @click="importKnowledge">
+            {{ importing ? '导入中…' : '导入官方题库' }}
+          </button>
+          <button type="button" @click="uploadOpen = true">上传我的资料</button>
+        </div>
       </div>
       <p v-if="importSummary" class="muted import-result">
         ✅ 导入完成：共 {{ importSummary.total }} 条，新增 {{ importSummary.inserted }} 条，跳过
@@ -90,6 +129,14 @@ async function ask(textOverride) {
         </button>
       </form>
     </div>
+
+    <!-- 上传我的资料小窗 -->
+    <UploadModal
+      v-if="uploadOpen"
+      :custom-categories="customCategoryList"
+      @close="uploadOpen = false"
+      @uploaded="onUploaded"
+    />
   </div>
 </template>
 
@@ -100,9 +147,16 @@ async function ask(textOverride) {
 
 .knowledge-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.knowledge-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .import-result {

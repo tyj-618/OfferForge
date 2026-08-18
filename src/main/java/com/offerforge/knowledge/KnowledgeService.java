@@ -200,7 +200,7 @@ public class KnowledgeService {
     }
 
     /**
-     * 用户上传资料入库：解析为问答对后按分组写入私域（owner=userId）；
+     * 用户上传资料入库：解析为问答对后按分组写入私域（owner=userId）并同步向量索引；
      * 解析不出任何问答对抛 PARAM_ERROR；私域内题面重复跳过。
      */
     @Transactional
@@ -211,6 +211,7 @@ public class KnowledgeService {
             throw new BusinessException(ErrorCode.PARAM_ERROR,
                     "文件「" + filename + "」未识别出有效问答对，请检查格式（支持 Q:/A: 标记或 Markdown 标题）");
         }
+        KnowledgeIndexClient indexClient = indexClientProvider.getIfAvailable();
         int inserted = 0;
         int skipped = 0;
         for (KnowledgeUploadParser.ParsedEntry entry : entries) {
@@ -233,6 +234,8 @@ public class KnowledgeService {
                 continue;
             }
             inserted++;
+            // 同步入向量索引，保证快捷提问/面试检索能命中用户私有资料
+            indexIfPossible(indexClient, item);
         }
         log.info("knowledge upload finished userId={} file={} category={} parsed={} inserted={} skipped={}",
                 userId, filename, effectiveCategory, entries.size(), inserted, skipped);
@@ -268,6 +271,7 @@ public class KnowledgeService {
         }
         List<KnowledgeItem> owned = repository.findByIdInAndOwnerUserId(ids, userId);
         repository.deleteAll(owned);
+        removeFromIndex(owned.stream().map(KnowledgeItem::getId).toList());
         log.info("knowledge batch deleted userId={} requested={} deleted={}", userId, ids.size(), owned.size());
         return owned.size();
     }
@@ -278,7 +282,23 @@ public class KnowledgeService {
         KnowledgeItem item = repository.findByIdAndOwnerUserId(id, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "资料不存在"));
         repository.delete(item);
+        removeFromIndex(List.of(item.getId()));
         log.info("knowledge deleted userId={} itemId={}", userId, id);
+    }
+
+    /** 同步移除向量索引文档；索引故障不阻断删除主流程 */
+    private void removeFromIndex(List<Long> itemIds) {
+        KnowledgeIndexClient indexClient = indexClientProvider.getIfAvailable();
+        if (indexClient == null || itemIds.isEmpty()) {
+            return;
+        }
+        for (Long itemId : itemIds) {
+            try {
+                indexClient.remove(itemId);
+            } catch (Exception exception) {
+                log.warn("knowledge index removal failed itemId={} reason={}", itemId, exception.getMessage());
+            }
+        }
     }
 
     /**
@@ -311,6 +331,29 @@ public class KnowledgeService {
         log.info("knowledge batch moved userId={} requested={} moved={} category={}",
                 userId, ids.size(), owned.size(), target);
         return owned.size();
+    }
+
+    /**
+     * 全量重建向量索引（幂等 upsert）：启动时补齐存量私有条目，
+     * 单条失败仅告警不阻断，逐条重建保证部分成功。
+     */
+    public void reindexAll() {
+        KnowledgeIndexClient indexClient = indexClientProvider.getIfAvailable();
+        if (indexClient == null) {
+            return;
+        }
+        List<KnowledgeItem> all = repository.findAll();
+        int indexed = 0;
+        for (KnowledgeItem item : all) {
+            try {
+                List<Float> embedding = embeddingClient.embed(item.getQuestion() + " " + item.getTags());
+                indexClient.upsert(item, embedding);
+                indexed++;
+            } catch (Exception exception) {
+                log.warn("knowledge reindex failed itemId={} reason={}", item.getId(), exception.getMessage());
+            }
+        }
+        log.info("knowledge reindex finished total={} indexed={}", all.size(), indexed);
     }
 
     /**

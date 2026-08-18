@@ -53,6 +53,21 @@ public class KnowledgeIndexClient {
                 .toBodilessEntity();
     }
 
+    /** 移除索引文档；文档不存在（404）视为幂等成功 */
+    public void remove(Long itemId) {
+        ensureIndex();
+        try {
+            restClient.delete()
+                    .uri("/{index}/_doc/{itemId}", properties.getKnowledgeIndex(), itemId)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException exception) {
+            if (exception.getStatusCode().value() != 404) {
+                throw exception;
+            }
+        }
+    }
+
     public List<Long> searchByVector(List<Float> vector, int limit) {
         if (vector == null || vector.isEmpty()) {
             return List.of();
