@@ -41,6 +41,35 @@ const STYLE_OPTIONS = [
   { value: 'strict', label: '🧊 严肃专业', desc: '效率优先，专注知识内容' }
 ]
 
+// 分组两级选择：一级来源标签（官方题库/我的资料）→ 二级具体分组 → 确认后才开局
+const sourceTab = ref('official') // official | custom
+const selectedCategory = ref('')
+const officialCategories = computed(() => categoryOptions.value.filter((opt) => opt.official))
+const customCategories = computed(() => categoryOptions.value.filter((opt) => !opt.official))
+const visibleCategories = computed(() => (sourceTab.value === 'official' ? officialCategories.value : customCategories.value))
+
+function switchSourceTab(tab) {
+  if (sending.value || sourceTab.value === tab) {
+    return
+  }
+  sourceTab.value = tab
+  selectedCategory.value = ''
+}
+
+function selectCategory(name) {
+  if (sending.value) {
+    return
+  }
+  selectedCategory.value = selectedCategory.value === name ? '' : name
+}
+
+function confirmStart() {
+  if (!selectedCategory.value || sending.value) {
+    return
+  }
+  startTraining(selectedCategory.value)
+}
+
 function toggleAnalysis(index) {
   analysisOpenIndex.value = analysisOpenIndex.value === index ? null : index
 }
@@ -103,6 +132,10 @@ async function loadCategories() {
       ...(view?.official || []).map((name) => ({ name, official: true })),
       ...(view?.custom || []).map((name) => ({ name, official: false }))
     ]
+    // 默认落在有内容的来源标签上，避免开局即看到空列表
+    if (!view?.official?.length && view?.custom?.length) {
+      sourceTab.value = 'custom'
+    }
   } catch {
     // 分组加载失败提示即可，不阻断页面
   }
@@ -293,20 +326,51 @@ function scrollDown() {
           <span class="muted style-desc">{{ opt.desc }}</span>
         </label>
       </div>
-      <div v-if="categoryOptions.length" class="category-grid">
+      <!-- 一级标签：题库来源（官方题库 / 我的资料） -->
+      <div v-if="categoryOptions.length" class="source-tabs">
         <button
-          v-for="opt in categoryOptions"
+          v-for="tab in [{ key: 'official', label: '官方题库', count: officialCategories.length }, { key: 'custom', label: '我的资料', count: customCategories.length }]"
+          :key="tab.key"
+          type="button"
+          class="source-tab"
+          :class="{ active: sourceTab === tab.key }"
+          :disabled="sending"
+          @click="switchSourceTab(tab.key)"
+        >
+          {{ tab.label }}
+          <span class="source-count">{{ tab.count }}</span>
+        </button>
+      </div>
+      <!-- 二级标签：具体分组，选中后需确认才开局 -->
+      <div v-if="visibleCategories.length" class="category-grid">
+        <button
+          v-for="opt in visibleCategories"
           :key="opt.name"
           type="button"
           class="category-card"
+          :class="{ selected: selectedCategory === opt.name }"
           :disabled="sending"
-          @click="startTraining(opt.name)"
+          @click="selectCategory(opt.name)"
         >
           <span class="category-name">{{ opt.name }}</span>
           <span class="muted category-tag">{{ opt.official ? '官方题库' : '我的资料' }}</span>
         </button>
       </div>
+      <p v-else-if="categoryOptions.length" class="muted empty-category">该来源下暂无可用分组，可前往 <RouterLink to="/library">资源库</RouterLink> 导入或上传资料。</p>
       <p v-else class="muted">暂无可用分组，请先前往 <RouterLink to="/library">资源库</RouterLink> 导入官方题库或上传资料。</p>
+
+      <!-- 开局确认：选定分组后二次确认，避免误触直接开局 -->
+      <div v-if="selectedCategory" class="confirm-panel">
+        <p>
+          即将开始 <strong>「{{ selectedCategory }}」</strong>
+          <span class="muted">（{{ sourceTab === 'official' ? '官方题库' : '我的资料' }}）</span>
+          的专项训练，开局后由浅入深出题并消耗 1 次额度（自带 API Key 不消耗）。确认开始吗？
+        </p>
+        <div class="confirm-actions">
+          <button type="button" class="ghost" :disabled="sending" @click="selectedCategory = ''">重新选择</button>
+          <button type="button" :disabled="sending" @click="confirmStart">{{ sending ? '正在开启…' : '确认开始' }}</button>
+        </div>
+      </div>
       <p v-if="error" class="error-text">{{ error }}</p>
 
       <div v-if="records.length" class="recent-records">
@@ -481,6 +545,50 @@ function scrollDown() {
   margin-top: 14px;
 }
 
+/* 一级来源标签：分段式按钮，选中态高亮 */
+.source-tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 4px;
+  border: 1px solid var(--border, #e3e6ef);
+  border-radius: 10px;
+  background: var(--bg-subtle, #f5f6fa);
+}
+
+.source-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-weight: 500;
+  color: var(--text-muted, #6b7280);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.source-tab.active {
+  background: var(--bg-card, #fff);
+  color: var(--primary, #4f6ef7);
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.source-count {
+  font-size: 12px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(79, 110, 247, 0.12);
+  color: var(--primary, #4f6ef7);
+}
+
+.empty-category {
+  margin-top: 14px;
+}
+
 .category-card {
   display: flex;
   flex-direction: column;
@@ -497,6 +605,34 @@ function scrollDown() {
 .category-card:hover:not(:disabled) {
   border-color: var(--primary, #4f6ef7);
   box-shadow: 0 2px 8px rgba(79, 110, 247, 0.15);
+}
+
+/* 二级分组选中态：等待确认开局 */
+.category-card.selected {
+  border-color: var(--primary, #4f6ef7);
+  background: rgba(79, 110, 247, 0.08);
+  box-shadow: 0 2px 8px rgba(79, 110, 247, 0.18);
+}
+
+/* 开局确认面板 */
+.confirm-panel {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border, #e3e6ef);
+  border-left: 3px solid var(--primary, #4f6ef7);
+  border-radius: 10px;
+  background: var(--bg-subtle, #f7f8fc);
+}
+
+.confirm-panel p {
+  margin: 0 0 12px;
+  line-height: 1.6;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
 }
 
 .category-name {
