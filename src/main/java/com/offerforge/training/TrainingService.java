@@ -13,6 +13,7 @@ import com.offerforge.interview.EvaluationService;
 import com.offerforge.interview.InterviewMessageStore;
 import com.offerforge.interview.InterviewPromptBuilder;
 import com.offerforge.interview.InterviewQuestionBank;
+import com.offerforge.interview.InterviewSessionStore;
 import com.offerforge.interview.InterviewState;
 import com.offerforge.interview.InterviewStreamSink;
 import com.offerforge.knowledge.Difficulty;
@@ -42,6 +43,7 @@ public class TrainingService {
     private static final int ANSWER_LOG_PREVIEW_LENGTH = 100;
 
     private final TrainingSessionStore sessionStore;
+    private final InterviewSessionStore interviewSessionStore;
     private final InterviewMessageStore messageStore;
     private final InterviewQuestionBank questionBank;
     private final TrainingPromptBuilder promptBuilder;
@@ -58,6 +60,7 @@ public class TrainingService {
     private final Map<String, Object> sessionLocks = new ConcurrentHashMap<>();
 
     public TrainingService(TrainingSessionStore sessionStore,
+                           InterviewSessionStore interviewSessionStore,
                            InterviewMessageStore messageStore,
                            InterviewQuestionBank questionBank,
                            TrainingPromptBuilder promptBuilder,
@@ -71,6 +74,7 @@ public class TrainingService {
                            QuotaService quotaService,
                            LlmCredentialResolver credentialResolver) {
         this.sessionStore = sessionStore;
+        this.interviewSessionStore = interviewSessionStore;
         this.messageStore = messageStore;
         this.questionBank = questionBank;
         this.promptBuilder = promptBuilder;
@@ -91,19 +95,24 @@ public class TrainingService {
      * 开场即出第 1 题（EASY 起步），经教练话术包装后随响应返回。
      */
     public TrainingStartResponse start(Long userId, String category) {
-        return start(userId, category, null);
+        return start(userId, category, null, false);
     }
 
     /**
-     * 完整参数版：style 为助手语气风格（strict/friendly，缺省 friendly）。
+     * 完整参数版：style 为助手语气风格（strict/friendly，缺省 friendly）；
+     * fromInterview=true 表示面试「深入该模块」跳转，豁免与面试会话的跨模块互斥。
      */
-    public TrainingStartResponse start(Long userId, String category, String style) {
+    public TrainingStartResponse start(Long userId, String category, String style, boolean fromInterview) {
         String normalized = category == null ? null : category.trim();
         if (normalized == null || normalized.isEmpty()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "请选择要训练的资料分组");
         }
         if (sessionStore.hasActiveSession(userId)) {
             throw new BusinessException(ErrorCode.CONFLICT, "已有一场专项训练正在进行，请先结束后再开始新训练");
+        }
+        // 跨模块互斥：同一用户同一时刻只能进行一场面试或训练（多端一致）；面试深入跳转豁免
+        if (!fromInterview && interviewSessionStore.hasActiveSession(userId)) {
+            throw new BusinessException(ErrorCode.CONFLICT, "你有一场模拟面试正在进行，请先完成或结束后再开始训练");
         }
         // 分组可见性：官方 + 本人私有条目均无该分组时拒绝，避免开局即无题
         if (knowledgeRepository.findVisibleByCategories(List.of(normalized), userId).isEmpty()) {

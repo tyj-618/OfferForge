@@ -25,7 +25,7 @@ class InterviewPromptBuilderTests {
         List<ChatMessage> messages = builder.buildInterviewerMessages(
                 List.of(), InterviewState.BASICS, "HashMap 的原理？", InterviewContext.MODE_PRACTICE,
                 "上一轮回答出色。覆盖到的要点：线程状态", "候选人：张三。技能：Java、Spring。项目经历：商城系统。",
-                AssistantStyle.FRIENDLY);
+                AssistantStyle.FRIENDLY, null, List.of());
 
         assertThat(messages.get(0).content()).contains("AI 面试官");
         String instruction = lastUserContent(messages);
@@ -42,7 +42,7 @@ class InterviewPromptBuilderTests {
     void practiceModeWithoutResumeUsesNeutralTransition() {
         List<ChatMessage> messages = builder.buildInterviewerMessages(
                 List.of(), InterviewState.BASICS, "HashMap 的原理？", InterviewContext.MODE_PRACTICE,
-                "上一轮回答基本合格。", null, AssistantStyle.FRIENDLY);
+                "上一轮回答基本合格。", null, AssistantStyle.FRIENDLY, null, List.of());
 
         String instruction = lastUserContent(messages);
         assertThat(instruction).contains("<last-answer>").doesNotContain("<resume>");
@@ -53,7 +53,7 @@ class InterviewPromptBuilderTests {
     void trainingModeKeepsMinimalTransitionWithoutPersonaContext() {
         List<ChatMessage> messages = builder.buildInterviewerMessages(
                 List.of(), InterviewState.PROJECT, "项目里如何做缓存？", InterviewContext.MODE_TRAINING,
-                "上一轮回答出色。", "候选人：张三。", AssistantStyle.FRIENDLY);
+                "上一轮回答出色。", "候选人：张三。", AssistantStyle.FRIENDLY, null, List.of());
 
         String instruction = lastUserContent(messages);
         assertThat(instruction).contains("<task>interviewer</task>");
@@ -95,7 +95,7 @@ class InterviewPromptBuilderTests {
 
         List<ChatMessage> messages = builder.buildInterviewerMessages(
                 history, InterviewState.BASICS, "新题", InterviewContext.MODE_PRACTICE, null, null,
-                AssistantStyle.FRIENDLY);
+                AssistantStyle.FRIENDLY, null, List.of());
 
         assertThat(messages).hasSize(4);
         assertThat(messages.get(0).role()).isEqualTo(ChatMessage.Role.SYSTEM);
@@ -108,7 +108,7 @@ class InterviewPromptBuilderTests {
     void strictStyleInjectsEfficiencyNoteAndRemovesSmallTalk() {
         List<ChatMessage> messages = builder.buildInterviewerMessages(
                 List.of(), InterviewState.BASICS, "HashMap 的原理？", InterviewContext.MODE_PRACTICE,
-                "上一轮回答出色。", null, AssistantStyle.STRICT);
+                "上一轮回答出色。", null, AssistantStyle.STRICT, null, List.of());
 
         // 系统人设追加严肃专业风格指令
         assertThat(messages.get(0).content()).contains("严肃专业").contains("铁面无私");
@@ -121,7 +121,7 @@ class InterviewPromptBuilderTests {
     void friendlyStyleInjectsInformationDensityNote() {
         List<ChatMessage> messages = builder.buildInterviewerMessages(
                 List.of(), InterviewState.BASICS, "HashMap 的原理？", InterviewContext.MODE_PRACTICE,
-                null, null, AssistantStyle.FRIENDLY);
+                null, null, AssistantStyle.FRIENDLY, null, List.of());
 
         assertThat(messages.get(0).content()).contains("和蔼可亲").contains("信息浓度");
     }
@@ -129,8 +129,31 @@ class InterviewPromptBuilderTests {
     @Test
     void nullStyleFallsBackToFriendly() {
         List<ChatMessage> messages = builder.buildInterviewerMessages(
-                List.of(), InterviewState.BASICS, "新题", InterviewContext.MODE_PRACTICE, null, null, null);
+                List.of(), InterviewState.BASICS, "新题", InterviewContext.MODE_PRACTICE, null, null, null,
+                null, List.of());
 
         assertThat(messages.get(0).content()).contains("和蔼可亲");
+    }
+
+    @Test
+    void setupBlockInjectsPositionAndFocusCategories() {
+        List<ChatMessage> messages = builder.buildInterviewerMessages(
+                List.of(), InterviewState.BASICS, "HashMap 的原理？", InterviewContext.MODE_PRACTICE,
+                null, null, AssistantStyle.FRIENDLY, "Java 后端开发", List.of("Java 基础", "我的笔记"));
+
+        String instruction = lastUserContent(messages);
+        assertThat(instruction).contains("<setup>");
+        assertThat(instruction).contains("求职岗位：Java 后端开发");
+        assertThat(instruction).contains("本场面试重点考察的资料标签：Java 基础、我的笔记");
+        assertThat(instruction).contains("不要原样照念");
+    }
+
+    @Test
+    void setupBlockOmittedWithoutPositionAndCategories() {
+        List<ChatMessage> messages = builder.buildInterviewerMessages(
+                List.of(), InterviewState.BASICS, "HashMap 的原理？", InterviewContext.MODE_PRACTICE,
+                null, null, AssistantStyle.FRIENDLY, null, List.of());
+
+        assertThat(lastUserContent(messages)).doesNotContain("<setup>");
     }
 }

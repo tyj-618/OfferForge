@@ -36,6 +36,10 @@ public class InterviewContext {
     private List<String> selectedCategories;
     /** 是否包含算法手写编程题：开启后 DEEP 阶段按难度掺入算法分组（旧会话缺失默认 false） */
     private boolean includeAlgorithm;
+    /** 开场话术缓存：刷新恢复时凭 status 还原开场白（旧会话为 null，前端降级默认文案） */
+    private String openingMessage;
+    /** 回合评估中标记：answer() 开始置 true 并落库，正常/异常路径均复位；刷新恢复的前端凭此轮询等待未完成回合 */
+    private boolean evaluating;
     private InterviewState state = InterviewState.OPENING;
     private String currentQuestion;
     private String currentCandidateAnswer;
@@ -144,6 +148,22 @@ public class InterviewContext {
 
     public void setIncludeAlgorithm(boolean includeAlgorithm) {
         this.includeAlgorithm = includeAlgorithm;
+    }
+
+    public String getOpeningMessage() {
+        return openingMessage;
+    }
+
+    public void setOpeningMessage(String openingMessage) {
+        this.openingMessage = openingMessage;
+    }
+
+    public boolean isEvaluating() {
+        return evaluating;
+    }
+
+    public void setEvaluating(boolean evaluating) {
+        this.evaluating = evaluating;
     }
 
     /** 便捷判断，非持久化字段（避免序列化后反序列化失败） */

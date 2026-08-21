@@ -337,8 +337,8 @@ export function askStream(sessionId, message, callbacks) {
 
 // ---------- 专项训练（任务 7）：SSE 契约与面试 ask 一致 ----------
 export const trainingApi = {
-  // style：助手语气风格（strict/friendly，缺省 friendly）
-  start: (category, style = null) => http.post('/training/start', { category, style }),
+  // style：助手语气风格（strict/friendly，缺省 friendly）；fromInterview：面试「深入该模块」跳转豁免互斥
+  start: (category, style = null, fromInterview = false) => http.post('/training/start', { category, style, fromInterview }),
   status: (sessionId) => http.get(`/training/${sessionId}/status`),
   finish: (sessionId) => http.post(`/training/${sessionId}/finish`, null),
   records: () => http.get('/training/records')

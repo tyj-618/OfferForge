@@ -87,10 +87,19 @@ class InterviewTrainingHandoffIntegrationTests {
         assertThat(active.at("/data/sessionId").asText()).isEqualTo(interviewId);
         assertThat(ACTIVE_STATES).contains(active.at("/data/state").asText());
 
+        // 跨模块互斥：面试暂存期间直接开新训练被拒（40900）；带 fromInterview 的深入跳转豁免
+        JsonNode blocked = post("/api/training/start", token, Map.of("category", category));
+        assertThat(blocked.at("/code").asInt()).isEqualTo(40900);
+
         // 跳转该分组开启专项训练：与面试会话并存互不冲突
-        JsonNode training = post("/api/training/start", token, Map.of("category", category));
+        JsonNode training = post("/api/training/start", token, Map.of("category", category, "fromInterview", true));
         assertCode(training, 0);
         String trainingId = training.at("/data/sessionId").asText();
+
+        // 反向互斥：训练进行中再开新面试被拒（40900）
+        JsonNode blockedInterview = post("/api/interview/start", token, Map.of("mode", "practice"));
+        assertThat(blockedInterview.at("/code").asInt()).isEqualTo(40900);
+
         for (int i = 0; i < 3; i++) {
             assertDone(doneOf(answer(trainingId, token, LONG_ANSWER)));
         }

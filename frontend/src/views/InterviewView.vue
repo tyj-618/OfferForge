@@ -46,11 +46,32 @@ const thinkingText = ref('')
 const error = ref('')
 const mode = ref('practice') // training | practice
 
-// 训练模式「具体分析」小窗：同一时刻最多展开一个，锚定在对应得分徽章旁
+// 训练模式「具体分析」小窗：同一时刻最多展开一个，锚定在对应得分徽章旁；
+// 弹窗高度/上下方位按会话窗口可见区域动态计算，保证完全包含在会话窗口内
 const analysisOpenIndex = ref(null)
+const analysisPlacement = ref({ maxHeight: '340px', below: false })
 
-function toggleAnalysis(index) {
-  analysisOpenIndex.value = analysisOpenIndex.value === index ? null : index
+function toggleAnalysis(index, event) {
+  if (analysisOpenIndex.value === index) {
+    analysisOpenIndex.value = null
+    return
+  }
+  const box = chatBox.value
+  const anchor = event?.currentTarget?.closest('.analysis-anchor')
+  if (box && anchor) {
+    const boxRect = box.getBoundingClientRect()
+    const anchorRect = anchor.getBoundingClientRect()
+    const spaceAbove = anchorRect.top - boxRect.top
+    const spaceBelow = boxRect.bottom - anchorRect.bottom
+    // 上方空间不足且下方更宽裕时翻转到下方；最大高度取可用空间减去边距
+    const below = spaceAbove < 220 && spaceBelow > spaceAbove
+    const space = (below ? spaceBelow : spaceAbove) - 16
+    analysisPlacement.value = {
+      maxHeight: Math.max(140, Math.min(420, space)) + 'px',
+      below
+    }
+  }
+  analysisOpenIndex.value = index
 }
 
 // 任务 4：暂存续考——开始卡片展示「继续未完成的面试」入口；
@@ -127,6 +148,49 @@ async function loadRecommendedCategories() {
     }
   } catch {
     // 推荐失败静默降级：不勾选任何分组
+  }
+}
+
+// 官方/自建标签分组展示，便于快捷勾选自己添加的标签
+const officialOptions = computed(() => categoryOptions.value.filter((opt) => opt.official))
+const customOptions = computed(() => categoryOptions.value.filter((opt) => !opt.official))
+
+// 岗位与资料标签的关键词匹配：取岗位中英文词/两字中文段，与标签名双向包含匹配
+const positionSuggestions = computed(() => {
+  const text = position.value.trim().toLowerCase()
+  if (!text) {
+    return []
+  }
+  const tokens = new Set()
+  for (const word of text.match(/[a-z0-9+#.]{2,}/g) || []) {
+    tokens.add(word)
+  }
+  for (let i = 0; i + 2 <= text.length; i++) {
+    const seg = text.slice(i, i + 2)
+    if (/^[\u4e00-\u9fa5]{2}$/.test(seg)) {
+      tokens.add(seg)
+    }
+  }
+  return categoryOptions.value
+    .filter((opt) => [...tokens].some((token) => opt.name.toLowerCase().includes(token)))
+    .map((opt) => opt.name)
+})
+
+// 填入岗位后自动勾选匹配标签（仅追加）；岗位与所选标签随 start 传给后端作为面试官设定
+watch(positionSuggestions, (names) => {
+  for (const name of names) {
+    if (!selectedCategories.value.includes(name)) {
+      selectedCategories.value.push(name)
+    }
+  }
+})
+
+function toggleCategory(name) {
+  const idx = selectedCategories.value.indexOf(name)
+  if (idx >= 0) {
+    selectedCategories.value.splice(idx, 1)
+  } else {
+    selectedCategories.value.push(name)
   }
 }
 
@@ -249,22 +313,82 @@ onMounted(async () => {
   }
 })
 
-// 恢复既有会话：刷新恢复与「继续未完成的面试」共用（历史消息不回放，仅展示当前题）
+// 恢复既有会话：刷新恢复与「继续未完成的面试」共用；
+// 凭 status 完整重建对话（开场话术/历史回合/当前题），未完成回合轮询续接
 async function restoreSession(saved) {
   status.value = await interviewApi.status(saved)
   sessionId.value = saved
   mode.value = status.value?.mode || sessionStorage.getItem(MODE_KEY) || 'practice'
   phase.value = 'active'
+  if (status.value?.evaluating) {
+    // 回合进行中刷新（评估/出题未完）：先展示已落库内容，轮询等回合完成后再补全
+    messages.value = buildMessagesFromStatus(status.value)
+    thinking.value = true
+    thinkingText.value = '正在续接你上次提交的回答，评估中…'
+    try {
+      const latest = await waitForEvaluation(saved)
+      if (latest) {
+        status.value = latest
+      }
+    } finally {
+      thinking.value = false
+      thinkingText.value = ''
+    }
+  }
+  messages.value = buildMessagesFromStatus(status.value)
   if (isFinished.value) {
     messages.value.push({ role: 'assistant', content: '本次面试已结束，可前往「历史报告」查看或生成报告。' })
-  } else if (status.value.currentQuestion) {
-    messages.value.push({
+  }
+  scrollDown()
+}
+
+// 轮询等待未完成回合收尾（2.5s 间隔，最长 3 分钟）；会话过期等异常向上抛出由调用方清理本地会话
+async function waitForEvaluation(id) {
+  for (let i = 0; i < 72; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 2500))
+    const latest = await interviewApi.status(id)
+    status.value = latest
+    if (!latest.evaluating) {
+      return latest
+    }
+  }
+  return null
+}
+
+// 凭 status 重建对话列表：开场话术 → 每个历史回合（题目→回答→导师点评+得分徽章）→ 当前待作答题
+function buildMessagesFromStatus(st) {
+  const list = []
+  if (st?.openingMessage || st?.state === 'OPENING') {
+    list.push({
       role: 'assistant',
-      content: status.value.currentQuestion,
-      restored: true
+      content: st.openingMessage || '你好！请先做一个简短的自我介绍（可包含项目经历与熟悉的技术栈）。'
     })
   }
-  // 旧低分选择卡（followUpChoiceRequired）已移除，深入入口由「深入该模块」按钮承担
+  const training = st?.mode === 'training'
+  for (const rec of st?.history || []) {
+    const turn = []
+    if (rec.question) {
+      turn.push({ role: 'assistant', content: rec.question, followUp: !!rec.followUp })
+    }
+    if (rec.userAnswer) {
+      turn.push({ role: 'user', content: rec.userAnswer })
+    }
+    if (training && rec.mentorComment) {
+      turn.push({ role: 'assistant', content: rec.mentorComment })
+    }
+    // 得分徽章与「具体分析」数据挂在本回合最后一个气泡（对齐实时流的展示语义）
+    if (training && turn.length) {
+      const last = turn[turn.length - 1]
+      last.score = rec.score
+      last.evaluation = rec.evaluation || null
+      last.category = rec.knowledgePoint || null
+    }
+    list.push(...turn)
+  }
+  if (st?.state !== 'FINISHED' && st?.currentQuestion) {
+    list.push({ role: 'assistant', content: st.currentQuestion, followUp: !!st.currentQuestionFollowUp })
+  }
+  return list
 }
 
 // 继续未完成的面试：写回本地会话标记后按刷新恢复同逻辑还原
@@ -643,21 +767,49 @@ function scrollDown() {
           <span class="muted">暂无简历，面试将使用通用项目题；可先去 <RouterLink to="/resume">简历管理</RouterLink> 创建</span>
         </template>
       </div>
-      <!-- 出题范围：勾选资料分组，不勾选按默认官方题库；有简历时推荐分组默认勾选 -->
+      <!-- 出题范围：勾选资料分组，不勾选按默认官方题库；岗位/标签同时作为面试官设定注入 -->
       <div class="category-row">
         <div class="category-head">
-          <span class="muted">出题范围（可选，不勾选使用默认题库）：</span>
+          <span class="muted">出题范围（可选，不勾选使用默认题库；所选标签会一并提供给面试官作为设定）：</span>
           <RouterLink class="category-link" to="/library">管理资源库 →</RouterLink>
         </div>
-        <div v-if="categoryOptions.length" class="category-chips">
-          <label v-for="opt in categoryOptions" :key="opt.name" class="chip-check">
-            <input v-model="selectedCategories" type="checkbox" :value="opt.name" :disabled="sending" />
-            <span>
-              {{ opt.name }}
-              <span v-if="recommendedCategories.includes(opt.name)" class="recommend-star" title="根据简历推荐">⭐</span>
-            </span>
-          </label>
+        <div v-if="positionSuggestions.length" class="suggest-row">
+          <span class="muted">🎯 根据岗位快捷选择：</span>
+          <div class="category-chips">
+            <button
+              v-for="name in positionSuggestions"
+              :key="'s' + name"
+              type="button"
+              class="chip-btn"
+              :class="{ active: selectedCategories.includes(name) }"
+              :disabled="sending"
+              @click="toggleCategory(name)"
+            >
+              {{ name }}
+            </button>
+          </div>
         </div>
+        <template v-if="officialOptions.length">
+          <div class="chip-group-title muted">官方题库标签</div>
+          <div class="category-chips">
+            <label v-for="opt in officialOptions" :key="opt.name" class="chip-check">
+              <input v-model="selectedCategories" type="checkbox" :value="opt.name" :disabled="sending" />
+              <span>
+                {{ opt.name }}
+                <span v-if="recommendedCategories.includes(opt.name)" class="recommend-star" title="根据简历推荐">⭐</span>
+              </span>
+            </label>
+          </div>
+        </template>
+        <template v-if="customOptions.length">
+          <div class="chip-group-title muted">我的标签（自行添加）</div>
+          <div class="category-chips">
+            <label v-for="opt in customOptions" :key="opt.name" class="chip-check">
+              <input v-model="selectedCategories" type="checkbox" :value="opt.name" :disabled="sending" />
+              <span>{{ opt.name }}</span>
+            </label>
+          </div>
+        </template>
         <!-- 算法开关（任务 12）：开启后 DEEP 阶段掺入算法分组手写编程题 -->
         <label class="algorithm-toggle">
           <input v-model="includeAlgorithm" type="checkbox" :disabled="sending" />
@@ -751,7 +903,6 @@ function scrollDown() {
             <div class="bubble-content">
               <div v-if="item.role === 'assistant'" class="md" v-html="renderMarkdown(item.content)"></div>
               <template v-else>{{ item.content }}</template>
-              <span v-if="item.restored" class="muted">（刷新恢复，历史消息不回放）</span>
               <span v-if="item.comment" class="muted comment">{{ item.comment }}</span>
               <span v-if="isStreamingItem(item)" class="stream-cursor"></span>
             </div>
@@ -759,13 +910,18 @@ function scrollDown() {
               <span :class="['badge', scoreClass(item.score)]">得分 {{ item.score }}</span>
               <!-- 训练模式：得分不再附点评，亮点/不足/改进回答收入「具体分析」小窗 -->
               <div v-if="mode === 'training' && item.evaluation" class="analysis-anchor">
-                <button type="button" class="ghost small analysis-btn" @click="toggleAnalysis(index)">
+                <button type="button" class="ghost small analysis-btn" @click="toggleAnalysis(index, $event)">
                   {{ analysisOpenIndex === index ? '收起分析' : '🔍 具体分析' }}
                 </button>
-                <div v-if="analysisOpenIndex === index" class="analysis-popover card">
+                <div
+                  v-if="analysisOpenIndex === index"
+                  class="analysis-popover card"
+                  :class="{ below: analysisPlacement.below }"
+                  :style="{ maxHeight: analysisPlacement.maxHeight }"
+                >
                   <div class="analysis-head">
                     <strong>本题分析</strong>
-                    <button type="button" class="ghost small" @click="analysisOpenIndex = null">✕ 关闭</button>
+                    <button type="button" class="analysis-close" @click="analysisOpenIndex = null">✕ 关闭</button>
                   </div>
                   <div class="analysis-body">
                     <div v-if="item.evaluation.goodPoints?.length" class="eval-section good">
@@ -1120,6 +1276,43 @@ function scrollDown() {
   font-size: 12px;
 }
 
+/* 岗位快捷选择：标题行 + 可点选胶囊（选中态对齐 chip-check 高亮） */
+.suggest-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chip-group-title {
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  font-size: 13px;
+  background: #fff;
+  cursor: pointer;
+  user-select: none;
+}
+
+.chip-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.chip-btn.active {
+  border-style: solid;
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(64, 128, 255, 0.06);
+}
+
 .resume-row select {
   width: auto;
   min-width: 220px;
@@ -1352,12 +1545,18 @@ function scrollDown() {
   bottom: calc(100% + 8px);
   z-index: 40;
   width: min(440px, 82vw);
-  max-height: 340px;
+  /* 高度上限由 JS 按会话窗口可见区域动态注入，保证弹窗完全包含在会话窗口内 */
   overflow-y: auto;
   padding: 14px 16px;
   text-align: left;
   box-shadow: 0 8px 28px rgba(31, 41, 55, 0.18);
   animation: bubble-in 0.2s ease;
+}
+
+/* 上方空间不足时翻转到锚点下方展示 */
+.analysis-popover.below {
+  bottom: auto;
+  top: calc(100% + 8px);
 }
 
 .analysis-head {
@@ -1366,6 +1565,30 @@ function scrollDown() {
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 10px;
+  /* 弹窗内部滚动时关闭钮保持可见 */
+  position: sticky;
+  top: -14px;
+  background: var(--card, #fff);
+  padding-top: 2px;
+  padding-bottom: 8px;
+  z-index: 1;
+}
+
+/* 关闭钮醒目化：主色实底白字，区别于普通幽灵按钮 */
+.analysis-close {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(31, 41, 55, 0.22);
+}
+
+.analysis-close:hover {
+  filter: brightness(1.1);
 }
 
 .analysis-body {

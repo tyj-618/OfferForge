@@ -13,6 +13,7 @@ import com.offerforge.exception.QuotaExceededException;
 import com.offerforge.knowledge.Difficulty;
 import com.offerforge.quota.QuotaService;
 import com.offerforge.resume.ResumeService;
+import com.offerforge.training.TrainingSessionStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -61,6 +62,7 @@ public class InterviewService {
     private final ApiKeyService apiKeyService;
     private final QuotaService quotaService;
     private final LlmCredentialResolver credentialResolver;
+    private final TrainingSessionStore trainingSessionStore;
     /** 会话级互斥锁条目（锁对象 + 最近使用时间），中途放弃的会话靠惰性清理避免无界增长 */
     private final Map<String, LockEntry> sessionLocks = new ConcurrentHashMap<>();
     private final AtomicLong lockAcquisitions = new AtomicLong();
@@ -81,7 +83,8 @@ public class InterviewService {
                             InterviewProperties properties,
                             ApiKeyService apiKeyService,
                             QuotaService quotaService,
-                            LlmCredentialResolver credentialResolver) {
+                            LlmCredentialResolver credentialResolver,
+                            TrainingSessionStore trainingSessionStore) {
         this.sessionStore = sessionStore;
         this.messageStore = messageStore;
         this.questionBank = questionBank;
@@ -96,6 +99,7 @@ public class InterviewService {
         this.apiKeyService = apiKeyService;
         this.quotaService = quotaService;
         this.credentialResolver = credentialResolver;
+        this.trainingSessionStore = trainingSessionStore;
     }
 
     public InterviewStartResponse start(Long userId, String position) {
@@ -136,6 +140,10 @@ public class InterviewService {
         if (sessionStore.hasActiveSession(userId)) {
             throw new BusinessException(ErrorCode.CONFLICT, "已有一场面试正在进行，请先结束后再开始新面试");
         }
+        // 跨模块互斥：面试与专项训练同时只能进行一场，避免双端并发产生不可控状态
+        if (trainingSessionStore.hasActiveSession(userId)) {
+            throw new BusinessException(ErrorCode.CONFLICT, "你有一场专项训练正在进行，请先完成或结束后再开始面试");
+        }
         if (resumeId != null) {
             // 先校验简历归属（不存在/非本人均 NOT_FOUND），避免非法简历白白消耗免费额度
             resumeService.getOwned(userId, resumeId);
@@ -159,6 +167,7 @@ public class InterviewService {
         context.setSelectedCategories(normalizeSelectedCategories(categories));
         context.setIncludeAlgorithm(Boolean.TRUE.equals(includeAlgorithm));
         context.setState(InterviewState.OPENING);
+        context.setOpeningMessage(OPENING_TEXT);
         context.setCreatedAtEpochMillis(System.currentTimeMillis());
         sessionStore.save(context);
         messageStore.append(sessionId, List.of(ChatMessage.assistant(OPENING_TEXT)));
@@ -183,6 +192,9 @@ public class InterviewService {
                     log.info("interview answer received sessionId={} phase={} length={} preview={}",
                             sessionId, context.getState(), userMessage.length(), preview(userMessage));
                     messageStore.append(sessionId, List.of(ChatMessage.user(userMessage)));
+                    // 回合开始即标记评估中并落库：刷新恢复的前端凭此轮询等待未完成回合
+                    context.setEvaluating(true);
+                    sessionStore.save(context);
 
                     InterviewTurnResult result;
                     if (context.getState() == InterviewState.DEEP_TRAINING) {
@@ -191,15 +203,23 @@ public class InterviewService {
                     } else if (context.getState() == InterviewState.OPENING) {
                         // 开场后的首次作答（自我介绍）不评分，直接进入基础考察
                         advance(context, sessionId, sink);
+                        context.setEvaluating(false);
                         result = new InterviewTurnResult(null, null, StateTransitionStrategy.Action.ADVANCE, statusView(context));
                     } else if (context.getState() == InterviewState.CLOSING) {
                         finish(context, sessionId);
+                        context.setEvaluating(false);
                         result = new InterviewTurnResult(null, null, StateTransitionStrategy.Action.FINISH, statusView(context));
                     } else {
                         result = evaluateAndTransition(context, sessionId, userMessage, sink);
                     }
+                    context.setEvaluating(false);
                     sessionStore.save(context);
                     return result;
+                } catch (IOException | RuntimeException exception) {
+                    // 回合中途失败：复位评估标记，避免刷新恢复时永久卡在轮询
+                    context.setEvaluating(false);
+                    sessionStore.save(context);
+                    throw exception;
                 } finally {
                     LlmCallContext.clear();
                 }
@@ -272,6 +292,9 @@ public class InterviewService {
                     }
                     log.info("interview sessionId={} phase={} question skipped", sessionId, phase);
                     messageStore.append(sessionId, List.of(ChatMessage.user("（跳过此题）")));
+                    // 同作答回合：标记评估中，正常/异常路径均复位
+                    context.setEvaluating(true);
+                    sessionStore.save(context);
 
                     // 记 0 分并纳入平均分，连续低分连击照常累计（可能触发降难度）
                     AnswerEvaluation skipped = new AnswerEvaluation(
@@ -293,12 +316,18 @@ public class InterviewService {
                         action = StateTransitionStrategy.Action.NEW_QUESTION;
                         askNextQuestion(context, sessionId, phase, sink);
                     }
+                    context.setEvaluating(false);
                     sessionStore.save(context);
                     // 实战模式过程免评分：不向前端暴露 0 分与计分明细，点评改中性
                     if (context.isTrainingMode()) {
                         return new InterviewTurnResult(0.0, "已跳过该题，计 0 分", action, statusView(context));
                     }
                     return new InterviewTurnResult(null, "已跳过该题", action, statusView(context));
+                } catch (IOException | RuntimeException exception) {
+                    // 回合中途失败：复位评估标记，避免刷新恢复时永久卡在轮询
+                    context.setEvaluating(false);
+                    sessionStore.save(context);
+                    throw exception;
                 } finally {
                     LlmCallContext.clear();
                 }
@@ -342,6 +371,19 @@ public class InterviewService {
         log.info("interview sessionId={} phase={} score={} followUps={} difficulty={} action={}",
                 sessionId, phase, overall, context.getCurrentFollowUpCount(), context.getCurrentDifficulty(), action);
 
+        // 训练模式：先生成导师点评全文写入本回合记录（刷新恢复回放用），再流式输出；
+        // 详细评估同步入回合记录，恢复时重建「具体分析」小窗
+        String mentorComment = null;
+        if (context.isTrainingMode() && action != StateTransitionStrategy.Action.FINISH) {
+            mentorComment = generateMentorComment(context, sessionId, evaluation);
+            List<QuestionRecord> history = context.getQuestionHistory();
+            if (!history.isEmpty()) {
+                QuestionRecord record = history.get(history.size() - 1);
+                record.setMentorComment(mentorComment);
+                record.setEvaluation(evaluation);
+            }
+        }
+
         switch (action) {
             case FOLLOW_UP -> {
                 sink.progress("正在准备追问…");
@@ -351,7 +393,7 @@ public class InterviewService {
                 // 两种模式均直接发出追问；训练模式先流导师反馈气泡再流追问气泡
                 if (context.isTrainingMode()) {
                     sink.progress("导师点评中…");
-                    emitMentorFeedback(context, sessionId, evaluation, sink);
+                    emitMentorFeedback(context, sessionId, mentorComment, sink);
                     sink.segment();
                 }
                 askFollowUpQuestion(context, sessionId, followUpQuestion, preview(userMessage),
@@ -366,7 +408,7 @@ public class InterviewService {
                 }
                 if (context.isTrainingMode()) {
                     sink.progress("导师点评中…");
-                    emitMentorFeedback(context, sessionId, evaluation, sink);
+                    emitMentorFeedback(context, sessionId, mentorComment, sink);
                     sink.segment();
                 }
                 askNextQuestion(context, sessionId, phase, sink);
@@ -374,13 +416,15 @@ public class InterviewService {
             case ADVANCE -> {
                 if (context.isTrainingMode()) {
                     sink.progress("导师点评中…");
-                    emitMentorFeedback(context, sessionId, evaluation, sink);
+                    emitMentorFeedback(context, sessionId, mentorComment, sink);
                     sink.segment();
                 }
                 advance(context, sessionId, sink);
             }
             case FINISH -> finish(context, sessionId);
         }
+        // 回合完成：在构造 status 前复位评估标记，done 载荷与刷新后 status 查询一致
+        context.setEvaluating(false);
         // 实战模式过程免评分：评分照常入库（状态机/报告依赖），但不向前端返回评分与点评
         if (context.isTrainingMode()) {
             return new InterviewTurnResult(overall, evaluation.feedback(), action, statusView(context), evaluation);
@@ -389,13 +433,38 @@ public class InterviewService {
     }
 
     /**
-     * 训练模式导师反馈：按得分区间人性化点评（表扬/宽慰鼓励），独立气泡流式输出并入消息库。
+     * 训练模式导师反馈：先生成全文（入回合记录供刷新回放），再入消息库供话术上下文引用。
+     * 生成失败降级为空串，不阻断主流程。
      */
-    private void emitMentorFeedback(InterviewContext context, String sessionId,
-                                    AnswerEvaluation evaluation, InterviewStreamSink sink) throws IOException {
+    private String generateMentorComment(InterviewContext context, String sessionId,
+                                         AnswerEvaluation evaluation) {
         List<ChatMessage> messages = promptBuilder.buildMentorFeedbackMessages(
                 messageStore.list(sessionId), context.getCurrentQuestion(), evaluation, context.getStyle());
-        streamAndRecord(sessionId, messages, sink);
+        try {
+            StringBuilder fullText = new StringBuilder();
+            aiModelClient.generateStream(messages, fullText::append);
+            String comment = fullText.toString();
+            messageStore.append(sessionId, List.of(ChatMessage.assistant(comment)));
+            return comment;
+        } catch (RuntimeException | IOException exception) {
+            log.warn("mentor comment generation failed sessionId={}", sessionId, exception);
+            return "";
+        }
+    }
+
+    /**
+     * 训练模式导师反馈流式输出：全文已由 generateMentorComment 生成并入库，此处只负责推给前端；
+     * 按短块下发（前端再拆单字符渲染），块太小会让完整文案在事件流中不连续。
+     */
+    private void emitMentorFeedback(InterviewContext context, String sessionId,
+                                    String comment, InterviewStreamSink sink) throws IOException {
+        if (comment == null || comment.isEmpty()) {
+            return;
+        }
+        int chunkSize = 8;
+        for (int start = 0; start < comment.length(); start += chunkSize) {
+            sink.chunk(comment.substring(start, Math.min(start + chunkSize, comment.length())));
+        }
     }
 
     /**
@@ -501,6 +570,7 @@ public class InterviewService {
         } else {
             askDeepTrainingQuestion(context, sessionId, sink);
         }
+        context.setEvaluating(false);
         return new InterviewTurnResult(overall, evaluation.feedback(), action, statusView(context), evaluation);
     }
 
@@ -692,7 +762,8 @@ public class InterviewService {
                 preview(question.question()));
         List<ChatMessage> messages = promptBuilder.buildInterviewerMessages(
                 messageStore.list(sessionId), phase, question.question(), context.getMode(),
-                lastAnswerSummary(context), resumeSummaryFor(context), context.getStyle());
+                lastAnswerSummary(context), resumeSummaryFor(context), context.getStyle(),
+                context.getPosition(), context.getSelectedCategories());
         streamAndRecord(sessionId, messages, sink);
     }
 

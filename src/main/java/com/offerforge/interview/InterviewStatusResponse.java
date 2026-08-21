@@ -1,8 +1,11 @@
 package com.offerforge.interview;
 
+import java.util.List;
+
 /**
  * 面试进度视图，供前端展示当前阶段、已问/剩余题数、追问进度、当前难度与深度训练状态。
  * 实战模式过程免评分：lastScore/averageScore 返回 null（评分仍入库供结束报告）。
+ * openingMessage/history/evaluating：刷新恢复凭此完整重建对话（history 含用户作答与点评，不含参考答案）。
  */
 public record InterviewStatusResponse(
         String sessionId,
@@ -26,7 +29,13 @@ public record InterviewStatusResponse(
         int deepTrainingPassStreak,
         InterviewState returnState,
         /** 最近一道已作答题目所属资料分组（任务 4：「深入该模块」跳转专项训练用；无作答记录时为 null） */
-        String lastAnswerCategory
+        String lastAnswerCategory,
+        /** 开场话术（自我介绍引导）：刷新恢复开场阶段用；旧会话为 null */
+        String openingMessage,
+        /** 回合评估中：前端恢复时轮询等待未完成回合 */
+        boolean evaluating,
+        /** 已作答回合完整记录：前端重建历史对话（含题面/回答/评分/导师点评） */
+        List<QuestionRecord> history
 ) {
 
     static InterviewStatusResponse from(InterviewContext context, InterviewProperties properties) {
@@ -56,7 +65,10 @@ public record InterviewStatusResponse(
                 context.getDeepTrainingAsked(),
                 context.getDeepTrainingConsecutivePass(),
                 context.getDeepTrainingReturnState(),
-                lastAnswerCategory);
+                lastAnswerCategory,
+                context.getOpeningMessage(),
+                context.isEvaluating(),
+                List.copyOf(context.getQuestionHistory()));
     }
 
     private static int remainingQuestions(InterviewContext context, InterviewProperties properties) {

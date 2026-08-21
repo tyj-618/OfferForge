@@ -55,7 +55,8 @@ public class TrainingController {
         Long userId = currentUserService.requireUserId(authorization);
         String category = request == null ? null : request.category();
         String style = request == null ? null : request.style();
-        return ApiResponse.success(trainingService.start(userId, category, style));
+        boolean fromInterview = request != null && Boolean.TRUE.equals(request.fromInterview());
+        return ApiResponse.success(trainingService.start(userId, category, style, fromInterview));
     }
 
     /**

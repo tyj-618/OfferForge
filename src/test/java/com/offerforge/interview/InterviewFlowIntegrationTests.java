@@ -63,11 +63,14 @@ class InterviewFlowIntegrationTests {
         // 基础题已发出（待作答），剩余 = PROJECT 1 + DEEP 1
         assertThat(status.at("/data/remaining").asInt()).isEqualTo(2);
 
-        // 第 2 轮：长回答评分 8 照常入库，实战模式过程免评分（done 载荷 score/点评/评估均为 null）→ 推进 PROJECT
+        // 第 2 轮：长回答评分 8 照常入库（status.history 含分供报告/回放），实战模式过程免评分：
+        // done 顶层 score/点评/评估均为 null → 推进 PROJECT
         String sse2 = ask(sessionId, token, LONG_ANSWER);
-        assertThat(sse2).contains("\"score\":null").contains("\"evaluationComment\":null")
-                .doesNotContain("\"score\":8")
-                .contains("\"action\":\"ADVANCE\"").contains("\"state\":\"PROJECT\"");
+        JsonNode done2 = doneOf(sse2);
+        assertThat(done2.at("/score").isNull()).isTrue();
+        assertThat(done2.at("/evaluationComment").isNull()).isTrue();
+        assertThat(done2.at("/evaluation").isNull()).isTrue();
+        assertThat(sse2).contains("\"action\":\"ADVANCE\"").contains("\"state\":\"PROJECT\"");
 
         // 第 3 轮：PROJECT → DEEP
         String sse3 = ask(sessionId, token, LONG_ANSWER);
@@ -340,5 +343,16 @@ class InterviewFlowIntegrationTests {
 
     private void assertCode(JsonNode response, int expected) {
         assertThat(response.at("/code").asInt()).as("response: %s", response).isEqualTo(expected);
+    }
+
+    /** 从 SSE 响应体中提取 done 事件载荷 JSON */
+    private JsonNode doneOf(String sseBody) throws Exception {
+        String[] lines = sseBody.split("\n");
+        for (int i = 0; i < lines.length - 1; i++) {
+            if (lines[i].startsWith("event:done") && lines[i + 1].startsWith("data:")) {
+                return objectMapper.readTree(lines[i + 1].substring("data:".length()).trim());
+            }
+        }
+        throw new AssertionError("SSE 响应缺少 done 事件：" + sseBody);
     }
 }

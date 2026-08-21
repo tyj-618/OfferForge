@@ -24,6 +24,10 @@ public class QuestionRecord {
     private List<String> missedPoints = new ArrayList<>();
     private List<String> wrongPoints = new ArrayList<>();
     private String knowledgePoint;
+    /** 训练模式导师点评全文：刷新恢复时回放点评气泡（实战模式/旧数据为 null） */
+    private String mentorComment;
+    /** 训练模式详细评估（亮点/不足/改进回答）：刷新恢复时重建「具体分析」小窗；实战模式/旧数据为 null */
+    private AnswerEvaluation evaluation;
     private boolean followUp;
     /** 深度训练子流程题目（followUp 同为 true）：不计入主流程已问题数/平均分/追问统计；旧数据缺省 false */
     private boolean deepTraining;
@@ -144,6 +148,22 @@ public class QuestionRecord {
 
     public void setKnowledgePoint(String knowledgePoint) {
         this.knowledgePoint = knowledgePoint;
+    }
+
+    public String getMentorComment() {
+        return mentorComment;
+    }
+
+    public void setMentorComment(String mentorComment) {
+        this.mentorComment = mentorComment;
+    }
+
+    public AnswerEvaluation getEvaluation() {
+        return evaluation;
+    }
+
+    public void setEvaluation(AnswerEvaluation evaluation) {
+        this.evaluation = evaluation;
     }
 
     public boolean isFollowUp() {

@@ -203,7 +203,7 @@ async function startTraining(category) {
   localError.value = ''
   starting.value = true
   try {
-    await startTrainingSession(category, assistantStyle.value)
+    await startTrainingSession(category, assistantStyle.value, fromInterview)
     phase.value = 'active'
     refreshQuota()
     scrollDown()

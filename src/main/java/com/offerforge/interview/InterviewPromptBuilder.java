@@ -53,15 +53,20 @@ public class InterviewPromptBuilder {
      *
      * @param previousAnswerSummary 上一轮作答概况（仅实战模式注入，可空）
      * @param resumeSummary         简历摘要（仅实战模式注入，可空，用于话题转移时的自然桥接）
+     * @param position              候选人求职岗位（可空）：作为面试设定影响话术侧重与追问方向
+     * @param focusCategories       候选人勾选的资料标签（可空）：限定面试官围绕这些方向组织节奏
      */
     public List<ChatMessage> buildInterviewerMessages(List<ChatMessage> history, InterviewState phase,
                                                       String question, String mode,
                                                       String previousAnswerSummary, String resumeSummary,
-                                                      String style) {
+                                                      String style, String position,
+                                                      List<String> focusCategories) {
         boolean strict = AssistantStyle.isStrict(style);
+        String setup = buildSetupBlock(position, focusCategories);
         String instruction;
         if (InterviewContext.MODE_TRAINING.equals(mode)) {
             instruction = "<task>interviewer</task><phase>" + phase.label() + "</phase>"
+                    + setup
                     + "<instruction>" + (strict
                             ? "直接提出下面的新面试题，不需要衔接语，不要点评或总结候选人此前的回答。"
                             : "用一句极简的衔接语（如“接下来我们看这个问题”）直接提出下面的新面试题，不要点评或总结候选人此前的回答。")
@@ -89,11 +94,33 @@ public class InterviewPromptBuilder {
                         + "3. 随后提出下面的新面试题，不得自创题目、不得泄露参考答案。";
             }
             instruction = "<task>interviewer</task><phase>" + phase.label() + "</phase>"
+                    + setup
                     + context
                     + "<instruction>" + persona + "</instruction>"
                     + "<question>" + question + "</question>";
         }
         return build(history, instruction, style);
+    }
+
+    /**
+     * 面试设定块：候选人岗位与自选资料标签作为面试官背景设定，
+     * 供其围绕目标岗位与指定方向组织衔接话术与追问节奏（题面仍由服务端给定，不得自创）。
+     */
+    private static String buildSetupBlock(String position, List<String> focusCategories) {
+        boolean hasPosition = position != null && !position.isBlank();
+        boolean hasCategories = focusCategories != null && !focusCategories.isEmpty();
+        if (!hasPosition && !hasCategories) {
+            return "";
+        }
+        StringBuilder setup = new StringBuilder("<setup>候选人设定（供你把控面试方向与语气侧重，不要原样照念）：");
+        if (hasPosition) {
+            setup.append("求职岗位：").append(position).append("；");
+        }
+        if (hasCategories) {
+            setup.append("本场面试重点考察的资料标签：").append(String.join("、", focusCategories)).append("；");
+        }
+        setup.append("请围绕该岗位与标签方向自然组织衔接与追问。</setup>");
+        return setup.toString();
     }
 
     /**
