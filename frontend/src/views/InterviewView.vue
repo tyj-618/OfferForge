@@ -5,11 +5,12 @@ import { marked } from 'marked'
 import {
   askStream,
   deepTrainingExitStream,
+  dontknowStream,
   interviewApi,
   knowledgeApi,
+  masteredStream,
   quotaApi,
-  resumeApi,
-  skipStream
+  resumeApi
 } from '../api'
 import { classifyError, notifyError } from '../utils/errors'
 import { isMobileViewport } from '../utils/device'
@@ -293,8 +294,8 @@ const stageIndex = computed(() => {
 
 const stagePercent = computed(() => ((stageIndex.value + 1) / STAGES.length) * 100)
 
-// 仅出题环节可跳过；开场（自我介绍）、收尾与深度训练中不可跳过
-const canSkip = computed(() => ['BASICS', 'PROJECT', 'DEEP'].includes(status.value?.state))
+// 仅出题环节可标记「已掌握/不知道」；开场（自我介绍）、收尾与深度训练中不可用
+const canMark = computed(() => ['BASICS', 'PROJECT', 'DEEP'].includes(status.value?.state))
 
 // 深度训练子流程进行中（徽章 + 退出按钮 + 禁用跳过）
 const deepTrainingActive = computed(() => status.value?.deepTrainingActive === true)
@@ -587,12 +588,20 @@ function retrySend(text) {
   runStreamingTurn((callbacks) => askStream(sessionId.value, text, callbacks), () => retrySend(text))
 }
 
-// 跳过当前题：后端计 0 分并推进状态机，SSE 返回下一题
-function skipQuestion() {
-  if (!canSkip.value || sending.value || isFinished.value) {
+// 「已掌握」：绿勾标记后本题直接 pass（不计分不入历史），SSE 返回下一题
+function markMastered() {
+  if (!canMark.value || sending.value || isFinished.value) {
     return
   }
-  runStreamingTurn((callbacks) => skipStream(sessionId.value, callbacks), skipQuestion)
+  runStreamingTurn((callbacks) => masteredStream(sessionId.value, callbacks), markMastered)
+}
+
+// 「不知道」：等价作答「不知道」走完整评估反馈（强制 0 分）+ 红叉
+function markDontKnow() {
+  if (!canMark.value || sending.value || isFinished.value) {
+    return
+  }
+  runStreamingTurn((callbacks) => dontknowStream(sessionId.value, callbacks), markDontKnow)
 }
 
 // 主动退出深度训练：恢复主面试并出下一题（仅兼容存量会话，新入口已下线）
@@ -1092,12 +1101,22 @@ function scrollDown() {
           <button
             v-if="mode === 'training'"
             type="button"
-            class="ghost skip-btn"
-            title="跳过当前题：视为未能作答，本题计 0 分（实战模式不提供跳过）"
-            :disabled="sending || !canSkip || deepTrainingActive"
-            @click="skipQuestion"
+            class="ghost mastered-btn"
+            title="已掌握：本题直接 pass，不计分不入历史，后续出现概率降低"
+            :disabled="sending || !canMark || deepTrainingActive"
+            @click="markMastered"
           >
-            跳过此题
+            ✓ 已掌握
+          </button>
+          <button
+            v-if="mode === 'training'"
+            type="button"
+            class="ghost dontknow-btn"
+            title="不知道：本题记 0 分并给出点评，后续出现频率增高"
+            :disabled="sending || !canMark || deepTrainingActive"
+            @click="markDontKnow"
+          >
+            ✗ 不知道
           </button>
           <button type="submit" :disabled="sending || !answer.trim()">发送</button>
         </div>
@@ -1778,18 +1797,24 @@ function scrollDown() {
   white-space: nowrap;
 }
 
-.skip-btn {
+.mastered-btn,
+.dontknow-btn {
   flex-shrink: 0;
   white-space: nowrap;
 }
 
-.skip-btn:disabled {
+.mastered-btn:disabled,
+.dontknow-btn:disabled {
   background: transparent;
   color: #c3c9d4;
 }
 
-.skip-btn:hover:not(:disabled) {
-  color: var(--warning);
+.mastered-btn:hover:not(:disabled) {
+  color: var(--success, #2e7d32);
+}
+
+.dontknow-btn:hover:not(:disabled) {
+  color: var(--danger, #c62828);
 }
 
 /* ---------- 深度训练徽章与退出按钮 ---------- */

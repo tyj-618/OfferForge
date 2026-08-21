@@ -39,6 +39,8 @@ public class TrainingContext {
     private boolean evaluating;
     /** 已作答题目记录（题面 + 得分），达标题数即完成 */
     private List<TrainingQuestionRecord> questionHistory = new ArrayList<>();
+    /** 「已掌握」pass 掉的题面：不计入 askedCount，单独登记防重复出题（旧会话缺失为 null） */
+    private Set<String> passedQuestions;
     /** 本场训练达到的最高难度（归档展示用） */
     private Difficulty maxDifficultyReached = Difficulty.EASY;
     private long createdAtEpochMillis;
@@ -157,6 +159,25 @@ public class TrainingContext {
         this.questionHistory = questionHistory;
     }
 
+    public Set<String> getPassedQuestions() {
+        return passedQuestions;
+    }
+
+    public void setPassedQuestions(Set<String> passedQuestions) {
+        this.passedQuestions = passedQuestions;
+    }
+
+    /** 登记一道「已掌握」pass 的题：下次选题时排除，防止未入 history 导致重复出题 */
+    public void recordPassedQuestion(String question) {
+        if (question == null) {
+            return;
+        }
+        if (passedQuestions == null) {
+            passedQuestions = new HashSet<>();
+        }
+        passedQuestions.add(question);
+    }
+
     public Difficulty getMaxDifficultyReached() {
         return maxDifficultyReached;
     }
@@ -203,6 +224,9 @@ public class TrainingContext {
     public Set<String> askedQuestions() {
         Set<String> asked = new HashSet<>();
         questionHistory.forEach(record -> asked.add(record.getQuestion()));
+        if (passedQuestions != null) {
+            asked.addAll(passedQuestions);
+        }
         if (currentQuestion != null) {
             asked.add(currentQuestion);
         }

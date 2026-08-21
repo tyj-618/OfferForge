@@ -57,12 +57,12 @@ public class KnowledgeController {
         return ApiResponse.success(knowledgeService.listMine(userId));
     }
 
-    /** 官方题库列表（全局共享只读）：资源库页按分组筛选与浏览答案 */
+    /** 官方题库列表（全局共享只读）：资源库页按分组筛选与浏览答案，附带本人掌握度标记 */
     @GetMapping("/official")
     public ApiResponse<List<KnowledgeService.OwnedKnowledge>> official(
             @RequestHeader(value = "Authorization", required = false) String authorization) {
-        currentUserService.requireUserId(authorization);
-        return ApiResponse.success(knowledgeService.listOfficial());
+        Long userId = currentUserService.requireUserId(authorization);
+        return ApiResponse.success(knowledgeService.listOfficial(userId));
     }
 
     /** 批量删除本人上传的资料；仅删除归属本人的条目，返回实际删除条数 */

@@ -20,6 +20,7 @@ import com.offerforge.interview.InterviewSessionStore;
 import com.offerforge.interview.InterviewState;
 import com.offerforge.interview.InterviewStreamSink;
 import com.offerforge.knowledge.Difficulty;
+import com.offerforge.knowledge.KnowledgeMasteryService;
 import com.offerforge.knowledge.KnowledgeRepository;
 import com.offerforge.quota.QuotaService;
 import org.slf4j.Logger;
@@ -56,6 +57,7 @@ public class TrainingService {
     private final AiModelClient aiModelClient;
     private final EvaluationService evaluationService;
     private final KnowledgeRepository knowledgeRepository;
+    private final KnowledgeMasteryService masteryService;
     private final TrainingRecordRepository recordRepository;
     private final TrainingProperties properties;
     private final ApiKeyService apiKeyService;
@@ -74,6 +76,7 @@ public class TrainingService {
                            AiModelClient aiModelClient,
                            EvaluationService evaluationService,
                            KnowledgeRepository knowledgeRepository,
+                           KnowledgeMasteryService masteryService,
                            TrainingRecordRepository recordRepository,
                            TrainingProperties properties,
                            ApiKeyService apiKeyService,
@@ -89,6 +92,7 @@ public class TrainingService {
         this.aiModelClient = aiModelClient;
         this.evaluationService = evaluationService;
         this.knowledgeRepository = knowledgeRepository;
+        this.masteryService = masteryService;
         this.recordRepository = recordRepository;
         this.properties = properties;
         this.apiKeyService = apiKeyService;
@@ -176,59 +180,7 @@ public class TrainingService {
             }
             LlmCallContext.bind(credentialResolver.resolveFor(userId));
             try {
-                log.info("training answer received sessionId={} category={} length={} preview={}",
-                        sessionId, context.getCategory(), userMessage.length(), preview(userMessage));
-                messageStore.append(sessionId, List.of(ChatMessage.user(userMessage)));
-                // 回合开始即标记评估中并落库：刷新恢复的前端凭此轮询等待未完成回合
-                context.setEvaluating(true);
-                sessionStore.save(context);
-
-                sink.progress("正在评估你的回答…");
-                AnswerEvaluation evaluation = evaluationService.evaluate(
-                        context.getCurrentQuestion(), context.getCurrentKnowledgePoint(),
-                        context.getCurrentCandidateAnswer(), userMessage, true);
-                double overall = evaluation.overall();
-
-                // 导师反馈独立气泡（复用面试训练模式的导师人设），点评全文随回合记录保存供刷新回放
-                sink.progress("导师点评中…");
-                String comment = streamAndRecordSink(sessionId, mentorPromptBuilder.buildMentorFeedbackMessages(
-                        messageStore.list(sessionId), context.getCurrentQuestion(), evaluation, context.getStyle()), sink);
-                context.getQuestionHistory().add(new TrainingQuestionRecord(
-                        context.getCurrentQuestion(), context.getCurrentKnowledgePoint(), overall,
-                        userMessage, comment, evaluation));
-                updateScoreStreaks(context, overall);
-                adjustDifficulty(context, sessionId);
-                sink.segment();
-
-                boolean finished = false;
-                if (context.askedCount() >= properties.getMaxQuestions()) {
-                    sink.progress("正在生成训练成绩…");
-                    emitPlain(sessionId, "恭喜！你已完成「" + context.getCategory() + "」专项训练全部 "
-                            + properties.getMaxQuestions() + " 题，平均得分 "
-                            + oneDecimal(context.averageScore()) + " 分，成绩已归档。", sink);
-                    finish(context, sessionId);
-                    finished = true;
-                } else {
-                    var next = nextQuestion(context);
-                    if (next.isEmpty()) {
-                        emitPlain(sessionId, "「" + context.getCategory() + "」分组的题目已全部练完，本场训练提前完成，"
-                                + "平均得分 " + oneDecimal(context.averageScore()) + " 分，成绩已归档。", sink);
-                        finish(context, sessionId);
-                        finished = true;
-                    } else {
-                        applyQuestion(context, next.get());
-                        sink.progress("正在准备下一题…");
-                        streamAndRecordSink(sessionId, promptBuilder.buildCoachMessages(
-                                messageStore.list(sessionId), context.getCategory(),
-                                context.getCurrentQuestion(), context.askedCount() + 1,
-                                context.getCurrentDifficulty().label(), context.getStyle()), sink);
-                    }
-                }
-                context.setEvaluating(false);
-                sessionStore.save(context);
-                log.info("training sessionId={} score={} asked={} difficulty={} finished={}",
-                        sessionId, overall, context.askedCount(), context.getCurrentDifficulty(), finished);
-                return new TrainingTurnResult(overall, evaluation.feedback(), finished, statusView(context), evaluation);
+                return answerInternal(context, sessionId, userMessage, false, sink);
             } catch (IOException | RuntimeException exception) {
                 // 回合中途失败：复位评估标记，避免刷新恢复时永久卡在轮询
                 context.setEvaluating(false);
@@ -239,6 +191,160 @@ public class TrainingService {
                 releaseLockIfTerminal(sessionId, lock);
             }
         }
+    }
+
+    /**
+     * 标记当前题「已掌握」（绿勾）：题目直接 pass——不计入 askedCount、不入 history，仅登记防重复清单；
+     * 对应资料问答加绿勾；随后教练话术出下一题，题库耗尽走既有完成分支。
+     */
+    public TrainingTurnResult mastered(Long userId, String sessionId, InterviewStreamSink sink) throws IOException {
+        Object lock = lockFor(sessionId);
+        synchronized (lock) {
+            TrainingContext context = requireOwnedSession(userId, sessionId);
+            if (context.isFinished()) {
+                throw new BusinessException(ErrorCode.CONFLICT, "本场专项训练已完成");
+            }
+            String question = context.getCurrentQuestion();
+            log.info("training sessionId={} question marked mastered", sessionId);
+            masteryService.resolveItemId(question, context.getUserId())
+                    .ifPresent(itemId -> masteryService.recordCheck(context.getUserId(), itemId));
+            messageStore.append(sessionId, List.of(ChatMessage.user("（已掌握本题，继续下一题）")));
+            context.recordPassedQuestion(question);
+            // 同作答回合：标记评估中，正常/异常路径均复位
+            context.setEvaluating(true);
+            sessionStore.save(context);
+            LlmCallContext.bind(credentialResolver.resolveFor(userId));
+            try {
+                boolean finished = advanceToNextOrFinish(context, sessionId, sink);
+                context.setEvaluating(false);
+                sessionStore.save(context);
+                // score 为 null：前端不展示得分徽章
+                return new TrainingTurnResult(null, null, finished, statusView(context), null);
+            } catch (IOException | RuntimeException exception) {
+                context.setEvaluating(false);
+                sessionStore.save(context);
+                throw exception;
+            } finally {
+                LlmCallContext.clear();
+                releaseLockIfTerminal(sessionId, lock);
+            }
+        }
+    }
+
+    /**
+     * 标记当前题「不知道」（红叉）：等价作答「不知道」走完整评估反馈流程（综合分强制 0），
+     * 对应资料问答加红叉；后续推进与正常作答一致。
+     */
+    public TrainingTurnResult dontknow(Long userId, String sessionId, InterviewStreamSink sink) throws IOException {
+        Object lock = lockFor(sessionId);
+        synchronized (lock) {
+            TrainingContext context = requireOwnedSession(userId, sessionId);
+            if (context.isFinished()) {
+                throw new BusinessException(ErrorCode.CONFLICT, "本场专项训练已完成");
+            }
+            log.info("training sessionId={} question marked dont-know", sessionId);
+            masteryService.resolveItemId(context.getCurrentQuestion(), context.getUserId())
+                    .ifPresent(itemId -> masteryService.recordCross(context.getUserId(), itemId));
+            LlmCallContext.bind(credentialResolver.resolveFor(userId));
+            try {
+                // 复用作答主流程：红叉已预先记录，强制 0 分后联动跳过避免重复记录
+                return answerInternal(context, sessionId, "不知道", true, sink);
+            } catch (IOException | RuntimeException exception) {
+                context.setEvaluating(false);
+                sessionStore.save(context);
+                throw exception;
+            } finally {
+                LlmCallContext.clear();
+                releaseLockIfTerminal(sessionId, lock);
+            }
+        }
+    }
+
+    /**
+     * 作答回合骨架：详细评估（forceZeroScore 时综合分强制 0）+ 导师反馈 + 难度升降档 + 下一题/完成归档。
+     */
+    private TrainingTurnResult answerInternal(TrainingContext context, String sessionId, String userMessage,
+                                              boolean forceZeroScore, InterviewStreamSink sink) throws IOException {
+        log.info("training answer received sessionId={} category={} length={} preview={}",
+                sessionId, context.getCategory(), userMessage.length(), preview(userMessage));
+        messageStore.append(sessionId, List.of(ChatMessage.user(userMessage)));
+        // 回合开始即标记评估中并落库：刷新恢复的前端凭此轮询等待未完成回合
+        context.setEvaluating(true);
+        sessionStore.save(context);
+
+        sink.progress("正在评估你的回答…");
+        AnswerEvaluation evaluation = evaluationService.evaluate(
+                context.getCurrentQuestion(), context.getCurrentKnowledgePoint(),
+                context.getCurrentCandidateAnswer(), userMessage, true);
+        if (forceZeroScore) {
+            // 「不知道」：仅综合分强制 0，点评/维度分照常展示
+            evaluation = new AnswerEvaluation(evaluation.accuracy(), evaluation.completeness(),
+                    evaluation.clarity(), evaluation.depth(), 0,
+                    evaluation.keyPoints(), evaluation.missedPoints(), evaluation.wrongPoints(),
+                    evaluation.feedback(), evaluation.goodPoints(), evaluation.badPoints(), evaluation.improvedAnswer());
+        }
+        double overall = evaluation.overall();
+
+        // 导师反馈独立气泡（复用面试训练模式的导师人设），点评全文随回合记录保存供刷新回放
+        sink.progress("导师点评中…");
+        String comment = streamAndRecordSink(sessionId, mentorPromptBuilder.buildMentorFeedbackMessages(
+                messageStore.list(sessionId), context.getCurrentQuestion(), evaluation, context.getStyle()), sink);
+        context.getQuestionHistory().add(new TrainingQuestionRecord(
+                context.getCurrentQuestion(), context.getCurrentKnowledgePoint(), overall,
+                userMessage, comment, evaluation));
+        updateScoreStreaks(context, overall);
+        // 评分联动：>8 分绿勾、<5 分红叉；「不知道」已预记红叉不重复（forceZeroScore 跳过）
+        if (!forceZeroScore) {
+            linkMastery(context, overall);
+        }
+        adjustDifficulty(context, sessionId);
+        sink.segment();
+
+        boolean finished = advanceToNextOrFinish(context, sessionId, sink);
+        context.setEvaluating(false);
+        sessionStore.save(context);
+        log.info("training sessionId={} score={} asked={} difficulty={} finished={}",
+                sessionId, overall, context.askedCount(), context.getCurrentDifficulty(), finished);
+        return new TrainingTurnResult(overall, evaluation.feedback(), finished, statusView(context), evaluation);
+    }
+
+    /** 推进下一题或完成：达标题数/题库耗尽则归档完成，否则教练话术出下一题；返回本场是否已完成 */
+    private boolean advanceToNextOrFinish(TrainingContext context, String sessionId, InterviewStreamSink sink)
+            throws IOException {
+        if (context.askedCount() >= properties.getMaxQuestions()) {
+            sink.progress("正在生成训练成绩…");
+            emitPlain(sessionId, "恭喜！你已完成「" + context.getCategory() + "」专项训练全部 "
+                    + properties.getMaxQuestions() + " 题，平均得分 "
+                    + oneDecimal(context.averageScore()) + " 分，成绩已归档。", sink);
+            finish(context, sessionId);
+            return true;
+        }
+        var next = nextQuestion(context);
+        if (next.isEmpty()) {
+            emitPlain(sessionId, "「" + context.getCategory() + "」分组的题目已全部练完，本场训练提前完成，"
+                    + "平均得分 " + oneDecimal(context.averageScore()) + " 分，成绩已归档。", sink);
+            finish(context, sessionId);
+            return true;
+        }
+        applyQuestion(context, next.get());
+        sink.progress("正在准备下一题…");
+        streamAndRecordSink(sessionId, promptBuilder.buildCoachMessages(
+                messageStore.list(sessionId), context.getCategory(),
+                context.getCurrentQuestion(), context.askedCount() + 1,
+                context.getCurrentDifficulty().label(), context.getStyle()), sink);
+        return false;
+    }
+
+    /** 评分联动掌握度：高于 8 分加绿勾，低于 5 分加红叉；题库外题目 resolveItemId 返回 empty 天然不记录 */
+    private void linkMastery(TrainingContext context, double overall) {
+        masteryService.resolveItemId(context.getCurrentQuestion(), context.getUserId())
+                .ifPresent(itemId -> {
+                    if (overall > 8) {
+                        masteryService.recordCheck(context.getUserId(), itemId);
+                    } else if (overall < 5) {
+                        masteryService.recordCross(context.getUserId(), itemId);
+                    }
+                });
     }
 
     /**
@@ -319,11 +425,22 @@ public class TrainingService {
         }
     }
 
-    /** 按当前难度从该分组取下一道未问题目；题库选题复用面试的可见性查询与连续性策略 */
+    /** 按当前难度从该分组取下一道未问题目；当前难度已全部问过则回退任意难度；
+     *  题库选题复用面试的可见性查询、连续性策略与掌握度加权 */
     private java.util.Optional<InterviewQuestionBank.InterviewQuestion> nextQuestion(TrainingContext context) {
-        return questionBank.nextQuestion(InterviewState.BASICS, context.askedQuestions(),
+        Map<Long, Double> weights = masteryService.weightsFor(context.getUserId());
+        java.util.Optional<InterviewQuestionBank.InterviewQuestion> next = questionBank.nextQuestion(
+                InterviewState.BASICS, context.askedQuestions(),
                 context.getCurrentDifficulty(), context.getCategory(), context.askedCount(), null,
-                context.getUserId(), List.of(context.getCategory()));
+                context.getUserId(), List.of(context.getCategory()), weights);
+        if (next.isEmpty()) {
+            // 当前难度无未问题目（如「已掌握」不升档连续消耗同难度题）：回退任意难度，避免其余难度仍有题时误判枯竭
+            next = questionBank.nextQuestion(
+                    InterviewState.BASICS, context.askedQuestions(),
+                    null, context.getCategory(), context.askedCount(), null,
+                    context.getUserId(), List.of(context.getCategory()), weights);
+        }
+        return next;
     }
 
     private void applyQuestion(TrainingContext context, InterviewQuestionBank.InterviewQuestion question) {

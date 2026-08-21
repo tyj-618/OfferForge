@@ -95,15 +95,34 @@ public class InterviewController {
     }
 
     /**
-     * 跳过当前题（计 0 分）：事件结构与 ask 一致，message 事件为下一题话术，done 携带进度视图。
+     * 标记当前题「已掌握」（绿勾，不计分不入历史）：事件结构与 ask 一致，
+     * message 事件为下一题话术，done 携带进度视图；仅训练模式出题阶段可用。
      */
-    @PostMapping(value = "/{sessionId}/skip", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter skip(@RequestHeader(value = "Authorization", required = false) String authorization,
-                           @PathVariable String sessionId) {
+    @PostMapping(value = "/{sessionId}/mastered", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter mastered(@RequestHeader(value = "Authorization", required = false) String authorization,
+                               @PathVariable String sessionId) {
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
         emitter.onTimeout(emitter::complete);
         emitter.onError(throwable -> emitter.complete());
-        interviewStreamExecutor.execute(() -> writeSkipTurn(emitter, authorization, sessionId));
+        interviewStreamExecutor.execute(() -> writeChoiceTurn(
+                emitter, authorization, sessionId, "mastered",
+                interviewService::markMastered));
+        return emitter;
+    }
+
+    /**
+     * 标记当前题「不知道」（红叉）：等价作答「不知道」走完整评估反馈流程（强制 0 分），
+     * 事件结构与 ask 一致；仅训练模式出题阶段可用。
+     */
+    @PostMapping(value = "/{sessionId}/dontknow", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter dontknow(@RequestHeader(value = "Authorization", required = false) String authorization,
+                               @PathVariable String sessionId) {
+        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
+        emitter.onTimeout(emitter::complete);
+        emitter.onError(throwable -> emitter.complete());
+        interviewStreamExecutor.execute(() -> writeChoiceTurn(
+                emitter, authorization, sessionId, "dontknow",
+                interviewService::markDontKnow));
         return emitter;
     }
 
@@ -199,13 +218,9 @@ public class InterviewController {
         }
     }
 
-    private void writeSkipTurn(SseEmitter emitter, String authorization, String sessionId) {
-        writeChoiceTurn(emitter, authorization, sessionId, "skip", interviewService::skip);
-    }
-
     /**
-     * 无请求体的流式回合统一模板（skip / deep-training / deep-training/exit / next-question）：鉴权后委托服务层执行，
-     * 业务/IO/运行时异常均以 error 事件收尾，避免连接悬挂到超时。
+     * 无请求体的流式回合统一模板（mastered / dontknow / deep-training / deep-training/exit / next-question）：
+     * 鉴权后委托服务层执行，业务/IO/运行时异常均以 error 事件收尾，避免连接悬挂到超时。
      */
     private void writeChoiceTurn(SseEmitter emitter, String authorization, String sessionId, String turnName,
                                  ChoiceTurnAction action) {

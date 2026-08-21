@@ -204,8 +204,8 @@ class InterviewFlowIntegrationTests {
         assertThat(status2.at("/data/deepTrainingAsked").asInt()).isEqualTo(1);
         assertThat(status2.at("/data/returnState").asText()).isEqualTo("BASICS");
         assertThat(status2.at("/data/followUpChoiceRequired").asBoolean()).isFalse();
-        // 深度训练中跳过被拒绝（引导使用退出按钮）
-        assertThat(ssePost("/api/interview/" + sessionId + "/skip", token))
+        // 深度训练中掌握度标记被拒绝（引导使用退出按钮）
+        assertThat(ssePost("/api/interview/" + sessionId + "/mastered", token))
                 .contains("event:error").contains("40900");
 
         // 第 1 道递进题达标（长回答 → 8 分 ≥ 6）：继续出第 2 题，连续达标计数 1
@@ -304,7 +304,7 @@ class InterviewFlowIntegrationTests {
     }
 
     /**
-     * 无请求体的 SSE 端点（skip / deep-training / deep-training/exit / next-question）：返回完整事件流文本。
+     * 无请求体的 SSE 端点（mastered / dontknow / deep-training / deep-training/exit / next-question）：返回完整事件流文本。
      */
     private String ssePost(String path, String token) throws Exception {
         HttpRequest.Builder builder = HttpRequest.newBuilder()

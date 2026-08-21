@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -80,6 +81,13 @@ class InterviewQuestionBankTests {
         knowledgeItem.setAnswer("参考答案：" + question);
         knowledgeItem.setCategory(category);
         knowledgeItem.setDifficulty(Difficulty.EASY);
+        return knowledgeItem;
+    }
+
+    /** 同 {@link #item(String, String)} 但带 id（掌握度权重表按 itemId 查找，加权测试必需） */
+    private static KnowledgeItem item(long id, String question, String category) {
+        KnowledgeItem knowledgeItem = item(question, category);
+        knowledgeItem.setId(id);
         return knowledgeItem;
     }
 
@@ -220,5 +228,69 @@ class InterviewQuestionBankTests {
             seenPoints.add(next.knowledgePoint());
         }
         assertThat(seenPoints).contains("算法", "Java并发");
+    }
+
+    /**
+     * 掌握度加权选题：满 10 绿勾权重 0 的题从候选剔除永不出题；
+     * 红叉题按 1+x 增权；空权重表（实战模式）退化为均匀随机。
+     */
+    @Test
+    void fullyCheckedItemIsExcludedFromCandidates() {
+        InterviewQuestionBank stubbed = bankWithBasicsItems(List.of(
+                item(1L, "Java 基础题1", "Java基础"),
+                item(2L, "集合题1", "Java集合")));
+
+        // 权重 0（满 10 绿勾）：多轮选题永远选不到该题，只剩另一题
+        Map<Long, Double> weights = Map.of(1L, 0.0);
+        for (int round = 0; round < 30; round++) {
+            InterviewQuestionBank.InterviewQuestion next = stubbed
+                    .nextQuestion(InterviewState.BASICS, Set.of(), Difficulty.EASY, null, 0, null,
+                            1L, stubbed.categoriesFor(InterviewState.BASICS), weights)
+                    .orElseThrow();
+            assertThat(next.question()).isEqualTo("集合题1");
+        }
+
+        // 全部候选均权重 0 → 选题枯竭返回 empty
+        assertThat(stubbed.nextQuestion(InterviewState.BASICS, Set.of(), Difficulty.EASY, null, 0, null,
+                1L, stubbed.categoriesFor(InterviewState.BASICS), Map.of(1L, 0.0, 2L, 0.0))).isEmpty();
+    }
+
+    @Test
+    void crossedItemIsPickedMoreOftenByWeight() {
+        InterviewQuestionBank stubbed = bankWithBasicsItems(List.of(
+                item(1L, "Java 基础题1", "Java基础"),
+                item(2L, "集合题1", "Java集合")));
+
+        // 满 10 红叉 → 11 倍权重 vs 未标记题 1.0：200 轮中红叉题应占绝对多数（期望 ≈183）
+        Map<Long, Double> weights = Map.of(1L, 11.0);
+        int crossedPicks = 0;
+        for (int round = 0; round < 200; round++) {
+            InterviewQuestionBank.InterviewQuestion next = stubbed
+                    .nextQuestion(InterviewState.BASICS, Set.of(), Difficulty.EASY, null, 0, null,
+                            1L, stubbed.categoriesFor(InterviewState.BASICS), weights)
+                    .orElseThrow();
+            if ("Java 基础题1".equals(next.question())) {
+                crossedPicks++;
+            }
+        }
+        assertThat(crossedPicks).isGreaterThan(150);
+    }
+
+    @Test
+    void emptyWeightsFallBackToUniformRandom() {
+        InterviewQuestionBank stubbed = bankWithBasicsItems(List.of(
+                item(1L, "Java 基础题1", "Java基础"),
+                item(2L, "集合题1", "Java集合")));
+
+        // 空权重表（实战模式）：均匀随机，30 轮两道题都应出现（单一题霸屏概率可忽略）
+        Set<String> seen = new HashSet<>();
+        for (int round = 0; round < 30; round++) {
+            InterviewQuestionBank.InterviewQuestion next = stubbed
+                    .nextQuestion(InterviewState.BASICS, Set.of(), Difficulty.EASY, null, 0, null,
+                            1L, stubbed.categoriesFor(InterviewState.BASICS), Map.of())
+                    .orElseThrow();
+            seen.add(next.question());
+        }
+        assertThat(seen).containsExactlyInAnyOrder("Java 基础题1", "集合题1");
     }
 }

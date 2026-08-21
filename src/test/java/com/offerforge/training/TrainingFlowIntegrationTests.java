@@ -168,6 +168,77 @@ class TrainingFlowIntegrationTests {
                 .at("/code").asInt()).isNotZero();
     }
 
+    @Test
+    void masteredAddsCheckWithoutCountingAndDontknowForcesZero() throws Exception {
+        String token = newUser();
+        assertCode(post("/api/knowledge/import", token, Map.of()), 0);
+
+        JsonNode start = post("/api/training/start", token, Map.of("category", CATEGORY));
+        assertCode(start, 0);
+        String sessionId = start.at("/data/sessionId").asText();
+        String firstQuestion = get("/api/training/" + sessionId + "/status", token)
+                .at("/data/currentQuestion").asText();
+        assertThat(firstQuestion).isNotBlank();
+
+        // 已掌握：score null、不计作答数，资料库加绿勾，教练话术出下一题
+        JsonNode masteredDone = doneOf(choice(sessionId, "mastered", token));
+        assertThat(masteredDone.at("/score").isNull()).isTrue();
+        assertThat(masteredDone.at("/finished").asBoolean()).isFalse();
+        assertThat(masteredDone.at("/status/askedCount").asInt()).isZero();
+        String secondQuestion = get("/api/training/" + sessionId + "/status", token)
+                .at("/data/currentQuestion").asText();
+        assertThat(secondQuestion).isNotBlank().isNotEqualTo(firstQuestion);
+        assertThat(checksOf(get("/api/knowledge/official", token), firstQuestion)).isEqualTo(1);
+
+        // 不知道：综合分强制 0、计一次作答，资料库加红叉
+        JsonNode dontknowDone = doneOf(choice(sessionId, "dontknow", token));
+        assertThat(dontknowDone.at("/score").asDouble()).isZero();
+        assertThat(dontknowDone.at("/status/askedCount").asInt()).isEqualTo(1);
+        assertThat(crossesOf(get("/api/knowledge/official", token), secondQuestion)).isEqualTo(1);
+
+        // 正常作答照常推进：8 分（未达 >8 不联动绿勾），作答数 2
+        JsonNode answerDone = doneOf(answer(sessionId, token, LONG_ANSWER));
+        assertThat(answerDone.at("/score").asDouble()).isEqualTo(8.0);
+        assertThat(answerDone.at("/status/askedCount").asInt()).isEqualTo(2);
+
+        // 主动结束归档：mastered 题不计入作答题数
+        JsonNode finish = post("/api/training/" + sessionId + "/finish", token, Map.of());
+        assertCode(finish, 0);
+        assertThat(finish.at("/data/askedCount").asInt()).isEqualTo(2);
+    }
+
+    /** mastered / dontknow 标记当前题（SSE，无请求体），返回完整事件流文本 */
+    private String choice(String sessionId, String action, String token) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + port + "/api/training/" + sessionId + "/" + action))
+                .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE)
+                .header("Authorization", "Bearer " + token)
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        return httpClient.send(request, HttpResponse.BodyHandlers.ofString()).body();
+    }
+
+    /** 官方题库列表中指定题面的绿勾数（找不到该题视为 0） */
+    private int checksOf(JsonNode officialListResponse, String question) {
+        JsonNode item = findItem(officialListResponse, question);
+        return item == null ? 0 : item.at("/checks").asInt();
+    }
+
+    /** 官方题库列表中指定题面的红叉数（找不到该题视为 0） */
+    private int crossesOf(JsonNode officialListResponse, String question) {
+        JsonNode item = findItem(officialListResponse, question);
+        return item == null ? 0 : item.at("/crosses").asInt();
+    }
+
+    private JsonNode findItem(JsonNode officialListResponse, String question) {
+        for (JsonNode item : officialListResponse.at("/data")) {
+            if (question.equals(item.at("/question").asText())) {
+                return item;
+            }
+        }
+        return null;
+    }
+
     private String newUser() throws Exception {
         String username = "training_user_" + System.nanoTime();
         assertCode(post("/api/auth/register", null, Map.of("username", username, "password", "123456")), 0);

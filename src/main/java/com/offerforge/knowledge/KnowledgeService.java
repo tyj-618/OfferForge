@@ -59,16 +59,19 @@ public class KnowledgeService {
             Map.entry("算法", List.of("算法", "数据结构", "leetcode", "力扣", "动态规划", "手写编程")));
 
     private final KnowledgeRepository repository;
+    private final KnowledgeMasteryService masteryService;
     private final EmbeddingClient embeddingClient;
     private final ObjectProvider<KnowledgeIndexClient> indexClientProvider;
     private final ObjectMapper objectMapper;
     private final KnowledgeUploadParser uploadParser;
     private final ResumeService resumeService;
 
-    public KnowledgeService(KnowledgeRepository repository, EmbeddingClient embeddingClient,
+    public KnowledgeService(KnowledgeRepository repository, KnowledgeMasteryService masteryService,
+                            EmbeddingClient embeddingClient,
                             ObjectProvider<KnowledgeIndexClient> indexClientProvider, ObjectMapper objectMapper,
                             KnowledgeUploadParser uploadParser, ResumeService resumeService) {
         this.repository = repository;
+        this.masteryService = masteryService;
         this.embeddingClient = embeddingClient;
         this.indexClientProvider = indexClientProvider;
         this.objectMapper = objectMapper;
@@ -242,23 +245,27 @@ public class KnowledgeService {
         return new UploadSummary(entries.size(), inserted, skipped);
     }
 
-    /** 我的上传列表（仅本人私有条目） */
+    /** 我的上传列表（仅本人私有条目）：附带本人掌握度勾叉计数 */
     public List<OwnedKnowledge> listMine(Long userId) {
+        Map<Long, KnowledgeMasteryService.MasteryView> mastery = masteryService.summaryFor(userId);
         return repository.findByOwnerUserIdOrderById(userId).stream()
-                .map(this::toOwnedKnowledge)
+                .map(item -> toOwnedKnowledge(item, mastery))
                 .toList();
     }
 
-    /** 官方题库列表（owner 恒为 NULL，全局共享只读） */
-    public List<OwnedKnowledge> listOfficial() {
+    /** 官方题库列表（owner 恒为 NULL，全局共享只读）：附带调用者本人的掌握度勾叉计数 */
+    public List<OwnedKnowledge> listOfficial(Long userId) {
+        Map<Long, KnowledgeMasteryService.MasteryView> mastery = masteryService.summaryFor(userId);
         return repository.findByOwnerUserIdIsNullOrderById().stream()
-                .map(this::toOwnedKnowledge)
+                .map(item -> toOwnedKnowledge(item, mastery))
                 .toList();
     }
 
-    private OwnedKnowledge toOwnedKnowledge(KnowledgeItem item) {
+    private OwnedKnowledge toOwnedKnowledge(KnowledgeItem item, Map<Long, KnowledgeMasteryService.MasteryView> mastery) {
+        KnowledgeMasteryService.MasteryView view = mastery.get(item.getId());
         return new OwnedKnowledge(item.getId(), item.getQuestion(), item.getAnswer(),
-                item.getCategory(), item.getDifficulty() == null ? null : item.getDifficulty().label());
+                item.getCategory(), item.getDifficulty() == null ? null : item.getDifficulty().label(),
+                view == null ? 0 : view.checks(), view == null ? 0 : view.crosses());
     }
 
     /**
@@ -438,7 +445,8 @@ public class KnowledgeService {
     public record UploadSummary(int parsed, int inserted, int skipped) {
     }
 
-    public record OwnedKnowledge(Long id, String question, String answer, String category, String difficulty) {
+    public record OwnedKnowledge(Long id, String question, String answer, String category, String difficulty,
+                                 int checks, int crosses) {
     }
 
     public record CategoriesView(List<String> official, List<String> custom) {

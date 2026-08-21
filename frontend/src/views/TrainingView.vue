@@ -14,6 +14,8 @@ import {
   trainingSession,
   startTrainingSession,
   submitTrainingAnswer,
+  submitTrainingMastered,
+  submitTrainingDontknow,
   restoreTrainingSession,
   clearTrainingSession,
   TRAINING_SESSION_KEY
@@ -445,9 +447,29 @@ function scrollDown() {
           :disabled="sending || status?.finished"
           @keydown.enter="onEnterSend"
         ></textarea>
-        <button :disabled="sending || !answer.trim() || status?.finished" @click="submitAnswer">
-          {{ sending ? '评估中…' : '提交回答' }}
-        </button>
+        <div class="submit-actions">
+          <button
+            type="button"
+            class="ghost mastered-btn"
+            title="已掌握：本题直接 pass，不计分不入历史，后续出现概率降低"
+            :disabled="sending || status?.finished"
+            @click="submitTrainingMastered"
+          >
+            ✓ 已掌握
+          </button>
+          <button
+            type="button"
+            class="ghost dontknow-btn"
+            title="不知道：本题记 0 分并给出点评，后续出现频率增高"
+            :disabled="sending || status?.finished"
+            @click="submitTrainingDontknow"
+          >
+            ✗ 不知道
+          </button>
+          <button :disabled="sending || !answer.trim() || status?.finished" @click="submitAnswer">
+            {{ sending ? '评估中…' : '提交回答' }}
+          </button>
+        </div>
       </div>
       <p v-if="error" class="error-text">{{ error }}</p>
     </template>
@@ -877,6 +899,40 @@ function scrollDown() {
 .answer-input {
   flex: 1;
   resize: none;
+}
+
+.submit-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: stretch;
+}
+
+.mastered-btn,
+.dontknow-btn {
+  white-space: nowrap;
+}
+
+.mastered-btn {
+  color: #2e7d32;
+}
+
+.dontknow-btn {
+  color: #c62828;
+}
+
+.mastered-btn:disabled,
+.dontknow-btn:disabled {
+  background: transparent;
+  color: #c3c9d4;
+}
+
+.mastered-btn:hover:not(:disabled) {
+  color: #1b5e20;
+}
+
+.dontknow-btn:hover:not(:disabled) {
+  color: #8e0000;
 }
 
 .summary-card {

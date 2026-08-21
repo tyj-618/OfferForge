@@ -355,9 +355,24 @@ export function trainingAnswerStream(sessionId, message, callbacks) {
   return sseRequest(`/api/training/${sessionId}/answer`, { message }, callbacks)
 }
 
-// 跳过当前题：无请求体，SSE 契约与 ask 一致（计 0 分后推进状态机）
-export function skipStream(sessionId, callbacks) {
-  return sseRequest(`/api/interview/${sessionId}/skip`, null, callbacks)
+// 专项训练「已掌握」：绿勾标记后出下一题，不计分不入历史，SSE 契约与 answer 一致
+export function trainingMasteredStream(sessionId, callbacks) {
+  return sseRequest(`/api/training/${sessionId}/mastered`, null, callbacks)
+}
+
+// 专项训练「不知道」：等价作答「不知道」走完整评估反馈（强制 0 分）+ 红叉，SSE 契约与 answer 一致
+export function trainingDontknowStream(sessionId, callbacks) {
+  return sseRequest(`/api/training/${sessionId}/dontknow`, null, callbacks)
+}
+
+// 面试「已掌握」（仅训练模式）：绿勾标记后出下一题，不计分不入历史，SSE 契约与 ask 一致
+export function masteredStream(sessionId, callbacks) {
+  return sseRequest(`/api/interview/${sessionId}/mastered`, null, callbacks)
+}
+
+// 面试「不知道」（仅训练模式）：等价作答「不知道」走完整评估反馈（强制 0 分）+ 红叉，SSE 契约与 ask 一致
+export function dontknowStream(sessionId, callbacks) {
+  return sseRequest(`/api/interview/${sessionId}/dontknow`, null, callbacks)
 }
 
 // 训练模式“深度训练”：丢弃暂存追问进入深度训练子流程，SSE 契约与 ask 一致

@@ -3,7 +3,7 @@
 // 刷新页面时按后端 status.history 完整回放历史对话；若刷新时有回合在服务端进行中，
 // 轮询至回合完成后重建，实现「刷新后继续未完成的对话」。
 import { reactive } from 'vue'
-import { trainingApi, trainingAnswerStream } from '../api'
+import { trainingApi, trainingAnswerStream, trainingMasteredStream, trainingDontknowStream } from '../api'
 import { classifyError } from '../utils/errors'
 import { toast } from '../toast'
 
@@ -42,17 +42,38 @@ export function submitTrainingAnswer(text) {
   if (!trimmed || trainingSession.sending || !trainingSession.sessionId || trainingSession.status?.finished) {
     return
   }
+  runTurn((callbacks) => trainingAnswerStream(trainingSession.sessionId, trimmed, callbacks), trimmed, '正在评估你的回答…')
+}
+
+/** 「已掌握」：绿勾标记后本题直接 pass（不计分不入历史），SSE 返回下一题教练话术 */
+export function submitTrainingMastered() {
+  if (trainingSession.sending || !trainingSession.sessionId || trainingSession.status?.finished) {
+    return
+  }
+  runTurn((callbacks) => trainingMasteredStream(trainingSession.sessionId, callbacks), '✓ 已掌握，继续下一题', '正在准备下一题…')
+}
+
+/** 「不知道」：等价作答「不知道」走完整评估反馈（强制 0 分）+ 红叉 */
+export function submitTrainingDontknow() {
+  if (trainingSession.sending || !trainingSession.sessionId || trainingSession.status?.finished) {
+    return
+  }
+  runTurn((callbacks) => trainingDontknowStream(trainingSession.sessionId, callbacks), '不知道', '正在评估你的回答…')
+}
+
+/** SSE 回合公共骨架：推用户气泡 + 占位助手气泡，逐帧渲染，done 帧结算评分与进度 */
+function runTurn(request, userText, initialThinkingText) {
   trainingSession.sending = true
   trainingSession.error = ''
-  trainingSession.messages.push({ role: 'user', content: trimmed })
+  trainingSession.messages.push({ role: 'user', content: userText })
   const assistantMessage = { role: 'assistant', content: '' }
   trainingSession.messages.push(assistantMessage)
   // 取数组代理对象而非原始对象，保证后续属性写入能触发视图更新
   const firstBubble = trainingSession.messages[trainingSession.messages.length - 1]
   // 当前承接流式内容的气泡：segment 帧后重指向新气泡
   let currentBubble = firstBubble
-  trainingSession.thinkingText = '正在评估你的回答…'
-  trainingAnswerStream(trainingSession.sessionId, trimmed, {
+  trainingSession.thinkingText = initialThinkingText
+  request({
     onMessage: (chunk) => {
       trainingSession.thinkingText = ''
       currentBubble.content += chunk
@@ -82,6 +103,17 @@ export function submitTrainingAnswer(text) {
 }
 
 function attachScore(result) {
+  if (result.score == null) {
+    // 「已掌握」回合无评分：在用户标记气泡上挂绿勾标记，不展示得分徽章
+    for (let i = trainingSession.messages.length - 1; i >= 0; i--) {
+      const item = trainingSession.messages[i]
+      if (item.role === 'user') {
+        item.masteredMark = true
+        break
+      }
+    }
+    return
+  }
   // 得分徽章挂在最近一个有内容的气泡上（导师点评气泡），附带详细评估供「具体分析」展开
   for (let i = trainingSession.messages.length - 1; i >= 0; i--) {
     const item = trainingSession.messages[i]

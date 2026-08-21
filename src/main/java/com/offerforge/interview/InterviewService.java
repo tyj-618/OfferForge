@@ -11,6 +11,7 @@ import com.offerforge.common.ErrorCode;
 import com.offerforge.exception.BusinessException;
 import com.offerforge.exception.QuotaExceededException;
 import com.offerforge.knowledge.Difficulty;
+import com.offerforge.knowledge.KnowledgeMasteryService;
 import com.offerforge.quota.QuotaService;
 import com.offerforge.resume.ResumeService;
 import com.offerforge.training.TrainingSessionStore;
@@ -63,6 +64,7 @@ public class InterviewService {
     private final QuotaService quotaService;
     private final LlmCredentialResolver credentialResolver;
     private final TrainingSessionStore trainingSessionStore;
+    private final KnowledgeMasteryService masteryService;
     /** 会话级互斥锁条目（锁对象 + 最近使用时间），中途放弃的会话靠惰性清理避免无界增长 */
     private final Map<String, LockEntry> sessionLocks = new ConcurrentHashMap<>();
     private final AtomicLong lockAcquisitions = new AtomicLong();
@@ -84,7 +86,8 @@ public class InterviewService {
                             ApiKeyService apiKeyService,
                             QuotaService quotaService,
                             LlmCredentialResolver credentialResolver,
-                            TrainingSessionStore trainingSessionStore) {
+                            TrainingSessionStore trainingSessionStore,
+                            KnowledgeMasteryService masteryService) {
         this.sessionStore = sessionStore;
         this.messageStore = messageStore;
         this.questionBank = questionBank;
@@ -100,6 +103,7 @@ public class InterviewService {
         this.quotaService = quotaService;
         this.credentialResolver = credentialResolver;
         this.trainingSessionStore = trainingSessionStore;
+        this.masteryService = masteryService;
     }
 
     public InterviewStartResponse start(Long userId, String position) {
@@ -186,38 +190,7 @@ public class InterviewService {
                 LlmCallContext.bind(credentialResolver.resolveFor(userId));
                 LlmCallContext.setUsageListener(context::addTokenUsage);
                 try {
-                    if (context.getState().terminal()) {
-                        throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，请勿继续作答");
-                    }
-                    log.info("interview answer received sessionId={} phase={} length={} preview={}",
-                            sessionId, context.getState(), userMessage.length(), preview(userMessage));
-                    messageStore.append(sessionId, List.of(ChatMessage.user(userMessage)));
-                    // 回合开始即标记评估中并落库：刷新恢复的前端凭此轮询等待未完成回合
-                    context.setEvaluating(true);
-                    sessionStore.save(context);
-
-                    InterviewTurnResult result;
-                    if (context.getState() == InterviewState.DEEP_TRAINING) {
-                        // 深度训练子流程：递进题评估 + 达标/上限判定，不走主状态机
-                        result = answerDeepTraining(context, sessionId, userMessage, sink);
-                    } else if (context.getState() == InterviewState.OPENING) {
-                        // 开场首次作答（自我介绍）不评分：信息不全时主动补充提问，充分后进入基础考察
-                        result = handleOpeningAnswer(context, sessionId, userMessage, sink);
-                    } else if (context.getState() == InterviewState.CLOSING) {
-                        finish(context, sessionId);
-                        context.setEvaluating(false);
-                        result = new InterviewTurnResult(null, null, StateTransitionStrategy.Action.FINISH, statusView(context));
-                    } else {
-                        result = evaluateAndTransition(context, sessionId, userMessage, sink);
-                    }
-                    context.setEvaluating(false);
-                    sessionStore.save(context);
-                    return result;
-                } catch (IOException | RuntimeException exception) {
-                    // 回合中途失败：复位评估标记，避免刷新恢复时永久卡在轮询
-                    context.setEvaluating(false);
-                    sessionStore.save(context);
-                    throw exception;
+                    return answerInternal(context, sessionId, userMessage, false, sink);
                 } finally {
                     LlmCallContext.clear();
                 }
@@ -225,6 +198,48 @@ public class InterviewService {
         } finally {
             releaseLockIfTerminal(sessionId, lock);
         }
+    }
+
+    /**
+     * 作答回合公共骨架：终态校验 → 记录消息 → evaluating 标记 → 按阶段分发。
+     * forceZeroScore=true（「不知道」）时综合分强制 0 且跳过掌握度联动（红叉已预先记录）。
+     */
+    private InterviewTurnResult answerInternal(InterviewContext context, String sessionId, String userMessage,
+                                               boolean forceZeroScore, InterviewStreamSink sink) throws IOException {
+        if (context.getState().terminal()) {
+            throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，请勿继续作答");
+        }
+        log.info("interview answer received sessionId={} phase={} length={} preview={}",
+                sessionId, context.getState(), userMessage.length(), preview(userMessage));
+        messageStore.append(sessionId, List.of(ChatMessage.user(userMessage)));
+        // 回合开始即标记评估中并落库：刷新恢复的前端凭此轮询等待未完成回合
+        context.setEvaluating(true);
+        sessionStore.save(context);
+
+        InterviewTurnResult result;
+        try {
+            if (context.getState() == InterviewState.DEEP_TRAINING) {
+                // 深度训练子流程：递进题评估 + 达标/上限判定，不走主状态机
+                result = answerDeepTraining(context, sessionId, userMessage, sink);
+            } else if (context.getState() == InterviewState.OPENING) {
+                // 开场首次作答（自我介绍）不评分：信息不全时主动补充提问，充分后进入基础考察
+                result = handleOpeningAnswer(context, sessionId, userMessage, sink);
+            } else if (context.getState() == InterviewState.CLOSING) {
+                finish(context, sessionId);
+                context.setEvaluating(false);
+                result = new InterviewTurnResult(null, null, StateTransitionStrategy.Action.FINISH, statusView(context));
+            } else {
+                result = evaluateAndTransition(context, sessionId, userMessage, forceZeroScore, sink);
+            }
+        } catch (IOException | RuntimeException exception) {
+            // 回合中途失败：复位评估标记，避免刷新恢复时永久卡在轮询
+            context.setEvaluating(false);
+            sessionStore.save(context);
+            throw exception;
+        }
+        context.setEvaluating(false);
+        sessionStore.save(context);
+        return result;
     }
 
     /**
@@ -266,11 +281,11 @@ public class InterviewService {
     }
 
     /**
-     * 跳过当前题：定性为「未能作答」（与答错同等对待，计 0 分并纳入平均分，防止靠跳过规避难题），
-     * 然后推进到下一题或下一阶段。仅训练模式的出题阶段（BASICS/PROJECT/DEEP）可用；
-     * 实战模式不提供跳过，开场/收尾阶段无需跳过。
+     * 标记当前题「已掌握」（绿勾）：题目直接 pass——不计分、不入作答历史、不计阶段题数，
+     * 仅登记防重复清单；对应资料问答加绿勾（仅题库题可记录）；随后流式出下一题或推进。
+     * 仅训练模式出题阶段可用（替代旧「跳过此题」）。
      */
-    public InterviewTurnResult skip(Long userId, String sessionId, InterviewStreamSink sink)
+    public InterviewTurnResult markMastered(Long userId, String sessionId, InterviewStreamSink sink)
             throws IOException {
         Object lock = lockFor(sessionId);
         try {
@@ -279,39 +294,21 @@ public class InterviewService {
                 LlmCallContext.bind(credentialResolver.resolveFor(userId));
                 LlmCallContext.setUsageListener(context::addTokenUsage);
                 try {
-                    if (context.getState().terminal()) {
-                        throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，无需跳过");
-                    }
+                    requireMarkablePhase(context);
                     InterviewState phase = context.getState();
-                    if (phase == InterviewState.OPENING || phase == InterviewState.CLOSING) {
-                        throw new BusinessException(ErrorCode.CONFLICT, "当前环节无需跳题，直接回复即可");
-                    }
-                    if (phase == InterviewState.DEEP_TRAINING) {
-                        throw new BusinessException(ErrorCode.CONFLICT, "深度训练中请作答当前题，可点击“退出深度训练”返回主面试");
-                    }
-                    if (!context.isTrainingMode()) {
-                        throw new BusinessException(ErrorCode.CONFLICT, "实战模式不提供跳过，请直接作答；确实不会可简要说明思路");
-                    }
-                    log.info("interview sessionId={} phase={} question skipped", sessionId, phase);
-                    messageStore.append(sessionId, List.of(ChatMessage.user("（未能作答，跳过本题）")));
+                    String question = context.getCurrentQuestion();
+                    log.info("interview sessionId={} phase={} question marked mastered", sessionId, phase);
+                    masteryService.resolveItemId(question, context.getUserId())
+                            .ifPresent(itemId -> masteryService.recordCheck(context.getUserId(), itemId));
+                    messageStore.append(sessionId, List.of(ChatMessage.user("（已掌握本题，继续下一题）")));
+                    context.recordPassedQuestion(question);
                     // 同作答回合：标记评估中，正常/异常路径均复位
                     context.setEvaluating(true);
                     sessionStore.save(context);
 
-                    // 视为未能作答：计 0 分并纳入平均分，连续低分连击照常累计（可能触发降难度）
-                    AnswerEvaluation skipped = new AnswerEvaluation(
-                            0, 0, 0, 0, 0, List.of(), List.of(), List.of(), "候选人未能作答该题（跳过）", null, null, null);
-                    context.recordAnswer(context.getCurrentQuestion(), "", skipped);
-                    updateScoreStreaks(context, 0);
-                    if (context.getConsecutiveLowScores() >= 2 && context.getCurrentDifficulty() != Difficulty.EASY) {
-                        context.setCurrentDifficulty(context.getCurrentDifficulty().lower());
-                        context.setConsecutiveLowScores(0);
-                        log.info("interview sessionId={} difficulty lowered to {}", sessionId, context.getCurrentDifficulty());
-                    }
-
                     StateTransitionStrategy.Action action;
                     if (context.questionsInPhase(phase) >= properties.maxQuestionsFor(phase)) {
-                        // 本阶段题量已满，跳过后直接进入下一阶段
+                        // 本阶段题量已满，直接进入下一阶段
                         action = StateTransitionStrategy.Action.ADVANCE;
                         advance(context, sessionId, sink);
                     } else {
@@ -320,8 +317,8 @@ public class InterviewService {
                     }
                     context.setEvaluating(false);
                     sessionStore.save(context);
-                    // 实战模式已在入口拒绝；训练模式明示计 0 分，避免误以为跳过不扣分
-                    return new InterviewTurnResult(0.0, "本题视为未能作答，计 0 分", action, statusView(context));
+                    // score 为 null：前端不展示得分徽章
+                    return new InterviewTurnResult(null, null, action, statusView(context));
                 } catch (IOException | RuntimeException exception) {
                     // 回合中途失败：复位评估标记，避免刷新恢复时永久卡在轮询
                     context.setEvaluating(false);
@@ -336,8 +333,55 @@ public class InterviewService {
         }
     }
 
+    /**
+     * 标记当前题「不知道」（红叉）：等价作答「不知道」走完整评估反馈流程（综合分强制 0），
+     * 对应资料问答加红叉，后续推进与正常作答一致。仅训练模式出题阶段可用。
+     */
+    public InterviewTurnResult markDontKnow(Long userId, String sessionId, InterviewStreamSink sink)
+            throws IOException {
+        Object lock = lockFor(sessionId);
+        try {
+            synchronized (lock) {
+                InterviewContext context = requireOwnedSession(userId, sessionId);
+                requireMarkablePhase(context);
+                InterviewState phase = context.getState();
+                log.info("interview sessionId={} phase={} question marked dont-know", sessionId, phase);
+                masteryService.resolveItemId(context.getCurrentQuestion(), context.getUserId())
+                        .ifPresent(itemId -> masteryService.recordCross(context.getUserId(), itemId));
+                LlmCallContext.bind(credentialResolver.resolveFor(userId));
+                LlmCallContext.setUsageListener(context::addTokenUsage);
+                try {
+                    // 复用作答主流程：红叉已预先记录，强制 0 分后联动跳过避免重复记录
+                    return answerInternal(context, sessionId, "不知道", true, sink);
+                } finally {
+                    LlmCallContext.clear();
+                }
+            }
+        } finally {
+            releaseLockIfTerminal(sessionId, lock);
+        }
+    }
+
+    /** mastered/dontknow 公共守卫：终态/开场/收尾/深度训练/非训练模式均拒绝 */
+    private void requireMarkablePhase(InterviewContext context) {
+        if (context.getState().terminal()) {
+            throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，无需此操作");
+        }
+        InterviewState phase = context.getState();
+        if (phase == InterviewState.OPENING || phase == InterviewState.CLOSING) {
+            throw new BusinessException(ErrorCode.CONFLICT, "当前环节无需此操作，直接回复即可");
+        }
+        if (phase == InterviewState.DEEP_TRAINING) {
+            throw new BusinessException(ErrorCode.CONFLICT, "深度训练中请作答当前题，可点击“退出深度训练”返回主面试");
+        }
+        if (!context.isTrainingMode()) {
+            throw new BusinessException(ErrorCode.CONFLICT, "实战模式不提供此操作，请直接作答");
+        }
+    }
+
     private InterviewTurnResult evaluateAndTransition(InterviewContext context, String sessionId,
-                                                      String userMessage, InterviewStreamSink sink)
+                                                      String userMessage, boolean forceZeroScore,
+                                                      InterviewStreamSink sink)
             throws IOException {
         InterviewState phase = context.getState();
         // SSE 体验：评估是 20~60s 的阻塞 LLM 调用，先下发状态帧，避免前端只见静态思考动画
@@ -346,9 +390,21 @@ public class InterviewService {
         AnswerEvaluation evaluation = evaluationService.evaluate(
                 context.getCurrentQuestion(), context.getCurrentKnowledgePoint(),
                 context.getCurrentCandidateAnswer(), userMessage, context.isTrainingMode());
+        if (forceZeroScore) {
+            // 「不知道」：仅综合分强制 0，点评/维度分照常展示
+            evaluation = new AnswerEvaluation(evaluation.accuracy(), evaluation.completeness(),
+                    evaluation.clarity(), evaluation.depth(), 0,
+                    evaluation.keyPoints(), evaluation.missedPoints(), evaluation.wrongPoints(),
+                    evaluation.feedback(), evaluation.goodPoints(), evaluation.badPoints(), evaluation.improvedAnswer());
+        }
         double overall = evaluation.overall();
         context.recordAnswer(context.getCurrentQuestion(), userMessage, evaluation);
         updateScoreStreaks(context, overall);
+
+        // 训练模式评分联动：>8 分加绿勾、<5 分加红叉；「不知道」已预记红叉不重复（forceZeroScore 跳过）
+        if (!forceZeroScore && context.isTrainingMode()) {
+            linkMastery(context, overall);
+        }
 
         // 难度调整：连续低分立即降档；连续高分在确认留阶段换题时才升档（见下方 NEW_QUESTION 分支）
         boolean canRaise = context.getConsecutiveHighScores() >= 2
@@ -362,7 +418,7 @@ public class InterviewService {
         CategoryStreak streak = categoryStreak(context, phase);
         boolean poolExhausted = questionBank.nextQuestion(phase, askedSet(context), context.getCurrentDifficulty(),
                         streak.category(), streak.count(), null,
-                        context.getUserId(), effectiveCategories(context, phase)).isEmpty()
+                        context.getUserId(), effectiveCategories(context, phase), masteryWeights(context)).isEmpty()
                 && context.getPreparedQuestions().isEmpty();
         StateTransitionStrategy.DecisionInput input = new StateTransitionStrategy.DecisionInput(
                 phase, overall, context.getCurrentFollowUpCount(), context.questionsInPhase(phase), poolExhausted, canRaise);
@@ -429,6 +485,21 @@ public class InterviewService {
             return new InterviewTurnResult(overall, evaluation.feedback(), action, statusView(context), evaluation);
         }
         return new InterviewTurnResult(null, null, action, statusView(context));
+    }
+
+    /**
+     * 训练模式评分联动掌握度：高于 8 分加绿勾，低于 5 分加红叉；
+     * 题库外题目（追问/项目题/深度训练题）resolveItemId 返回 empty 天然不记录。
+     */
+    private void linkMastery(InterviewContext context, double overall) {
+        masteryService.resolveItemId(context.getCurrentQuestion(), context.getUserId())
+                .ifPresent(itemId -> {
+                    if (overall > 8) {
+                        masteryService.recordCheck(context.getUserId(), itemId);
+                    } else if (overall < 5) {
+                        masteryService.recordCross(context.getUserId(), itemId);
+                    }
+                });
     }
 
     /**
@@ -878,7 +949,12 @@ public class InterviewService {
         CategoryStreak streak = categoryStreak(context, phase);
         return questionBank.nextQuestion(phase, askedSet(context), context.getCurrentDifficulty(),
                 streak.category(), streak.count(), null,
-                context.getUserId(), effectiveCategories(context, phase)).orElse(null);
+                context.getUserId(), effectiveCategories(context, phase), masteryWeights(context)).orElse(null);
+    }
+
+    /** 掌握度选题权重：训练模式传权重表（绿勾降权/红叉增权），实战模式传空表（保持原均匀随机逻辑） */
+    private Map<Long, Double> masteryWeights(InterviewContext context) {
+        return context.isTrainingMode() ? masteryService.weightsFor(context.getUserId()) : Map.of();
     }
 
     /** 生效分组：用户勾选非空时全量覆盖阶段默认（跨 BASICS/DEEP），否则按阶段默认；
@@ -1007,6 +1083,10 @@ public class InterviewService {
     private Set<String> askedSet(InterviewContext context) {
         Set<String> asked = new HashSet<>();
         context.getQuestionHistory().forEach(record -> asked.add(record.getQuestion()));
+        // 「已掌握」pass 的题不入 history，凭单独登记的清单防重复出题
+        if (context.getPassedQuestions() != null) {
+            asked.addAll(context.getPassedQuestions());
+        }
         if (context.getCurrentQuestion() != null) {
             asked.add(context.getCurrentQuestion());
         }

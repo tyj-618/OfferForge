@@ -79,6 +79,36 @@ public class TrainingController {
         return emitter;
     }
 
+    /**
+     * 标记当前题「已掌握」（绿勾，不计分不入历史）：事件结构与 answer 一致，
+     * message 事件为下一题教练话术，done 携带进度视图（score 为 null）。
+     */
+    @PostMapping(value = "/{sessionId}/mastered", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter mastered(@RequestHeader(value = "Authorization", required = false) String authorization,
+                               @PathVariable String sessionId) {
+        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
+        emitter.onTimeout(() -> safeComplete(emitter));
+        emitter.onError(throwable -> safeComplete(emitter));
+        interviewStreamExecutor.execute(() -> writeChoiceTurn(
+                emitter, authorization, sessionId, "mastered", trainingService::mastered));
+        return emitter;
+    }
+
+    /**
+     * 标记当前题「不知道」（红叉）：等价作答「不知道」走完整评估反馈流程（强制 0 分），
+     * 事件结构与 answer 一致。
+     */
+    @PostMapping(value = "/{sessionId}/dontknow", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter dontknow(@RequestHeader(value = "Authorization", required = false) String authorization,
+                               @PathVariable String sessionId) {
+        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
+        emitter.onTimeout(() -> safeComplete(emitter));
+        emitter.onError(throwable -> safeComplete(emitter));
+        interviewStreamExecutor.execute(() -> writeChoiceTurn(
+                emitter, authorization, sessionId, "dontknow", trainingService::dontknow));
+        return emitter;
+    }
+
     @GetMapping("/{sessionId}/status")
     public ApiResponse<TrainingStatusResponse> status(
             @RequestHeader(value = "Authorization", required = false) String authorization,
@@ -149,6 +179,36 @@ public class TrainingController {
         } finally {
             MDC.remove(SESSION_ID_KEY);
         }
+    }
+
+    /**
+     * 无请求体的流式回合统一模板（mastered / dontknow）：鉴权后委托服务层执行，
+     * 业务/IO/运行时异常均以 error 事件收尾，避免连接悬挂到超时。
+     */
+    private void writeChoiceTurn(SseEmitter emitter, String authorization, String sessionId, String turnName,
+                                 ChoiceTurnAction action) {
+        MDC.put(SESSION_ID_KEY, sessionId);
+        try {
+            Long userId = currentUserService.requireUserId(authorization);
+            TrainingTurnResult result = action.execute(userId, sessionId, sseSink(emitter));
+            emitter.send(SseEmitter.event().name("done").data(result));
+            emitter.complete();
+        } catch (BusinessException exception) {
+            completeWithReadableError(emitter, exception.errorCode().code(), exception.getMessage());
+        } catch (IOException exception) {
+            completeWithReadableError(emitter, ErrorCode.INTERNAL_ERROR.code(), "训练对话流已中断，请稍后重试。");
+        } catch (Exception exception) {
+            log.error("training {} unexpected error sessionId={}", turnName, sessionId, exception);
+            completeWithReadableError(emitter, ErrorCode.INTERNAL_ERROR.code(), "系统内部错误，请稍后重试。");
+        } finally {
+            MDC.remove(SESSION_ID_KEY);
+        }
+    }
+
+    /** 选择类回合执行体：鉴权后的 userId + 会话 ID + 流式输出槽，返回本轮结果 */
+    @FunctionalInterface
+    private interface ChoiceTurnAction {
+        TrainingTurnResult execute(Long userId, String sessionId, InterviewStreamSink sink) throws IOException;
     }
 
     /**

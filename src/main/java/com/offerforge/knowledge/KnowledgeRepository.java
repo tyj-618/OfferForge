@@ -95,4 +95,11 @@ public interface KnowledgeRepository extends JpaRepository<KnowledgeItem, Long> 
             """)
     List<KnowledgeItem> searchVisibleByKeyword(@Param("keyword") String keyword,
                                                @Param("userId") Long userId, Pageable pageable);
+
+    /** 用户全部可见题 id（官方 + 本人私有）：掌握度周衰减时确定无标记题目集合 */
+    @Query("""
+            select k.id from KnowledgeItem k
+            where k.ownerUserId is null or k.ownerUserId = :userId
+            """)
+    List<Long> findVisibleItemIds(@Param("userId") Long userId);
 }

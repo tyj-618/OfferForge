@@ -51,19 +51,34 @@ public class InterviewQuestionBank {
 
     /**
      * 取指定阶段下一道未问过的题（候选集内随机选取）；题库耗尽返回 empty。
+     * 便利重载：不带掌握度权重（实战模式/历史调用，均匀随机）。
+     */
+    public Optional<InterviewQuestion> nextQuestion(InterviewState phase, Set<String> askedQuestions, Difficulty difficulty,
+                                                    String lastCategory, int categoryStreak,
+                                                    Map<String, Double> profileCategoryHints,
+                                                    Long userId, Collection<String> categories) {
+        return nextQuestion(phase, askedQuestions, difficulty, lastCategory, categoryStreak,
+                profileCategoryHints, userId, categories, Map.of());
+    }
+
+    /**
+     * 取指定阶段下一道未问过的题；题库耗尽返回 empty。
      *
      * @param lastCategory         上一题所属科目（可空）；非空时参与科目连续性策略
      * @param categoryStreak       该科目已连续问题数
      * @param profileCategoryHints 用户画像科目得分预留参数（任务 14 接入，当前版本不参与选题）
      * @param userId               当前用户：题库仅取官方 + 本人私有条目（任务 8 归属隔离）
      * @param categories           生效分组：用户勾选的分组非空时全量覆盖阶段默认分组
+     * @param masteryWeights       掌握度选题权重（itemId → 倍数）：空 Map 为均匀随机（实战模式）；
+     *                             权重 0（满 10 绿勾）的题直接剔除，红叉题按倍数增权
      */
     public Optional<InterviewQuestion> nextQuestion(InterviewState phase, Set<String> askedQuestions, Difficulty difficulty,
                                                     String lastCategory, int categoryStreak,
                                                     Map<String, Double> profileCategoryHints,
-                                                    Long userId, Collection<String> categories) {
+                                                    Long userId, Collection<String> categories,
+                                                    Map<Long, Double> masteryWeights) {
         if (phase == InterviewState.PROJECT) {
-            // 项目类问题不按难度筛选，知识点固定为项目经历
+            // 项目类问题不按难度筛选，知识点固定为项目经历（不属知识库，不参与掌握度加权）
             List<String> candidates = projectEntries.stream()
                     .map(ProjectEntry::question)
                     .filter(question -> !askedQuestions.contains(question))
@@ -74,11 +89,12 @@ public class InterviewQuestionBank {
         }
         List<KnowledgeItem> candidates = findByDifficulty(categories, difficulty, userId).stream()
                 .filter(item -> !askedQuestions.contains(item.getQuestion()))
+                .filter(item -> weightOf(item, masteryWeights) > 0)
                 .toList();
         if (candidates.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(toQuestion(pickWithContinuity(candidates, lastCategory, categoryStreak)));
+        return Optional.of(toQuestion(pickWithContinuity(candidates, lastCategory, categoryStreak, masteryWeights)));
     }
 
     /** 阶段默认分组：供服务层推导生效分组（用户勾选优先） */
@@ -89,26 +105,54 @@ public class InterviewQuestionBank {
     /**
      * 科目连续性选题：连问未达上限时优先同科目（同科目候选耗尽则回退全候选）；
      * 达上限后随机切换到其他科目（无其他科目候选时回退全候选），避免固定顺序与单科目霸屏。
+     * 候选集内按掌握度权重加权随机（空权重表退化为均匀随机）。
      */
-    private static KnowledgeItem pickWithContinuity(List<KnowledgeItem> candidates, String lastCategory, int categoryStreak) {
+    private static KnowledgeItem pickWithContinuity(List<KnowledgeItem> candidates, String lastCategory,
+                                                    int categoryStreak, Map<Long, Double> masteryWeights) {
         if (lastCategory != null && categoryStreak > 0) {
             if (categoryStreak < MAX_SAME_CATEGORY_STREAK) {
                 List<KnowledgeItem> sameCategory = candidates.stream()
                         .filter(item -> lastCategory.equals(item.getCategory()))
                         .toList();
                 if (!sameCategory.isEmpty()) {
-                    return pickRandom(sameCategory);
+                    return pickWeighted(sameCategory, masteryWeights);
                 }
             } else {
                 List<KnowledgeItem> otherCategory = candidates.stream()
                         .filter(item -> !lastCategory.equals(item.getCategory()))
                         .toList();
                 if (!otherCategory.isEmpty()) {
-                    return pickRandom(otherCategory);
+                    return pickWeighted(otherCategory, masteryWeights);
                 }
             }
         }
-        return pickRandom(candidates);
+        return pickWeighted(candidates, masteryWeights);
+    }
+
+    /** 掌握度加权随机：未标记题权重 1.0；红叉题按 1+x 增权，绿勾题按 (10-c)/10 降权 */
+    private static KnowledgeItem pickWeighted(List<KnowledgeItem> candidates, Map<Long, Double> masteryWeights) {
+        double total = 0;
+        for (KnowledgeItem item : candidates) {
+            total += weightOf(item, masteryWeights);
+        }
+        double roll = ThreadLocalRandom.current().nextDouble(total);
+        double accumulated = 0;
+        for (KnowledgeItem item : candidates) {
+            accumulated += weightOf(item, masteryWeights);
+            if (roll < accumulated) {
+                return item;
+            }
+        }
+        return candidates.get(candidates.size() - 1);
+    }
+
+    private static double weightOf(KnowledgeItem item, Map<Long, Double> masteryWeights) {
+        // id 可能为 null（未持久化对象），Map.of 等不可变 Map 对 null key 查询会抛 NPE
+        if (item.getId() == null) {
+            return 1.0;
+        }
+        Double weight = masteryWeights.get(item.getId());
+        return weight == null ? 1.0 : weight;
     }
 
     private static <T> T pickRandom(List<T> candidates) {

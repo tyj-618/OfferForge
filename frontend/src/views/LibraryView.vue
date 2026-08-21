@@ -417,6 +417,13 @@ onMounted(() => {
               <span class="badges">
                 <span class="badge">{{ item.category }}</span>
                 <span v-if="item.difficulty" class="badge outline">{{ item.difficulty }}</span>
+                <!-- 掌握度标记：绿勾越多出现概率越低，红叉越多出现频率越高（无标记不展示） -->
+                <span v-if="item.checks > 0" class="badge mastery-check" :title="`已掌握绿勾 ×${item.checks}，后续练习出现概率降低`">
+                  ✓{{ item.checks }}
+                </span>
+                <span v-if="item.crosses > 0" class="badge mastery-cross" :title="`需加强红叉 ×${item.crosses}，后续练习出现频率增高`">
+                  ✗{{ item.crosses }}
+                </span>
               </span>
               <span class="expand-icon">{{ expandedId === item.id ? '▲' : '▼' }}</span>
             </div>
@@ -671,6 +678,16 @@ onMounted(() => {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-light);
+}
+
+.badge.mastery-check {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.badge.mastery-cross {
+  background: #ffebee;
+  color: #c62828;
 }
 
 .expand-icon {

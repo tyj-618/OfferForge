@@ -121,13 +121,13 @@ class KnowledgeOwnershipTests {
 
     @Test
     void officialListExcludesPrivateItems() {
-        int officialCount = knowledgeService.listOfficial().size();
+        int officialCount = knowledgeService.listOfficial(USER_A).size();
         assertThat(officialCount).isPositive();
 
         knowledgeService.uploadKnowledge(USER_A, "a.md", MARKED_CONTENT, null);
 
         // 官方列表不含私有条目，且私有上传不改变官方条数
-        List<KnowledgeService.OwnedKnowledge> official = knowledgeService.listOfficial();
+        List<KnowledgeService.OwnedKnowledge> official = knowledgeService.listOfficial(USER_A);
         assertThat(official).hasSize(officialCount);
         assertThat(official).extracting(KnowledgeService.OwnedKnowledge::question)
                 .noneMatch(question -> question.contains("顺序消费"));
@@ -152,13 +152,13 @@ class KnowledgeOwnershipTests {
         assertThat(knowledgeService.listMine(USER_A)).hasSize(2);
 
         // 本人批量删除：混合他人/官方 id 也只删自己的
-        Long officialId = knowledgeService.listOfficial().get(0).id();
+        Long officialId = knowledgeService.listOfficial(USER_A).get(0).id();
         List<Long> mixed = new ArrayList<>(itemIds);
         mixed.add(officialId);
         mixed.add(999999L);
         assertThat(knowledgeService.batchDeleteOwned(USER_A, mixed)).isEqualTo(2);
         assertThat(knowledgeService.listMine(USER_A)).isEmpty();
-        assertThat(knowledgeService.listOfficial()).extracting(KnowledgeService.OwnedKnowledge::id)
+        assertThat(knowledgeService.listOfficial(USER_A)).extracting(KnowledgeService.OwnedKnowledge::id)
                 .contains(officialId);
 
         // 空列表安全
@@ -208,14 +208,14 @@ class KnowledgeOwnershipTests {
                         .isEqualTo(KnowledgeService.DEFAULT_CUSTOM_CATEGORY));
 
         // 本人批量迁移：混合官方/不存在 id 也只迁自己的，且支持新建标签
-        Long officialId = knowledgeService.listOfficial().get(0).id();
+        Long officialId = knowledgeService.listOfficial(USER_A).get(0).id();
         List<Long> mixed = new ArrayList<>(itemIds);
         mixed.add(officialId);
         mixed.add(999999L);
         assertThat(knowledgeService.batchMoveOwned(USER_A, mixed, "批量新标签")).isEqualTo(2);
         assertThat(knowledgeService.listMine(USER_A))
                 .allSatisfy(item -> assertThat(item.category()).isEqualTo("批量新标签"));
-        assertThat(knowledgeService.listOfficial()).extracting(KnowledgeService.OwnedKnowledge::id)
+        assertThat(knowledgeService.listOfficial(USER_A)).extracting(KnowledgeService.OwnedKnowledge::id)
                 .contains(officialId);
     }
 

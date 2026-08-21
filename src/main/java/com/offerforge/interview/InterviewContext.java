@@ -73,6 +73,8 @@ public class InterviewContext {
     private boolean deepQuestionsGenerated;
     /** 工作记忆：每道题（含追问）的提问内容、回答、评分快照 */
     private List<QuestionRecord> questionHistory = new ArrayList<>();
+    /** 「已掌握」pass 掉的题面：不计分不入 history，单独登记防重复出题（旧会话缺失为 null） */
+    private java.util.Set<String> passedQuestions;
     /** 本场面试累计 token 消耗（仅模型返回 usage 时累计，结束时写入日志） */
     private int inputTokens;
     private int outputTokens;
@@ -332,6 +334,25 @@ public class InterviewContext {
 
     public void setQuestionHistory(List<QuestionRecord> questionHistory) {
         this.questionHistory = questionHistory;
+    }
+
+    public java.util.Set<String> getPassedQuestions() {
+        return passedQuestions;
+    }
+
+    public void setPassedQuestions(java.util.Set<String> passedQuestions) {
+        this.passedQuestions = passedQuestions;
+    }
+
+    /** 登记一道「已掌握」pass 的题：下次选题时排除，防止未入 history 导致重复出题 */
+    public void recordPassedQuestion(String question) {
+        if (question == null) {
+            return;
+        }
+        if (passedQuestions == null) {
+            passedQuestions = new java.util.HashSet<>();
+        }
+        passedQuestions.add(question);
     }
 
     public long getCreatedAtEpochMillis() {

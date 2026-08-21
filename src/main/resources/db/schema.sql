@@ -111,3 +111,20 @@ CREATE TABLE IF NOT EXISTS api_key (
 
 -- 存量库升级（混合 API 模式新增 api_key 表）：
 -- CREATE TABLE IF NOT EXISTS api_key ( ... 同上定义 ... );
+
+-- 资料掌握度标记（绿勾/红叉）：同一题同一时刻只存一种标记，勾叉互相抵消，数量 1~10
+CREATE TABLE IF NOT EXISTS knowledge_mastery (
+    id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id           BIGINT      NOT NULL,
+    knowledge_item_id BIGINT      NOT NULL,
+    mark_type         VARCHAR(8)  NOT NULL,
+    mark_count        INT         NOT NULL,
+    updated_at        DATETIME(3) NOT NULL,
+    UNIQUE KEY uk_mastery_user_item (user_id, knowledge_item_id),
+    KEY idx_mastery_user (user_id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+
+-- 存量库升级（掌握度标记新增 knowledge_mastery 表）：
+-- CREATE TABLE IF NOT EXISTS knowledge_mastery ( ... 同上定义 ... );
