@@ -49,6 +49,11 @@ services:
       OFFERFORGE_QUOTA_ENABLED: ${OFFERFORGE_QUOTA_ENABLED:-true}
       OFFERFORGE_QUOTA_DAILY_LIMIT: ${OFFERFORGE_QUOTA_DAILY_LIMIT:-10}
       APIKEY_ENCRYPT_KEY: ${APIKEY_ENCRYPT_KEY:?请在 .env 中设置 APIKEY_ENCRYPT_KEY（32 字符）}
+      # 腾讯云 SES（邮箱验证码）：凭据必须在 .env 中配置，否则生产发信失败
+      TENCENT_SECRET_ID: ${TENCENT_SECRET_ID:-}
+      TENCENT_SECRET_KEY: ${TENCENT_SECRET_KEY:-}
+      TENCENT_SES_REGION: ${TENCENT_SES_REGION:-ap-hongkong}
+      TENCENT_SES_FROM_EMAIL: ${TENCENT_SES_FROM_EMAIL:-noreply@easyofferforge.com}
       TZ: Asia/Shanghai
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health >/dev/null 2>&1 || exit 1"]

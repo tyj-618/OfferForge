@@ -3,6 +3,8 @@ package com.offerforge.common;
 public enum ErrorCode {
     PARAM_ERROR(40000, "请求参数错误"),
     AUTH_FAILED(40001, "用户名或密码错误"),
+    EMAIL_CODE_INVALID(40002, "验证码错误或已过期"),
+    EMAIL_EXISTS(40902, "邮箱已被绑定"),
     USERNAME_EXISTS(40901, "用户名已存在"),
     UNAUTHORIZED(40100, "未登录或 token 无效"),
     FORBIDDEN(40300, "无权限"),

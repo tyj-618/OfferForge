@@ -146,6 +146,9 @@ function refreshTokenOnce() {
 export const authApi = {
   register: (username, password) => http.post('/auth/register', { username, password }),
   login: (username, password) => http.post('/auth/login', { username, password }),
+  // 邮箱验证码登录：发码（60 秒防刷）→ 验证码登录（邮箱不存在自动注册）
+  sendCode: (email) => http.post('/auth/send-code', { email }),
+  loginByCode: (email, code) => http.post('/auth/login-by-code', { email, code }),
   logout: () => http.post('/auth/logout', null),
   me: () => http.get('/auth/me')
 }

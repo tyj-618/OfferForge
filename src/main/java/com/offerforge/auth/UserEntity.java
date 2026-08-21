@@ -27,6 +27,10 @@ public class UserEntity {
     @Column(nullable = false, length = 64)
     private String nickname;
 
+    /** 绑定邮箱：唯一（一邮箱只能绑一用户）；存量用户名注册账号为 NULL */
+    @Column(unique = true, length = 128)
+    private String email;
+
     @Column(nullable = false)
     private Integer status = 0;
 
@@ -73,6 +77,14 @@ public class UserEntity {
 
     public void setNickname(String nickname) {
         this.nickname = nickname;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
     }
 
     public Integer getStatus() {

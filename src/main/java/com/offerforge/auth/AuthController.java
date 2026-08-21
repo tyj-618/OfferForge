@@ -1,6 +1,7 @@
 package com.offerforge.auth;
 
 import com.offerforge.common.ApiResponse;
+import com.offerforge.email.EmailService;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
@@ -22,12 +23,14 @@ public class AuthController {
     private final AuthService authService;
     private final AuthProperties authProperties;
     private final CurrentUserService currentUserService;
+    private final EmailService emailService;
 
     public AuthController(AuthService authService, AuthProperties authProperties,
-                          CurrentUserService currentUserService) {
+                          CurrentUserService currentUserService, EmailService emailService) {
         this.authService = authService;
         this.authProperties = authProperties;
         this.currentUserService = currentUserService;
+        this.emailService = emailService;
     }
 
     @PostMapping("/register")
@@ -38,6 +41,27 @@ public class AuthController {
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request, HttpServletResponse response) {
         LoginResponse loginResponse = authService.login(request);
+        writeRefreshCookie(response, loginResponse.refreshToken(), loginResponse.refreshExpiresIn());
+        return ApiResponse.success(loginResponse);
+    }
+
+    /**
+     * 发送邮箱验证码：格式校验 → 防刷检查（60 秒）→ 腾讯云 SES 发信；
+     * 错误超限锁定的邮箱同样拒绝发信，避免被当作邮件轰炸工具。
+     */
+    @PostMapping("/send-code")
+    public ApiResponse<Boolean> sendCode(@Valid @RequestBody SendCodeRequest request) {
+        emailService.sendVerificationCode(request.email());
+        return ApiResponse.success(true);
+    }
+
+    /**
+     * 邮箱验证码登录：校验验证码 → 邮箱未注册自动创建账号 → 签发会话（与密码登录一致）。
+     */
+    @PostMapping("/login-by-code")
+    public ApiResponse<LoginResponse> loginByCode(@Valid @RequestBody LoginByCodeRequest request,
+                                                  HttpServletResponse response) {
+        LoginResponse loginResponse = authService.loginByCode(request.email(), request.code());
         writeRefreshCookie(response, loginResponse.refreshToken(), loginResponse.refreshExpiresIn());
         return ApiResponse.success(loginResponse);
     }

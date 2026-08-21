@@ -1,10 +1,13 @@
 package com.offerforge.auth;
 
 import com.offerforge.common.ErrorCode;
+import com.offerforge.email.EmailService;
 import com.offerforge.exception.BusinessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+
+import java.util.UUID;
 
 @Service
 public class AuthService {
@@ -13,14 +16,16 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final TokenStore tokenStore;
     private final LoginRateLimiter loginRateLimiter;
+    private final EmailService emailService;
     private final String passwordTimingHash;
 
     public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder, TokenStore tokenStore,
-                       LoginRateLimiter loginRateLimiter) {
+                       LoginRateLimiter loginRateLimiter, EmailService emailService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.tokenStore = tokenStore;
         this.loginRateLimiter = loginRateLimiter;
+        this.emailService = emailService;
         this.passwordTimingHash = passwordEncoder.encode("offerforge-login-timing-only");
     }
 
@@ -76,6 +81,51 @@ public class AuthService {
         );
     }
 
+    /**
+     * 邮箱验证码登录：校验验证码 → 邮箱不存在则自动注册（一邮箱唯一绑定）→ 复用既有会话签发。
+     * 自动注册账号的密码为随机值（仅可验证码登录，不可密码登录）。
+     */
+    public LoginResponse loginByCode(String email, String code) {
+        if (!EmailService.isValidEmail(email)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "邮箱格式不正确");
+        }
+        if (!emailService.verifyCode(email, code)) {
+            throw new BusinessException(ErrorCode.EMAIL_CODE_INVALID);
+        }
+
+        UserEntity user = userRepository.findByEmail(email).orElseGet(() -> registerByEmail(email));
+
+        if (user.getStatus() != null && user.getStatus() != 0) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "用户已被禁用");
+        }
+
+        TokenSession session = tokenStore.createSession(user.getId());
+        UserSummary userSummary = new UserSummary(user.getId(), user.getUsername(), user.getNickname());
+
+        return new LoginResponse(
+                session.token(),
+                session.expiresIn(),
+                session.refreshToken(),
+                session.refreshExpiresIn(),
+                userSummary
+        );
+    }
+
+    /** 验证码自动注册：随机用户名 + 随机密码 + 绑定邮箱；并发撞邮箱时回读既有账号 */
+    private UserEntity registerByEmail(String email) {
+        UserEntity user = new UserEntity();
+        user.setUsername(generateEmailUsername());
+        user.setPassword(passwordEncoder.encode(UUID.randomUUID().toString()));
+        user.setNickname(generateDefaultNickname());
+        user.setEmail(email);
+        try {
+            return userRepository.save(user);
+        } catch (DataIntegrityViolationException exception) {
+            return userRepository.findByEmail(email)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.EMAIL_EXISTS));
+        }
+    }
+
     public void logout(String authorization, String refreshToken) {
         String token = tokenStore.resolveBearerToken(authorization).orElse(null);
         if (token != null) {
@@ -108,5 +158,10 @@ public class AuthService {
 
     private String generateDefaultNickname() {
         return "Candidate_" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    }
+
+    /** 邮箱注册用户的系统用户名：u_ + 12 位随机（不可登录，仅作账号标识） */
+    private String generateEmailUsername() {
+        return "u_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     }
 }

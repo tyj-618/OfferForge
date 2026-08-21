@@ -99,3 +99,12 @@ offerforge:
   encryption:
     # API Key 加密密钥：必须 32 字节 UTF-8（AES-256），生产环境必须替换默认值
     key: ${APIKEY_ENCRYPT_KEY:}
+
+# 腾讯云 SES 邮件推送（邮箱验证码）：凭据仅通过环境变量注入（禁止入库），
+# 生产（redis profile）必须配置 TENCENT_SECRET_ID/TENCENT_SECRET_KEY，否则发信失败
+tencent:
+  ses:
+    secret-id: ${TENCENT_SECRET_ID:}
+    secret-key: ${TENCENT_SECRET_KEY:}
+    region: ${TENCENT_SES_REGION:ap-hongkong}
+    from-email: ${TENCENT_SES_FROM_EMAIL:noreply@easyofferforge.com}

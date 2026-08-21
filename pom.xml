@@ -72,6 +72,13 @@
             <artifactId>spring-security-crypto</artifactId>
         </dependency>
 
+        <!-- 腾讯云 SES 邮件推送（邮箱验证码）：3.1.1000 未发布，采用最新正式版 -->
+        <dependency>
+            <groupId>com.tencentcloudapi</groupId>
+            <artifactId>tencentcloud-sdk-java-ses</artifactId>
+            <version>3.2.6</version>
+        </dependency>
+
         <dependency>
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>

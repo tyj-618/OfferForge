@@ -5,12 +5,18 @@ CREATE TABLE IF NOT EXISTS users (
     username    VARCHAR(64)  NOT NULL,
     password    VARCHAR(100) NOT NULL,
     nickname    VARCHAR(64)  NOT NULL,
+    email       VARCHAR(128) NULL,
     status      TINYINT      NOT NULL DEFAULT 0,
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_users_username (username)
+    UNIQUE KEY uk_users_username (username),
+    UNIQUE KEY uk_users_email (email)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci;
+
+-- 存量库升级（邮箱验证码登录：新增唯一邮箱列）：
+-- ALTER TABLE users ADD COLUMN email VARCHAR(128) NULL AFTER nickname;
+-- ALTER TABLE users ADD UNIQUE KEY uk_users_email (email);
 
 CREATE TABLE IF NOT EXISTS knowledge_item (
     id            BIGINT AUTO_INCREMENT PRIMARY KEY,
