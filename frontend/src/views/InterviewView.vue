@@ -114,13 +114,6 @@ const recommendedCategories = ref([])
 // 算法开关（任务 12）：开启后 DEEP 阶段按难度掺入算法分组题目
 const includeAlgorithm = ref(false)
 
-// 助手语气风格：strict 严肃专业 / friendly 和蔼可亲（缺省）
-const assistantStyle = ref('friendly')
-const STYLE_OPTIONS = [
-  { value: 'friendly', label: '😊 和蔼可亲', desc: '温柔有礼，高信息浓度' },
-  { value: 'strict', label: '🧊 严肃专业', desc: '效率优先，专注知识内容' }
-]
-
 async function loadCategories() {
   try {
     const view = await knowledgeApi.categories()
@@ -547,8 +540,7 @@ async function startInterview(selectedMode) {
   error.value = ''
   try {
     const data = await interviewApi.start(position.value.trim(), selectedResumeId.value || null, selectedMode,
-      selectedCategories.value.length ? selectedCategories.value : null, includeAlgorithm.value || null,
-      assistantStyle.value)
+      selectedCategories.value.length ? selectedCategories.value : null, includeAlgorithm.value || null)
     mode.value = selectedMode
     sessionStorage.setItem(MODE_KEY, selectedMode)
     sessionId.value = data.sessionId
@@ -945,15 +937,6 @@ function scrollDown() {
           <input v-model="includeAlgorithm" type="checkbox" :disabled="sending" />
           <span>包含算法手写编程题<span class="muted">（开启后深度环节按难度掺入高频算法题）</span></span>
         </label>
-        <!-- 助手语气风格：贯穿面试官出题/追问/导师点评全部话术 -->
-        <div class="style-row">
-          <span class="muted">助手风格：</span>
-          <label v-for="opt in STYLE_OPTIONS" :key="opt.value" class="style-chip" :class="{ active: assistantStyle === opt.value }">
-            <input v-model="assistantStyle" type="radio" name="assistant-style" :value="opt.value" :disabled="sending" />
-            <span class="style-name">{{ opt.label }}</span>
-            <span class="muted style-desc">{{ opt.desc }}</span>
-          </label>
-        </div>
       </div>
       <p v-if="error" class="error-text">{{ error }}</p>
     </div>
@@ -1345,46 +1328,6 @@ function scrollDown() {
   margin-top: 10px;
   font-size: 14px;
   cursor: pointer;
-}
-
-/* 助手风格选择：胶囊单选，选中态高亮 */
-.style-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 12px;
-  font-size: 14px;
-}
-
-.style-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid var(--border, #d9deeb);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.style-chip input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.style-chip.active {
-  border-color: var(--primary);
-  background: rgba(79, 110, 247, 0.08);
-}
-
-.style-name {
-  font-weight: 600;
-}
-
-.style-desc {
-  font-size: 12px;
 }
 
 .algorithm-toggle input {

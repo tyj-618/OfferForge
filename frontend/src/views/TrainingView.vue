@@ -70,13 +70,6 @@ const chatBox = ref(null)
 // 「具体分析」小窗：同一时刻最多展开一个，锚定在对应得分徽章旁
 const analysisOpenIndex = ref(null)
 
-// 助手语气风格：strict 严肃专业 / friendly 和蔼可亲（缺省；query 自动开局也用缺省值）
-const assistantStyle = ref('friendly')
-const STYLE_OPTIONS = [
-  { value: 'friendly', label: '😊 和蔼可亲', desc: '温和鼓励，高信息浓度' },
-  { value: 'strict', label: '🧊 严肃专业', desc: '效率优先，专注知识内容' }
-]
-
 // 分组两级选择：一级来源标签（官方题库/我的资料）→ 二级具体分组 → 确认后才开局
 const sourceTab = ref('official') // official | custom
 const selectedCategory = ref('')
@@ -238,7 +231,7 @@ async function startTraining(category) {
   localError.value = ''
   starting.value = true
   try {
-    await startTrainingSession(category, assistantStyle.value, fromInterview)
+    await startTrainingSession(category, fromInterview)
     phase.value = 'active'
     refreshQuota()
     scrollDown()
@@ -326,15 +319,6 @@ function scrollDown() {
       <div v-if="quotaInfo && !quotaInfo.hasKey" class="quota-hint muted">
         <template v-if="quotaInfo.remaining > 0">今日剩余免费额度：{{ quotaInfo.remaining }} 次（开始训练消耗 1 次）</template>
         <template v-else>今日免费额度已用完，可前往「设置」配置自己的 API Key 继续使用</template>
-      </div>
-      <!-- 助手语气风格：贯穿教练出题与导师点评话术 -->
-      <div class="style-row">
-        <span class="muted">助手风格：</span>
-        <label v-for="opt in STYLE_OPTIONS" :key="opt.value" class="style-chip" :class="{ active: assistantStyle === opt.value }">
-          <input v-model="assistantStyle" type="radio" name="training-style" :value="opt.value" :disabled="sending" />
-          <span class="style-name">{{ opt.label }}</span>
-          <span class="muted style-desc">{{ opt.desc }}</span>
-        </label>
       </div>
       <!-- 一级标签：题库来源（官方题库 / 我的资料） -->
       <div v-if="categoryOptions.length" class="source-tabs">
@@ -619,46 +603,6 @@ function scrollDown() {
 
 .quota-hint {
   margin: 10px 0;
-}
-
-/* 助手风格选择：胶囊单选，选中态高亮 */
-.style-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 12px;
-  font-size: 14px;
-}
-
-.style-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid var(--border, #d9deeb);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.style-chip input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.style-chip.active {
-  border-color: var(--primary);
-  background: rgba(79, 110, 247, 0.08);
-}
-
-.style-name {
-  font-weight: 600;
-}
-
-.style-desc {
-  font-size: 12px;
 }
 
 .category-grid {

@@ -178,9 +178,9 @@ export const qaApi = {
 export const interviewApi = {
   // categories：勾选的资料分组（可空）；非空时出题仅用这些分组
   // includeAlgorithm：开启后 DEEP 阶段掺入算法手写编程题（任务 12）
-  // style：助手语气风格（strict 严肃专业 / friendly 和蔼可亲，缺省 friendly）
-  start: (position, resumeId = null, mode = null, categories = null, includeAlgorithm = null, style = null) =>
-    http.post('/interview/start', { position, resumeId, mode, categories, includeAlgorithm, style }),
+  // 助手语气风格固定为后端缺省值 friendly（和蔼可亲），不再提供选择
+  start: (position, resumeId = null, mode = null, categories = null, includeAlgorithm = null) =>
+    http.post('/interview/start', { position, resumeId, mode, categories, includeAlgorithm }),
   status: (sessionId) => http.get(`/interview/${sessionId}/status`),
   // 暂存续考（任务 4）：取未结束的面试会话，无则返回 null
   activeSession: () => http.get('/interview/active-session'),
@@ -340,8 +340,8 @@ export function askStream(sessionId, message, callbacks) {
 
 // ---------- 专项训练（任务 7）：SSE 契约与面试 ask 一致 ----------
 export const trainingApi = {
-  // style：助手语气风格（strict/friendly，缺省 friendly）；fromInterview：面试「深入该模块」跳转豁免互斥
-  start: (category, style = null, fromInterview = false) => http.post('/training/start', { category, style, fromInterview }),
+  // fromInterview：面试「深入该模块」跳转豁免互斥；助手风格固定后端缺省 friendly
+  start: (category, fromInterview = false) => http.post('/training/start', { category, fromInterview }),
   status: (sessionId) => http.get(`/training/${sessionId}/status`),
   finish: (sessionId) => http.post(`/training/${sessionId}/finish`, null),
   // 训练历史分页（按完成时间倒序）：返回 Page 结构（content/totalElements/totalPages）

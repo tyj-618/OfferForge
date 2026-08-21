@@ -18,9 +18,9 @@ export const trainingSession = reactive({
   error: ''
 })
 
-/** 开始一场训练：成功后会话挂到模块级，后续切标签不影响；fromInterview：面试深入跳转豁免互斥 */
-export async function startTrainingSession(category, style, fromInterview = false) {
-  const data = await trainingApi.start(category, style, fromInterview)
+/** 开始一场训练：成功后会话挂到模块级，后续切标签不影响；fromInterview：面试深入跳转豁免互斥；助手风格固定后端缺省 friendly */
+export async function startTrainingSession(category, fromInterview = false) {
+  const data = await trainingApi.start(category, fromInterview)
   trainingSession.sessionId = data.sessionId
   trainingSession.status = data.status
   trainingSession.messages = [{ role: 'assistant', content: data.openingMessage }]
