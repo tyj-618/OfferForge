@@ -347,7 +347,7 @@ onMounted(() => {
           />
           全选当前筛选（{{ filteredItems.length }}）
         </label>
-        <span class="muted">已选 {{ selectedIds.length }} 条</span>
+        <span class="muted batch-count">已选 {{ selectedIds.length }} 条</span>
         <button
           type="button"
           class="ghost"
@@ -550,7 +550,7 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   padding: 10px 12px;
   margin-bottom: 12px;
   background: #fafbff;
@@ -564,6 +564,21 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
   cursor: pointer;
+}
+
+/* 已选计数紧跟全选，把右侧空间让给操作按钮 */
+.batch-count {
+  margin-right: auto;
+  white-space: nowrap;
+}
+
+/* 两个操作按钮等宽平整铺满整行剩余空间，窄屏换行后仍各占半行 */
+.batch-bar .ghost {
+  flex: 1 1 150px;
+  min-width: 130px;
+  padding: 7px 12px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .empty-tip {
