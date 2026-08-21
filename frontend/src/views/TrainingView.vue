@@ -8,6 +8,7 @@ import {
   quotaApi
 } from '../api'
 import { classifyError } from '../utils/errors'
+import { isMobileViewport } from '../utils/device'
 import { toast } from '../toast'
 import {
   trainingSession,
@@ -30,6 +31,10 @@ function renderMarkdown(content) {
 
 const route = useRoute()
 const router = useRouter()
+// 手机端不展示键盘快捷键提示，placeholder 简化
+const answerPlaceholder = isMobileViewport()
+  ? '输入你的回答…'
+  : '输入你的回答…（Enter 发送，Shift+Enter 换行）'
 // 任务 4：由模拟面试「深入该模块」跳转而来，训练结束后引导回面试页续考
 const fromInterview = route.query.from === 'interview'
 
@@ -413,7 +418,7 @@ function scrollDown() {
           v-model="answer"
           class="answer-input"
           rows="3"
-          placeholder="输入你的回答…（Enter 发送，Shift+Enter 换行）"
+          :placeholder="answerPlaceholder"
           :disabled="sending || status?.finished"
           @keydown.enter="onEnterSend"
         ></textarea>

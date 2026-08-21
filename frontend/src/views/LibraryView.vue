@@ -801,11 +801,31 @@ onMounted(() => {
     font-size: 13px;
   }
 
+  /* 已选计数右对齐，与全选标签两端对齐成整齐一行 */
+  .batch-count {
+    text-align: right;
+  }
+
+  /* 手机端按钮加白底描边与更高点击区，视觉上更像实体按钮 */
   .batch-bar .ghost {
     flex: 1 1 45%;
     min-width: 0;
-    padding: 8px 6px;
+    padding: 9px 6px;
     font-size: 13px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+  }
+
+  .batch-bar .ghost.danger-text {
+    color: var(--danger, #d4380d);
+  }
+
+  /* 全选勾选框加大，便于触摸 */
+  .select-all input {
+    width: 16px;
+    height: 16px;
   }
 
   /* 条目行：题面独占一行，标签与展开箭头落第二行，层次清晰 */

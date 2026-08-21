@@ -12,6 +12,7 @@ import {
   skipStream
 } from '../api'
 import { classifyError, notifyError } from '../utils/errors'
+import { isMobileViewport } from '../utils/device'
 import { toast } from '../toast'
 
 // 面试官话术含 Markdown（粗体/斜体/列表等），gfm + breaks；html 默认关闭，原始 HTML 会被转义
@@ -27,6 +28,10 @@ function renderMarkdown(content) {
 const router = useRouter()
 const SESSION_KEY = 'offerforge_session'
 const MODE_KEY = 'offerforge_session_mode'
+// 手机端不展示键盘快捷键提示，placeholder 简化
+const answerPlaceholder = isMobileViewport()
+  ? '输入你的回答…'
+  : '输入你的回答…（Enter 发送，Shift+Enter 换行）'
 
 const phase = ref('idle') // idle | mode-select | active | finishing
 const position = ref('')
@@ -810,7 +815,7 @@ function scrollDown() {
         <textarea
           v-model="answer"
           rows="2"
-          placeholder="输入你的回答…（Enter 发送，Shift+Enter 换行）"
+          :placeholder="answerPlaceholder"
           :disabled="sending"
           @keydown.enter="onEnterSend"
         ></textarea>
@@ -1672,14 +1677,23 @@ function scrollDown() {
     flex-basis: 100%;
   }
 
+  /* 开局卡片：岗位输入与开始面试按钮纵向铺开，避免窄屏挤压 */
+  .start-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* 状态悬浮钮移到右上方：底部留给作答区，软键盘弹起时也不会与发送按钮重叠 */
   .status-fab {
     display: flex;
     position: fixed;
-    right: 16px;
-    bottom: 110px;
+    top: 78px;
+    right: 12px;
     z-index: 50;
     align-items: center;
     gap: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
     box-shadow: 0 6px 18px rgba(31, 41, 55, 0.2);
   }
 }

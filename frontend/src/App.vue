@@ -61,7 +61,7 @@ async function logout() {
           {{ item.label }}
         </RouterLink>
       </nav>
-      <span v-if="displayUsername" class="user-chip">👤 {{ displayUsername }} |</span>
+      <span v-if="displayUsername" class="user-chip">👤 {{ displayUsername }}</span>
       <button class="ghost" @click="logout">退出登录</button>
     </header>
     <RouterView />
@@ -141,9 +141,12 @@ async function logout() {
     white-space: nowrap;
   }
 
-  /* 小屏空间有限：用户名让位给导航与退出按钮 */
+  /* 移动端保留账号名：收窄并超长截断，避免挤掉退出按钮 */
   .user-chip {
-    display: none;
+    max-width: 108px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 12px;
   }
 }
 </style>

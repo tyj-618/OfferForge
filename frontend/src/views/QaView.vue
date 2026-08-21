@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { knowledgeApi } from '../api'
 import { notifyError } from '../utils/errors'
+import { isMobileViewport } from '../utils/device'
 import {
   qaSession,
   restoreQaSession,
@@ -25,6 +26,10 @@ function renderMarkdown(content) {
 
 const question = ref('')
 const chatScroll = ref(null)
+// 手机端不展示键盘快捷键提示，placeholder 简化
+const askPlaceholder = isMobileViewport()
+  ? '例如：HashMap 的底层原理是什么？'
+  : '例如：HashMap 的底层原理是什么？（Enter 发送，Shift+Enter 换行）'
 
 // 知识库构成：官方题库 + 本人上传资料，快捷提问默认参考资源库全部资料作答
 const officialCount = ref(0)
@@ -158,7 +163,7 @@ function confirmClear() {
         <textarea
           v-model="question"
           rows="2"
-          placeholder="例如：HashMap 的底层原理是什么？（Enter 发送，Shift+Enter 换行）"
+          :placeholder="askPlaceholder"
           :disabled="qaSession.asking || overLimit"
           @keydown.enter="onEnterSend"
         ></textarea>
@@ -374,5 +379,57 @@ function confirmClear() {
   flex: 1;
   min-width: 0;
   resize: none;
+}
+
+/* 手机档：压缩页头与提示区，会话卡片整体收进一屏内可见 */
+@media (max-width: 767px) {
+  .page {
+    padding-bottom: 16px;
+  }
+
+  .page-title {
+    font-size: 18px;
+    margin-bottom: 10px;
+  }
+
+  .knowledge-card {
+    gap: 8px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+
+  .knowledge-hint {
+    font-size: 12px;
+  }
+
+  .clear-btn {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+
+  /* 移动端顶栏两行，预留更多高度；dvh 适配手机浏览器地址栏伸缩 */
+  .qa-card {
+    height: calc(100vh - 250px);
+    height: calc(100dvh - 250px);
+    min-height: 300px;
+    padding: 12px;
+  }
+
+  .bubble {
+    max-width: 92%;
+    padding: 8px 12px;
+    font-size: 13px;
+    border-radius: 10px;
+  }
+
+  .ask-row {
+    gap: 8px;
+    padding-top: 10px;
+  }
+
+  .ask-row button {
+    flex-shrink: 0;
+    padding: 9px 14px;
+  }
 }
 </style>
