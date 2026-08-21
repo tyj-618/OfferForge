@@ -56,6 +56,8 @@ public class InterviewContext {
     private int deepTrainingAsked;
     /** 深度训练：连续达标题数（≥ deepTrainingPassScore 累计，低分清零） */
     private int deepTrainingConsecutivePass;
+    /** 开场环节：自我介绍信息不全时的补充提问次数（上限 maxOpeningFollowUps，防无限追问） */
+    private int openingFollowUpCount;
     /** 连续高分（>=7）次数，用于难度提升判定 */
     private int consecutiveHighScores;
     /** 连续低分（<4）次数，用于难度降低判定 */
@@ -258,6 +260,14 @@ public class InterviewContext {
 
     public void setDeepTrainingConsecutivePass(int deepTrainingConsecutivePass) {
         this.deepTrainingConsecutivePass = deepTrainingConsecutivePass;
+    }
+
+    public int getOpeningFollowUpCount() {
+        return openingFollowUpCount;
+    }
+
+    public void setOpeningFollowUpCount(int openingFollowUpCount) {
+        this.openingFollowUpCount = openingFollowUpCount;
     }
 
     public int getConsecutiveHighScores() {

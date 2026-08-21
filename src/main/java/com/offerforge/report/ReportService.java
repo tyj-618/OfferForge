@@ -117,7 +117,7 @@ public class ReportService {
     }
 
     /**
-     * 进步曲线：最近 limit 次面试的综合分，按开始时间正序返回。
+     * 进步曲线：最近 limit 次面试的综合分（含模式标识），按开始时间正序返回。
      */
     public List<InterviewProgressPoint> progress(Long userId, int limit) {
         int capped = Math.max(1, Math.min(limit, MAX_PROGRESS_LIMIT));
@@ -126,7 +126,8 @@ public class ReportService {
                 .getContent();
         List<InterviewProgressPoint> points = new ArrayList<>(latest.stream()
                 .map(entity -> new InterviewProgressPoint(entity.getSessionId(),
-                        entity.getStartTime(), entity.getOverallScore()))
+                        entity.getStartTime(), entity.getOverallScore(),
+                        entity.getMode() == null || entity.getMode().isBlank() ? "practice" : entity.getMode()))
                 .toList());
         // 倒序查出后反转为时间正序，便于前端直接绘制趋势
         Collections.reverse(points);

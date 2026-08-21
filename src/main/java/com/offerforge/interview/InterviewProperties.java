@@ -23,6 +23,8 @@ public class InterviewProperties {
     private int deepTrainingPassScore = 6;
     /** 深度训练达标所需连续达标题数 */
     private int deepTrainingPassStreak = 2;
+    /** 开场环节：自我介绍信息不全时最多补充提问次数 */
+    private int maxOpeningFollowUps = 2;
 
     public int maxQuestionsFor(InterviewState state) {
         return switch (state) {
@@ -107,5 +109,13 @@ public class InterviewProperties {
 
     public void setDeepTrainingPassStreak(int deepTrainingPassStreak) {
         this.deepTrainingPassStreak = deepTrainingPassStreak;
+    }
+
+    public int getMaxOpeningFollowUps() {
+        return maxOpeningFollowUps;
+    }
+
+    public void setMaxOpeningFollowUps(int maxOpeningFollowUps) {
+        this.maxOpeningFollowUps = maxOpeningFollowUps;
     }
 }

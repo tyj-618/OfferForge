@@ -113,6 +113,16 @@ public class MockAiModelClient implements AiModelClient {
     }
 
     @Override
+    public String generateIntroFollowUp(String prompt) {
+        // 确定性约定：自我介绍含「信息不全」标记时返回补充提问，其余视为信息充分直接推进；
+        // 便于集成测试断言开场主动追问链路，不影响既有测试的默认推进行为
+        if (prompt.contains("自我介绍：信息不全")) {
+            return "你的自我介绍信息还不够，能补充一下你参与过的项目和熟悉的技术栈吗？";
+        }
+        return null;
+    }
+
+    @Override
     public ReportSummary generateReportSummary(String prompt) {
         // 确定性摘要：从逐题评估记录中提取最高/最低分题，生成可断言的文本总结
         List<String> questions = new ArrayList<>();

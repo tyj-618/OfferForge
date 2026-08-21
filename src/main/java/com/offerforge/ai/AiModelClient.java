@@ -67,6 +67,14 @@ public interface AiModelClient {
     String generateFollowUpQuestion(String prompt);
 
     /**
+     * 开场自我介绍信息完备性检查：信息充分时返回 null/空白，
+     * 不足时返回一条向候选人索取缺失信息的补充提问。
+     */
+    default String generateIntroFollowUp(String prompt) {
+        return null;
+    }
+
+    /**
      * 面试报告文本摘要：基于逐题评估记录生成亮点/薄弱点/改进建议文本。
      * 评分与统计始终由服务端计算，本方法只产出文字总结；解析失败时返回 null 由调用方兜底。
      */

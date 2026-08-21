@@ -71,7 +71,7 @@ button.ghost:hover {
   background: transparent;
 }
 
-input,
+input:not([type="checkbox"]):not([type="radio"]),
 textarea {
   font-size: 14px;
   border: 1px solid var(--border);
@@ -81,6 +81,16 @@ textarea {
   width: 100%;
   background: #fff;
   color: var(--text);
+}
+
+/* 勾选框/单选框不走文本输入框样式：避免 width:100% 撑满容器挤掉旁边的标签文字 */
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  flex-shrink: 0;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
 }
 
 input:focus,

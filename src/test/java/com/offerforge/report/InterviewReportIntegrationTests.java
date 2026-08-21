@@ -108,12 +108,14 @@ class InterviewReportIntegrationTests {
         assertThat(get("/api/report/history?mode=training", token).at("/data/totalElements").asInt()).isZero();
         assertCode(get("/api/report/history?mode=invalid", token), 40000);
 
-        // 进步曲线：最近 N 次，时间正序
+        // 进步曲线：最近 N 次，时间正序，随点携带模式供前端按模式分线绘制
         JsonNode progress = get("/api/report/progress?limit=10", token);
         assertCode(progress, 0);
         assertThat(progress.at("/data").size()).isEqualTo(2);
         assertThat(progress.at("/data/0/overallScore").asDouble()).isEqualTo(80.0);
         assertThat(progress.at("/data/1/overallScore").asDouble()).isEqualTo(80.0);
+        assertThat(progress.at("/data/0/mode").asText()).isEqualTo("practice");
+        assertThat(progress.at("/data/1/mode").asText()).isEqualTo("practice");
 
         // 归属校验：他人查询报告 → NOT_FOUND；未登录 → 未授权
         String tokenB = newUser();

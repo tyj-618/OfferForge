@@ -115,25 +115,27 @@ class ReportServiceTests {
 
     @Test
     void progressReversesDescQueryToChronologicalOrder() {
-        // 仓储按开始时间倒序返回，progress 需反转为时间正序供前端直接绘制
+        // 仓储按开始时间倒序返回，progress 需反转为时间正序供前端直接绘制；mode 随点携带供前端分线
         when(sessionRepository.findByUserIdOrderByStartTimeDesc(eq(1L), org.mockito.ArgumentMatchers.any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(
-                        session("s2", Instant.parse("2026-08-02T10:00:00Z"), 70.0),
-                        session("s1", Instant.parse("2026-08-01T10:00:00Z"), 60.0))));
+                        session("s2", Instant.parse("2026-08-02T10:00:00Z"), 70.0, "training"),
+                        session("s1", Instant.parse("2026-08-01T10:00:00Z"), 60.0, null))));
 
         List<InterviewProgressPoint> points = reportService.progress(1L, 10);
 
         assertThat(points).hasSize(2);
         assertThat(points.get(0).interviewId()).isEqualTo("s1");
         assertThat(points.get(0).overallScore()).isEqualTo(60.0);
+        assertThat(points.get(0).mode()).isEqualTo("practice");
         assertThat(points.get(1).interviewId()).isEqualTo("s2");
         assertThat(points.get(1).overallScore()).isEqualTo(70.0);
+        assertThat(points.get(1).mode()).isEqualTo("training");
     }
 
     @Test
     void progressCapsLimitToRequestedSize() {
         when(sessionRepository.findByUserIdOrderByStartTimeDesc(eq(1L), org.mockito.ArgumentMatchers.any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of(session("s1", Instant.parse("2026-08-02T10:00:00Z"), 80.0))));
+                .thenReturn(new PageImpl<>(List.of(session("s1", Instant.parse("2026-08-02T10:00:00Z"), 80.0, null))));
 
         List<InterviewProgressPoint> points = reportService.progress(1L, 1);
 
@@ -151,11 +153,12 @@ class ReportServiceTests {
         assertThat(reportService.progress(1L, 10)).isEmpty();
     }
 
-    private static InterviewSession session(String sessionId, Instant startTime, double overallScore) {
+    private static InterviewSession session(String sessionId, Instant startTime, double overallScore, String mode) {
         InterviewSession entity = new InterviewSession();
         entity.setSessionId(sessionId);
         entity.setStartTime(startTime);
         entity.setOverallScore(overallScore);
+        entity.setMode(mode);
         return entity;
     }
 

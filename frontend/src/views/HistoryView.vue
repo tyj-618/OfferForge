@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { reportApi, trainingApi } from '../api'
@@ -18,8 +18,13 @@ const trainingRecords = ref([])
 const trainingRecordsTotal = ref(0)
 const progressPoints = ref([])
 
-const trendEl = ref(null)
-let trendChart = null
+// 面试趋势按模式分线：训练/实战各一张小图并排展示，避免占用过多纵向空间
+const trainingTrendEl = ref(null)
+const practiceTrendEl = ref(null)
+let trainingTrendChart = null
+let practiceTrendChart = null
+const trainingPoints = computed(() => progressPoints.value.filter((point) => point.mode === 'training'))
+const practicePoints = computed(() => progressPoints.value.filter((point) => point.mode !== 'training'))
 
 function formatTime(value) {
   return value ? new Date(value).toLocaleString('zh-CN') : '—'
@@ -45,36 +50,41 @@ function difficultyLabel(value) {
 }
 
 function renderTrend() {
-  // 单点无法形成趋势线，由模板展示友好提示，不初始化图表
-  if (!trendEl.value || progressPoints.value.length < 2) {
+  // 注意：必须在 loading=false 之后调用，否则图表容器尚未渲染（v-else 分支）导致拿不到 DOM
+  renderModeTrend(trainingTrendEl.value, trainingPoints.value, '训练模式', '#4f6ef7', (chart) => { trainingTrendChart = chart })
+  renderModeTrend(practiceTrendEl.value, practicePoints.value, '实战模式', '#f59e0b', (chart) => { practiceTrendChart = chart })
+}
+
+function renderModeTrend(el, points, seriesName, color, setChart) {
+  if (!el || points.length < 2) {
     return
   }
-  if (!trendChart) {
-    trendChart = echarts.init(trendEl.value)
+  let chart = echarts.getInstanceByDom(el)
+  if (!chart) {
+    chart = echarts.init(el)
+    setChart(chart)
   }
-  trendChart.setOption({
-    grid: { left: 44, right: 20, top: 28, bottom: 30 },
+  chart.setOption({
+    grid: { left: 40, right: 16, top: 24, bottom: 26 },
     tooltip: { trigger: 'axis' },
     xAxis: {
       type: 'category',
-      data: progressPoints.value.map((point, index) => `第 ${index + 1} 次`),
+      data: points.map((point, index) => `第 ${index + 1} 次`),
       axisLabel: { color: '#6b7280' }
     },
     yAxis: { type: 'value', min: 0, max: 100, axisLabel: { color: '#6b7280' } },
     series: [
       {
-        name: '综合评分',
+        name: seriesName,
         type: 'line',
         smooth: true,
-        data: progressPoints.value.map((point) => point.overallScore),
-        itemStyle: { color: '#4f6ef7' },
+        data: points.map((point) => point.overallScore),
+        itemStyle: { color },
         areaStyle: { opacity: 0.12 }
       }
     ]
   })
 }
-
-onMounted(load)
 
 async function load() {
   loading.value = true
@@ -93,6 +103,8 @@ async function load() {
     trainingRecords.value = records.content || []
     trainingRecordsTotal.value = records.totalElements || 0
     progressPoints.value = progress || []
+    // 先结束 loading 让趋势容器进 DOM，再渲染图表（此前顺序错误导致图表不可见）
+    loading.value = false
     await nextTick()
     renderTrend()
   } catch (e) {
@@ -102,8 +114,20 @@ async function load() {
   }
 }
 
+function onResize() {
+  trainingTrendChart?.resize()
+  practiceTrendChart?.resize()
+}
+
+onMounted(() => {
+  load()
+  window.addEventListener('resize', onResize)
+})
+
 onBeforeUnmount(() => {
-  trendChart?.dispose()
+  window.removeEventListener('resize', onResize)
+  trainingTrendChart?.dispose()
+  practiceTrendChart?.dispose()
 })
 </script>
 
@@ -128,12 +152,20 @@ onBeforeUnmount(() => {
 
     <template v-else>
       <div class="card section">
-        <h2>评分趋势（最近 10 次）</h2>
-        <div v-if="progressPoints.length >= 2" ref="trendEl" class="trend"></div>
-        <p v-else-if="progressPoints.length === 1" class="empty">
-          已完成 1 次面试，再完成至少 1 次即可展示评分趋势
-        </p>
-        <p v-else class="empty">暂无面试记录，先去「模拟面试」完成一场吧</p>
+        <h2>面试趋势（最近 10 次，按模式分线）</h2>
+        <div v-if="progressPoints.length === 0" class="empty">暂无面试记录，先去「模拟面试」完成一场吧</div>
+        <div v-else class="trend-grid">
+          <div class="trend-panel">
+            <div class="trend-panel-title">训练模式</div>
+            <div v-if="trainingPoints.length >= 2" ref="trainingTrendEl" class="trend"></div>
+            <p v-else class="empty trend-empty">已完成 {{ trainingPoints.length }} 次，再完成至少 2 次即可展示趋势</p>
+          </div>
+          <div class="trend-panel">
+            <div class="trend-panel-title">实战模式</div>
+            <div v-if="practicePoints.length >= 2" ref="practiceTrendEl" class="trend"></div>
+            <p v-else class="empty trend-empty">已完成 {{ practicePoints.length }} 次，再完成至少 2 次即可展示趋势</p>
+          </div>
+        </div>
       </div>
 
       <div class="card section">
@@ -275,8 +307,41 @@ onBeforeUnmount(() => {
   text-decoration: underline;
 }
 
+.trend-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.trend-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+}
+
+.trend-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-light);
+  margin-bottom: 6px;
+}
+
 .trend {
-  height: 260px;
+  height: 220px;
+}
+
+.trend-empty {
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 720px) {
+  .trend-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .table-wrap {

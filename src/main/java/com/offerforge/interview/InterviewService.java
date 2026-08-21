@@ -201,10 +201,8 @@ public class InterviewService {
                         // 深度训练子流程：递进题评估 + 达标/上限判定，不走主状态机
                         result = answerDeepTraining(context, sessionId, userMessage, sink);
                     } else if (context.getState() == InterviewState.OPENING) {
-                        // 开场后的首次作答（自我介绍）不评分，直接进入基础考察
-                        advance(context, sessionId, sink);
-                        context.setEvaluating(false);
-                        result = new InterviewTurnResult(null, null, StateTransitionStrategy.Action.ADVANCE, statusView(context));
+                        // 开场首次作答（自我介绍）不评分：信息不全时主动补充提问，充分后进入基础考察
+                        result = handleOpeningAnswer(context, sessionId, userMessage, sink);
                     } else if (context.getState() == InterviewState.CLOSING) {
                         finish(context, sessionId);
                         context.setEvaluating(false);
@@ -268,8 +266,9 @@ public class InterviewService {
     }
 
     /**
-     * 跳过当前题：记 0 分（与答错同等对待，防止靠跳过规避难题），然后推进到下一题或下一阶段。
-     * 仅出题阶段（BASICS/PROJECT/DEEP）可用；开场/收尾阶段无需跳过。
+     * 跳过当前题：定性为「未能作答」（与答错同等对待，计 0 分并纳入平均分，防止靠跳过规避难题），
+     * 然后推进到下一题或下一阶段。仅训练模式的出题阶段（BASICS/PROJECT/DEEP）可用；
+     * 实战模式不提供跳过，开场/收尾阶段无需跳过。
      */
     public InterviewTurnResult skip(Long userId, String sessionId, InterviewStreamSink sink)
             throws IOException {
@@ -290,15 +289,18 @@ public class InterviewService {
                     if (phase == InterviewState.DEEP_TRAINING) {
                         throw new BusinessException(ErrorCode.CONFLICT, "深度训练中请作答当前题，可点击“退出深度训练”返回主面试");
                     }
+                    if (!context.isTrainingMode()) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "实战模式不提供跳过，请直接作答；确实不会可简要说明思路");
+                    }
                     log.info("interview sessionId={} phase={} question skipped", sessionId, phase);
-                    messageStore.append(sessionId, List.of(ChatMessage.user("（跳过此题）")));
+                    messageStore.append(sessionId, List.of(ChatMessage.user("（未能作答，跳过本题）")));
                     // 同作答回合：标记评估中，正常/异常路径均复位
                     context.setEvaluating(true);
                     sessionStore.save(context);
 
-                    // 记 0 分并纳入平均分，连续低分连击照常累计（可能触发降难度）
+                    // 视为未能作答：计 0 分并纳入平均分，连续低分连击照常累计（可能触发降难度）
                     AnswerEvaluation skipped = new AnswerEvaluation(
-                            0, 0, 0, 0, 0, List.of(), List.of(), List.of(), "候选人跳过了该题", null, null, null);
+                            0, 0, 0, 0, 0, List.of(), List.of(), List.of(), "候选人未能作答该题（跳过）", null, null, null);
                     context.recordAnswer(context.getCurrentQuestion(), "", skipped);
                     updateScoreStreaks(context, 0);
                     if (context.getConsecutiveLowScores() >= 2 && context.getCurrentDifficulty() != Difficulty.EASY) {
@@ -318,11 +320,8 @@ public class InterviewService {
                     }
                     context.setEvaluating(false);
                     sessionStore.save(context);
-                    // 实战模式过程免评分：不向前端暴露 0 分与计分明细，点评改中性
-                    if (context.isTrainingMode()) {
-                        return new InterviewTurnResult(0.0, "已跳过该题，计 0 分", action, statusView(context));
-                    }
-                    return new InterviewTurnResult(null, "已跳过该题", action, statusView(context));
+                    // 实战模式已在入口拒绝；训练模式明示计 0 分，避免误以为跳过不扣分
+                    return new InterviewTurnResult(0.0, "本题视为未能作答，计 0 分", action, statusView(context));
                 } catch (IOException | RuntimeException exception) {
                     // 回合中途失败：复位评估标记，避免刷新恢复时永久卡在轮询
                     context.setEvaluating(false);
@@ -795,10 +794,47 @@ public class InterviewService {
     }
 
     /**
-     * 简历摘要（仅实战模式注入）：懒构建并缓存到会话，失败降级为 null 不阻断面试。
+     * 开场环节作答处理：自我介绍信息充分直接推进；不足时主动向候选人索取缺失信息
+     * （补充提问次数上限 maxOpeningFollowUps，超限或检查失败均降级推进，不阻断面试）。
+     */
+    private InterviewTurnResult handleOpeningAnswer(InterviewContext context, String sessionId,
+                                                    String intro, InterviewStreamSink sink) throws IOException {
+        if (context.getOpeningFollowUpCount() < properties.getMaxOpeningFollowUps()) {
+            sink.progress("正在整理你的自我介绍…");
+            String followUp = null;
+            try {
+                followUp = aiModelClient.generateIntroFollowUp(promptBuilder.buildIntroCheckPrompt(
+                        intro, resumeSummaryShared(context), context.getPosition()));
+            } catch (RuntimeException exception) {
+                log.warn("intro completeness check failed sessionId={}", sessionId, exception);
+            }
+            if (followUp != null && !followUp.isBlank()) {
+                context.setOpeningFollowUpCount(context.getOpeningFollowUpCount() + 1);
+                log.info("interview sessionId={} intro follow-up {} requested preview={}",
+                        sessionId, context.getOpeningFollowUpCount(), preview(followUp));
+                messageStore.append(sessionId, List.of(ChatMessage.assistant(followUp)));
+                sink.chunk(followUp);
+                return new InterviewTurnResult(null, null, StateTransitionStrategy.Action.FOLLOW_UP, statusView(context));
+            }
+        }
+        advance(context, sessionId, sink);
+        context.setEvaluating(false);
+        return new InterviewTurnResult(null, null, StateTransitionStrategy.Action.ADVANCE, statusView(context));
+    }
+
+    /**
+     * 简历摘要（仅实战模式注入话术）：实际构建逻辑模式无关，见 {@link #resumeSummaryShared}。
      */
     private String resumeSummaryFor(InterviewContext context) {
-        if (context.isTrainingMode() || context.getResumeId() == null) {
+        return context.isTrainingMode() ? null : resumeSummaryShared(context);
+    }
+
+    /**
+     * 简历摘要（模式无关）：懒构建并缓存到会话，失败降级为 null 不阻断面试；
+     * 供面试官话术桥接与开场自我介绍完备性检查共用。
+     */
+    private String resumeSummaryShared(InterviewContext context) {
+        if (context.getResumeId() == null) {
             return null;
         }
         if (context.getResumeSummary() != null) {

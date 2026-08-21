@@ -284,6 +284,17 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
     }
 
     @Override
+    public String generateIntroFollowUp(String prompt) {
+        AiTextResult result = generateText(List.of(ChatMessage.user(prompt)));
+        String content = result.content() == null ? "" : result.content().trim();
+        // 提示词约定：信息充分时输出 NONE；其余输出（含模型不守约的啰嗦前缀）均视为补充提问
+        if (content.isEmpty() || "NONE".equalsIgnoreCase(content)) {
+            return null;
+        }
+        return content;
+    }
+
+    @Override
     public ReportSummary generateReportSummary(String prompt) {
         AiTextResult result = generateText(List.of(ChatMessage.user(prompt)));
         ReportSummary parsed = parseReportSummary(result.content());

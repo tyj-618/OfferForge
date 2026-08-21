@@ -19,7 +19,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * 跳过此题端到端测试（test profile：各阶段题量上限=1，跳过即推进阶段）。
- * 跳过计 0 分并纳入平均分；开场/收尾环节无题可跳，返回 40900。
+ * 跳过定性为「未能作答」：计 0 分并纳入平均分；仅训练模式可用，
+ * 实战模式不提供跳过；开场/收尾环节无题可跳，返回 40900。
  */
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -37,7 +38,8 @@ class SkipQuestionIntegrationTests {
     void skipRecordsZeroScoreAndAdvancesThroughPhases() throws Exception {
         String token = newUser();
         assertCode(post("/api/knowledge/import", token, Map.of()), 0);
-        String sessionId = post("/api/interview/start", token, Map.of()).at("/data/sessionId").asText();
+        // 跳过仅训练模式可用：显式以训练模式开局
+        String sessionId = post("/api/interview/start", token, Map.of("mode", "training")).at("/data/sessionId").asText();
 
         // 开场环节（自我介绍）无题可跳 → SSE error 40900
         assertThat(skip(sessionId, token)).contains("event:error").contains("40900");
@@ -46,9 +48,9 @@ class SkipQuestionIntegrationTests {
         assertThat(ask(sessionId, token, "我熟悉 Java 后端开发，做过电商项目。"))
                 .contains("\"action\":\"ADVANCE\"").contains("\"state\":\"BASICS\"");
 
-        // 逐题跳过：计 0 分并逐阶段推进（各阶段 1 题 → 跳过即 ADVANCE）
+        // 逐题跳过：视为未能作答计 0 分并逐阶段推进（各阶段 1 题 → 跳过即 ADVANCE）
         String skipBasics = skip(sessionId, token);
-        assertThat(skipBasics).contains("event:done").contains("已跳过该题")
+        assertThat(skipBasics).contains("event:done").contains("视为未能作答，计 0 分")
                 .contains("\"action\":\"ADVANCE\"").contains("\"state\":\"PROJECT\"");
         assertThat(skip(sessionId, token))
                 .contains("\"action\":\"ADVANCE\"").contains("\"state\":\"DEEP\"");
@@ -59,7 +61,7 @@ class SkipQuestionIntegrationTests {
         // 收尾环节无题可跳 → SSE error 40900
         assertThat(skip(sessionId, token)).contains("event:error").contains("40900");
 
-        // 结束面试：3 题全部跳过 → 各题 0 分，综合分 0
+        // 结束面试：3 题全部视为未能作答 → 各题 0 分，综合分 0
         JsonNode finish = post("/api/interview/" + sessionId + "/finish", token, Map.of());
         assertCode(finish, 0);
         assertThat(finish.at("/data/totalQuestions").asInt()).isEqualTo(3);
@@ -69,6 +71,20 @@ class SkipQuestionIntegrationTests {
         for (JsonNode evaluation : evaluations) {
             assertThat(evaluation.at("/score").asDouble()).isZero();
         }
+    }
+
+    @Test
+    void skipRejectedInPracticeMode() throws Exception {
+        String token = newUser();
+        assertCode(post("/api/knowledge/import", token, Map.of()), 0);
+        // 缺省开局即实战模式
+        String sessionId = post("/api/interview/start", token, Map.of()).at("/data/sessionId").asText();
+        assertThat(ask(sessionId, token, "我熟悉 Java 后端开发，做过电商项目。"))
+                .contains("\"state\":\"BASICS\"");
+
+        // 实战模式不提供跳过 → SSE error 40900，面试照常继续
+        assertThat(skip(sessionId, token))
+                .contains("event:error").contains("40900").contains("实战模式不提供跳过");
     }
 
     private String newUser() throws Exception {

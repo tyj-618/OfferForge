@@ -623,8 +623,10 @@ let pendingSegments = 0
 async function runStreamingTurn(request, retry) {
   sending.value = true
   thinking.value = true
-  const assistantMessage = { role: 'assistant', content: '' }
-  messages.value.push(assistantMessage)
+  // 必须持有 push 后返回的响应式代理：直接改原始对象不会触发重渲染，
+  // 打字机过程将全程不可见、回合结束才一次性涌出（「一口气输出」）
+  messages.value.push({ role: 'assistant', content: '' })
+  const assistantMessage = messages.value[messages.value.length - 1]
   activeStreamMessage = assistantMessage
   scrollDown()
   try {
@@ -712,9 +714,9 @@ function startNewBubble() {
   if (!activeStreamMessage || !activeStreamMessage.content) {
     return
   }
-  const next = { role: 'assistant', content: '' }
-  messages.value.push(next)
-  activeStreamMessage = next
+  messages.value.push({ role: 'assistant', content: '' })
+  // 同 runStreamingTurn：持有响应式代理，逐字追加才能实时渲染
+  activeStreamMessage = messages.value[messages.value.length - 1]
   thinking.value = true
   scrollDown()
 }
@@ -1105,9 +1107,10 @@ function scrollDown() {
         ></textarea>
         <div class="answer-actions">
           <button
+            v-if="mode === 'training'"
             type="button"
             class="ghost skip-btn"
-            :title="mode === 'training' ? '跳过当前题（本题计 0 分）' : '跳过当前题'"
+            title="跳过当前题：视为未能作答，本题计 0 分（实战模式不提供跳过）"
             :disabled="sending || !canSkip || deepTrainingActive"
             @click="skipQuestion"
           >
