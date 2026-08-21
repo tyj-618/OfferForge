@@ -102,6 +102,12 @@ class InterviewReportIntegrationTests {
         assertThat(history.at("/data/content/0/overallScore").asDouble()).isEqualTo(80.0);
         assertThat(history.at("/data/content/0/status").asText()).isEqualTo("FINISHED");
 
+        // 模式划分：未传 mode 默认实战归档；mode=practice 命中、mode=training 为空；非法 mode 拒绝
+        assertThat(history.at("/data/content/0/mode").asText()).isEqualTo("practice");
+        assertThat(get("/api/report/history?mode=practice", token).at("/data/totalElements").asInt()).isEqualTo(2);
+        assertThat(get("/api/report/history?mode=training", token).at("/data/totalElements").asInt()).isZero();
+        assertCode(get("/api/report/history?mode=invalid", token), 40000);
+
         // 进步曲线：最近 N 次，时间正序
         JsonNode progress = get("/api/report/progress?limit=10", token);
         assertCode(progress, 0);

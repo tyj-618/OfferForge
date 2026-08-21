@@ -1,5 +1,8 @@
 package com.offerforge.training;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.offerforge.ai.AiModelClient;
 import com.offerforge.ai.AnswerEvaluation;
 import com.offerforge.ai.ChatMessage;
@@ -21,6 +24,8 @@ import com.offerforge.knowledge.KnowledgeRepository;
 import com.offerforge.quota.QuotaService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -56,6 +61,7 @@ public class TrainingService {
     private final ApiKeyService apiKeyService;
     private final QuotaService quotaService;
     private final LlmCredentialResolver credentialResolver;
+    private final ObjectMapper objectMapper;
     /** 会话级互斥锁：训练会话量小，终态时移除条目即可 */
     private final Map<String, Object> sessionLocks = new ConcurrentHashMap<>();
 
@@ -72,7 +78,8 @@ public class TrainingService {
                            TrainingProperties properties,
                            ApiKeyService apiKeyService,
                            QuotaService quotaService,
-                           LlmCredentialResolver credentialResolver) {
+                           LlmCredentialResolver credentialResolver,
+                           ObjectMapper objectMapper) {
         this.sessionStore = sessionStore;
         this.interviewSessionStore = interviewSessionStore;
         this.messageStore = messageStore;
@@ -87,6 +94,7 @@ public class TrainingService {
         this.apiKeyService = apiKeyService;
         this.quotaService = quotaService;
         this.credentialResolver = credentialResolver;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -266,6 +274,51 @@ public class TrainingService {
                 .toList();
     }
 
+    /** 我的训练历史（分页）：按完成时间倒序 */
+    public Page<TrainingRecordView> records(Long userId, Pageable pageable) {
+        return recordRepository.findByUserIdOrderByFinishedAtDesc(userId, pageable)
+                .map(TrainingRecordView::from);
+    }
+
+    /**
+     * 训练报告详情：概要统计 + 逐题明细；仅本人可查（非本人/不存在抛 NOT_FOUND）。
+     * 旧归档无明细时 details 为空列表，前端降级为仅展示概要。
+     */
+    public TrainingReportView getRecordReport(Long userId, Long recordId) {
+        TrainingRecord record = recordRepository.findById(recordId)
+                .filter(entity -> entity.getUserId().equals(userId))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "训练记录不存在"));
+        long durationMinutes = (record.getFinishedAt().toEpochMilli() - record.getStartTime().toEpochMilli()) / 60_000L;
+        return new TrainingReportView(record.getId(), record.getCategory(), record.getStartTime(),
+                record.getFinishedAt(), Math.max(0, durationMinutes), record.getAskedCount(),
+                record.getAverageScore(), record.getMaxDifficulty(), rating(record.getAverageScore()),
+                parseDetails(record));
+    }
+
+    /** 评级：与面试报告一致的阈值（>=85 优秀 / >=70 良好 / >=60 及格 / 其余需努力） */
+    public String rating(double averageScore) {
+        if (averageScore >= 85) {
+            return "优秀";
+        }
+        if (averageScore >= 70) {
+            return "良好";
+        }
+        return averageScore >= 60 ? "及格" : "需努力";
+    }
+
+    private List<TrainingQuestionRecord> parseDetails(TrainingRecord record) {
+        if (record.getDetailsJson() == null || record.getDetailsJson().isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(record.getDetailsJson(),
+                    new TypeReference<List<TrainingQuestionRecord>>() {});
+        } catch (JsonProcessingException exception) {
+            log.error("training record details corrupted recordId={}", record.getId(), exception);
+            return List.of();
+        }
+    }
+
     /** 按当前难度从该分组取下一道未问题目；题库选题复用面试的可见性查询与连续性策略 */
     private java.util.Optional<InterviewQuestionBank.InterviewQuestion> nextQuestion(TrainingContext context) {
         return questionBank.nextQuestion(InterviewState.BASICS, context.askedQuestions(),
@@ -320,10 +373,21 @@ public class TrainingService {
                 ? Difficulty.EASY.name() : context.getMaxDifficultyReached().name());
         record.setStartTime(Instant.ofEpochMilli(context.getCreatedAtEpochMillis()));
         record.setFinishedAt(Instant.ofEpochMilli(context.getFinishedAtEpochMillis()));
+        record.setDetailsJson(serializeDetails(context.getQuestionHistory()));
         recordRepository.save(record);
         messageStore.clear(sessionId);
         log.info("training finished sessionId={} asked={} averageScore={} maxDifficulty={}",
                 sessionId, record.getAskedCount(), record.getAverageScore(), record.getMaxDifficulty());
+    }
+
+    /** 逐题明细序列化为 JSON 随归档落库；序列化失败不阻断归档（报告页降级为仅概要） */
+    private String serializeDetails(List<TrainingQuestionRecord> history) {
+        try {
+            return objectMapper.writeValueAsString(history);
+        } catch (JsonProcessingException exception) {
+            log.error("training record details serialization failed", exception);
+            return null;
+        }
     }
 
     /** 非 LLM 的固定话术：直接入消息库并推给前端 */

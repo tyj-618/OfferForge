@@ -341,7 +341,10 @@ export const trainingApi = {
   start: (category, style = null, fromInterview = false) => http.post('/training/start', { category, style, fromInterview }),
   status: (sessionId) => http.get(`/training/${sessionId}/status`),
   finish: (sessionId) => http.post(`/training/${sessionId}/finish`, null),
-  records: () => http.get('/training/records')
+  // 训练历史分页（按完成时间倒序）：返回 Page 结构（content/totalElements/totalPages）
+  records: (page = 0, size = 20) => http.get('/training/records', { params: { page, size } }),
+  // 训练报告详情：概要 + 逐题明细（查看/打印报告页数据源）
+  recordReport: (id) => http.get(`/training/records/${id}/report`)
 }
 
 // 专项训练作答：message/segment/progress/done/error 事件结构与面试一致
@@ -421,6 +424,8 @@ export const quotaApi = {
 // ---------- 报告 ----------
 export const reportApi = {
   get: (interviewId) => http.get(`/report/${interviewId}`),
-  history: (page = 0, size = 10) => http.get('/report/history', { params: { page, size } }),
+  // mode：training/practice 按模式过滤；缺省返回全部
+  history: (page = 0, size = 10, mode = null) =>
+    http.get('/report/history', { params: mode ? { page, size, mode } : { page, size } }),
   progress: (limit = 10) => http.get('/report/progress', { params: { limit } })
 }

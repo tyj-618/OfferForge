@@ -185,7 +185,7 @@ async function loadCategories() {
 
 async function loadRecords() {
   try {
-    records.value = (await trainingApi.records()).slice(0, 5)
+    records.value = (await trainingApi.records(0, 5)).content || []
   } catch {
     records.value = []
   }
@@ -349,11 +349,15 @@ function scrollDown() {
       <p v-if="error" class="error-text">{{ error }}</p>
 
       <div v-if="records.length" class="recent-records">
-        <h3>最近训练</h3>
+        <div class="recent-records-head">
+          <h3>最近训练</h3>
+          <button class="link-btn" @click="router.push('/history/trainings')">查看全部 →</button>
+        </div>
         <div v-for="record in records" :key="record.id" class="record-row">
           <span>{{ record.category }}</span>
           <span class="muted">{{ record.askedCount }} 题 · 最高难度 {{ difficultyLabel(record.maxDifficulty) }}</span>
           <span :class="['badge', scoreClass(record.averageScore / 10)]">{{ record.averageScore.toFixed(1) }} 分</span>
+          <button class="link-btn" @click="router.push(`/training-report/${record.id}`)">查看报告</button>
         </div>
       </div>
     </div>
@@ -698,6 +702,29 @@ function scrollDown() {
   margin-top: 22px;
   border-top: 1px solid var(--border, #e3e6ef);
   padding-top: 14px;
+}
+
+.recent-records-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.recent-records-head h3 {
+  margin-bottom: 8px;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--primary, #4f6ef7);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
 }
 
 .record-row {

@@ -34,6 +34,10 @@ public class InterviewSession {
     @Column(nullable = false, length = 64)
     private String position;
 
+    /** 面试模式：training 训练 / practice 实战（存量记录默认 practice） */
+    @Column(nullable = false, length = 16)
+    private String mode;
+
     @Column(name = "start_time", nullable = false)
     private Instant startTime;
 
@@ -82,6 +86,14 @@ public class InterviewSession {
 
     public void setPosition(String position) {
         this.position = position;
+    }
+
+    public String getMode() {
+        return mode;
+    }
+
+    public void setMode(String mode) {
+        this.mode = mode;
     }
 
     public Instant getStartTime() {

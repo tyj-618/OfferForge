@@ -75,6 +75,8 @@ public class ReportService {
         entity.setUserId(userId);
         entity.setSessionId(sessionId);
         entity.setPosition(report.getPosition());
+        // 归档面试模式（training/practice，context 已归一化），历史列表据此划分展示
+        entity.setMode(context.getMode());
         entity.setStartTime(report.getInterviewTime());
         entity.setEndTime(Instant.now());
         entity.setStatus(InterviewState.FINISHED.name());
@@ -94,12 +96,24 @@ public class ReportService {
     }
 
     /**
-     * 历史面试列表：按开始时间倒序分页。
+     * 历史面试列表：按开始时间倒序分页；mode 非空时仅返回该模式（training/practice）记录。
      */
+    public Page<InterviewHistoryItem> history(Long userId, String mode, Pageable pageable) {
+        Page<InterviewSession> page = mode == null || mode.isBlank()
+                ? sessionRepository.findByUserIdOrderByStartTimeDesc(userId, pageable)
+                : sessionRepository.findByUserIdAndModeOrderByStartTimeDesc(userId, mode, pageable);
+        return page.map(this::toHistoryItem);
+    }
+
     public Page<InterviewHistoryItem> history(Long userId, Pageable pageable) {
-        return sessionRepository.findByUserIdOrderByStartTimeDesc(userId, pageable)
-                .map(entity -> new InterviewHistoryItem(entity.getSessionId(), entity.getPosition(),
-                        entity.getStartTime(), entity.getOverallScore(), entity.getStatus()));
+        return history(userId, null, pageable);
+    }
+
+    private InterviewHistoryItem toHistoryItem(InterviewSession entity) {
+        // 存量记录 mode 列默认 practice，反序列化后空值同样归为实战模式
+        String mode = entity.getMode() == null || entity.getMode().isBlank() ? "practice" : entity.getMode();
+        return new InterviewHistoryItem(entity.getSessionId(), entity.getPosition(), mode,
+                entity.getStartTime(), entity.getOverallScore(), entity.getStatus());
     }
 
     /**

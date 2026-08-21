@@ -1249,21 +1249,30 @@ function scrollDown() {
 }
 
 .category-chips {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 8px;
 }
 
 .chip-check {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
+  gap: 8px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 4px;
   font-size: 13px;
   cursor: pointer;
   user-select: none;
+  background: #fff;
+}
+
+.chip-check span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chip-check:has(input:checked) {
@@ -1276,7 +1285,7 @@ function scrollDown() {
   font-size: 12px;
 }
 
-/* 岗位快捷选择：标题行 + 可点选胶囊（选中态对齐 chip-check 高亮） */
+/* 岗位快捷选择：标题行 + 可点选矩形块（选中态对齐 chip-check 高亮） */
 .suggest-row {
   display: flex;
   flex-direction: column;
@@ -1289,16 +1298,20 @@ function scrollDown() {
 }
 
 .chip-btn {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 8px 12px;
   border: 1px dashed var(--border);
-  border-radius: 999px;
+  border-radius: 4px;
   font-size: 13px;
   background: #fff;
   cursor: pointer;
   user-select: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chip-btn:hover {

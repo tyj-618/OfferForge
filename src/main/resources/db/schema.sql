@@ -46,16 +46,22 @@ CREATE TABLE IF NOT EXISTS interview_session (
     user_id       BIGINT       NOT NULL,
     session_id    VARCHAR(64)  NOT NULL,
     position      VARCHAR(64)  NOT NULL,
+    mode          VARCHAR(16)  NOT NULL DEFAULT 'practice',
     start_time    DATETIME(3)  NOT NULL,
     end_time      DATETIME(3)  NOT NULL,
     status        VARCHAR(32)  NOT NULL,
     overall_score DOUBLE       NOT NULL,
     report_json   LONGTEXT     NOT NULL,
     UNIQUE KEY uk_interview_session_session_id (session_id),
-    KEY idx_interview_session_user_time (user_id, start_time)
+    KEY idx_interview_session_user_time (user_id, start_time),
+    KEY idx_interview_session_user_mode_time (user_id, mode, start_time)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci;
+
+-- 存量库升级（面试记录按训练/实战模式划分）：存量记录归为实战模式
+-- ALTER TABLE interview_session ADD COLUMN mode VARCHAR(16) NOT NULL DEFAULT 'practice' AFTER position;
+-- ALTER TABLE interview_session ADD KEY idx_interview_session_user_mode_time (user_id, mode, start_time);
 
 -- 专项训练归档（任务 7）：训练完成后的简要成绩
 CREATE TABLE IF NOT EXISTS training_record (
@@ -68,11 +74,15 @@ CREATE TABLE IF NOT EXISTS training_record (
     max_difficulty VARCHAR(16)  NOT NULL,
     start_time     DATETIME(3)  NOT NULL,
     finished_at    DATETIME(3)  NOT NULL,
+    details_json   LONGTEXT     NULL,
     UNIQUE KEY uk_training_record_session_id (session_id),
     KEY idx_training_record_user_time (user_id, finished_at)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci;
+
+-- 存量库升级（训练报告逐题明细）：旧记录 details_json 为 NULL，报告页降级为仅概要
+-- ALTER TABLE training_record ADD COLUMN details_json LONGTEXT NULL AFTER finished_at;
 
 CREATE TABLE IF NOT EXISTS api_key (
     id            BIGINT AUTO_INCREMENT PRIMARY KEY,

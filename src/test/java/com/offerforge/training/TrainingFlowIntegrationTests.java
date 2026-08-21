@@ -74,14 +74,32 @@ class TrainingFlowIntegrationTests {
         assertThat(done3.at("/status/averageScore").asDouble()).isEqualTo(8.0);
         assertThat(done3.at("/status/maxDifficultyReached").asText()).isEqualTo("MEDIUM");
 
-        // 归档成绩入库：records 可见本人训练记录
-        JsonNode records = get("/api/training/records", token);
+        // 归档成绩入库：records 分页可见本人训练记录
+        JsonNode records = get("/api/training/records?page=0&size=5", token);
         assertCode(records, 0);
-        JsonNode first = records.at("/data/0");
+        JsonNode first = records.at("/data/content/0");
         assertThat(first.at("/category").asText()).isEqualTo(CATEGORY);
         assertThat(first.at("/askedCount").asInt()).isEqualTo(3);
         assertThat(first.at("/averageScore").asDouble()).isEqualTo(80.0);
         assertThat(first.at("/maxDifficulty").asText()).isEqualTo("MEDIUM");
+
+        // 训练报告：概要 + 逐题明细（题面/回答/导师点评/详细评估）齐备
+        long recordId = first.at("/id").asLong();
+        JsonNode report = get("/api/training/records/" + recordId + "/report", token);
+        assertCode(report, 0);
+        assertThat(report.at("/data/category").asText()).isEqualTo(CATEGORY);
+        assertThat(report.at("/data/askedCount").asInt()).isEqualTo(3);
+        assertThat(report.at("/data/averageScore").asDouble()).isEqualTo(80.0);
+        assertThat(report.at("/data/rating").asText()).isEqualTo("良好");
+        assertThat(report.at("/data/details").size()).isEqualTo(3);
+        JsonNode detail = report.at("/data/details/0");
+        assertThat(detail.at("/question").asText()).isNotBlank();
+        assertThat(detail.at("/answer").asText()).isEqualTo(LONG_ANSWER);
+        assertThat(detail.at("/comment").asText()).isNotBlank();
+        assertThat(detail.at("/score").asDouble()).isEqualTo(8.0);
+        assertThat(detail.at("/evaluation/improvedAnswer").asText()).isNotBlank();
+        // 归属校验：他人查询训练报告 → NOT_FOUND
+        assertCode(get("/api/training/records/" + recordId + "/report", newUser()), 40400);
 
         // 已完成的会话继续作答被拒绝（error 事件收尾）
         assertThat(answer(sessionId, token, LONG_ANSWER)).contains("event:error");
@@ -118,7 +136,13 @@ class TrainingFlowIntegrationTests {
         assertThat(finish.at("/data/askedCount").asInt()).isEqualTo(1);
 
         JsonNode records = get("/api/training/records", token);
-        assertThat(records.at("/data/0/askedCount").asInt()).isEqualTo(1);
+        assertThat(records.at("/data/content/0/askedCount").asInt()).isEqualTo(1);
+        // 提前结束的归档同样携带逐题明细，报告页可查看完整回合
+        long recordId = records.at("/data/content/0/id").asLong();
+        JsonNode report = get("/api/training/records/" + recordId + "/report", token);
+        assertCode(report, 0);
+        assertThat(report.at("/data/details").size()).isEqualTo(1);
+        assertThat(report.at("/data/details/0/answer").asText()).isEqualTo(LONG_ANSWER);
     }
 
     @Test

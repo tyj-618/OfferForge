@@ -2,6 +2,8 @@ package com.offerforge.report;
 
 import com.offerforge.auth.CurrentUserService;
 import com.offerforge.common.ApiResponse;
+import com.offerforge.common.ErrorCode;
+import com.offerforge.exception.BusinessException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -39,16 +41,30 @@ public class ReportController {
     }
 
     /**
-     * 历史面试列表：按开始时间倒序分页。
+     * 历史面试列表：按开始时间倒序分页；mode=training/practice 时仅返回对应模式记录。
      */
     @GetMapping("/history")
     public ApiResponse<Page<InterviewHistoryItem>> history(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String mode) {
         Long userId = currentUserService.requireUserId(authorization);
+        String normalizedMode = normalizeMode(mode);
         int cappedSize = Math.max(1, Math.min(size, MAX_PAGE_SIZE));
-        return ApiResponse.success(reportService.history(userId, PageRequest.of(Math.max(0, page), cappedSize)));
+        return ApiResponse.success(
+                reportService.history(userId, normalizedMode, PageRequest.of(Math.max(0, page), cappedSize)));
+    }
+
+    /** mode 仅接受 training/practice，其余非空值拒绝；空值返回全部记录 */
+    private String normalizeMode(String mode) {
+        if (mode == null || mode.isBlank()) {
+            return null;
+        }
+        if ("training".equals(mode) || "practice".equals(mode)) {
+            return mode;
+        }
+        throw new BusinessException(ErrorCode.PARAM_ERROR, "mode 仅支持 training/practice");
     }
 
     /**

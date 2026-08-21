@@ -16,4 +16,7 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
      * 历史面试列表：按开始时间倒序分页；进步曲线取前 N 条后由服务层反转为正序。
      */
     Page<InterviewSession> findByUserIdOrderByStartTimeDesc(Long userId, Pageable pageable);
+
+    /** 按模式过滤的历史面试列表：按开始时间倒序分页（训练/实战记录划分展示） */
+    Page<InterviewSession> findByUserIdAndModeOrderByStartTimeDesc(Long userId, String mode, Pageable pageable);
 }

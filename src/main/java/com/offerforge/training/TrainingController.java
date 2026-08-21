@@ -9,6 +9,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,11 +18,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.concurrent.Executor;
 
 /**
@@ -35,6 +37,8 @@ public class TrainingController {
     private static final String SESSION_ID_KEY = "interviewId";
     /** 与面试流式同预算：评分重试 + 流式读超时的最坏覆盖 */
     private static final long STREAM_TIMEOUT_MILLIS = 180_000L;
+    /** 训练记录分页上限，防恶意大页 */
+    private static final int MAX_RECORD_PAGE_SIZE = 50;
 
     private final TrainingService trainingService;
     private final CurrentUserService currentUserService;
@@ -104,12 +108,25 @@ public class TrainingController {
         }
     }
 
-    /** 我的训练历史（简要成绩归档列表） */
+    /** 我的训练历史（简要成绩归档，分页）：按完成时间倒序 */
     @GetMapping("/records")
-    public ApiResponse<List<TrainingRecordView>> records(
-            @RequestHeader(value = "Authorization", required = false) String authorization) {
+    public ApiResponse<Page<TrainingRecordView>> records(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
         Long userId = currentUserService.requireUserId(authorization);
-        return ApiResponse.success(trainingService.records(userId));
+        int cappedSize = Math.max(1, Math.min(size, MAX_RECORD_PAGE_SIZE));
+        return ApiResponse.success(
+                trainingService.records(userId, PageRequest.of(Math.max(0, page), cappedSize)));
+    }
+
+    /** 训练报告详情：概要统计 + 逐题明细（查看/打印报告页数据源） */
+    @GetMapping("/records/{id}/report")
+    public ApiResponse<TrainingReportView> recordReport(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @PathVariable Long id) {
+        Long userId = currentUserService.requireUserId(authorization);
+        return ApiResponse.success(trainingService.getRecordReport(userId, id));
     }
 
     private void writeTurn(SseEmitter emitter, String authorization, String sessionId, String message) {

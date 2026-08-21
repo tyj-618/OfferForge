@@ -8,6 +8,7 @@ import java.time.Instant;
 public record InterviewHistoryItem(
         String interviewId,
         String position,
+        String mode,
         Instant interviewTime,
         double overallScore,
         String status

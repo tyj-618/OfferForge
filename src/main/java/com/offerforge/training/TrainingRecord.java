@@ -52,6 +52,10 @@ public class TrainingRecord {
     @Column(name = "finished_at", nullable = false)
     private Instant finishedAt;
 
+    /** 逐题明细 JSON（List<TrainingQuestionRecord>）：训练报告页展示；旧记录可为 null */
+    @Column(name = "details_json", columnDefinition = "LONGTEXT")
+    private String detailsJson;
+
     public Long getId() {
         return id;
     }
@@ -122,5 +126,13 @@ public class TrainingRecord {
 
     public void setFinishedAt(Instant finishedAt) {
         this.finishedAt = finishedAt;
+    }
+
+    public String getDetailsJson() {
+        return detailsJson;
+    }
+
+    public void setDetailsJson(String detailsJson) {
+        this.detailsJson = detailsJson;
     }
 }
