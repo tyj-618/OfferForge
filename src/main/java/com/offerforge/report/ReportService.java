@@ -210,18 +210,33 @@ public class ReportService {
 
     private void fillSummary(InterviewReport report, InterviewContext context,
                              List<QuestionRecord> mains, List<QuestionRecord> weakQuestions) {
-        ReportSummary summary = null;
-        try {
-            summary = aiModelClient.generateReportSummary(buildSummaryPrompt(context, mains));
-        } catch (Exception exception) {
-            log.warn("report summary generation failed, fallback to server-side summary: {}", exception.getMessage());
-        }
-        if (summary == null) {
-            summary = fallbackSummary(mains, weakQuestions);
+        ReportSummary summary;
+        if (mains.isEmpty()) {
+            // 无任何有效作答（综合分 0）：不调 LLM，直接给出低分场景措辞，
+            // 避免模型基于空记录编造“表现稳定”类反馈
+            summary = emptySessionSummary();
+        } else {
+            summary = null;
+            try {
+                summary = aiModelClient.generateReportSummary(buildSummaryPrompt(context, mains));
+            } catch (Exception exception) {
+                log.warn("report summary generation failed, fallback to server-side summary: {}", exception.getMessage());
+            }
+            if (summary == null) {
+                summary = fallbackSummary(mains, weakQuestions);
+            }
         }
         report.setStrengths(summary.strengths());
         report.setWeaknesses(summary.weaknesses());
         report.setSuggestions(summary.suggestions());
+    }
+
+    /** 无有效作答场次的报告措辞：不点评亮点，引导用户完成足够作答后再评估 */
+    private ReportSummary emptySessionSummary() {
+        return new ReportSummary(List.of(),
+                List.of("本次面试没有产生有效作答，无法评估你当前的真实水平"),
+                List.of("建议至少完整作答 3 道题再结束面试，报告才能定位你的薄弱知识点",
+                        "可先在资料库巩固相关知识，再回来进行针对性模拟"));
     }
 
     String buildSummaryPrompt(InterviewContext context, List<QuestionRecord> mains) {
@@ -246,8 +261,7 @@ public class ReportService {
 
     private ReportSummary fallbackSummary(List<QuestionRecord> mains, List<QuestionRecord> weakQuestions) {
         if (mains.isEmpty()) {
-            return new ReportSummary(List.of("完成了全部面试环节"), List.of(),
-                    List.of("建议系统化复习 Java 后端核心知识并多做模拟面试"));
+            return emptySessionSummary();
         }
         List<QuestionRecord> ranked = mains.stream()
                 .sorted(Comparator.comparingDouble(QuestionRecord::getScore).reversed())

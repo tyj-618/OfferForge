@@ -77,4 +77,30 @@ class QuotaServiceTest {
         }
         assertThat(quota.checkQuota(1L)).isEqualTo(10);
     }
+
+    @Test
+    void refundRestoresOneConsumedQuota() {
+        // 短场面试退还：扣减后退还一次，剩余额度回满；未扣减时退还不超出上限（保底 0）
+        Clock clock = Clock.fixed(BASE_TIME, ZONE);
+        QuotaService quota = service(true, 2, clock);
+
+        assertThat(quota.consumeQuota(1L)).isTrue();
+        assertThat(quota.checkQuota(1L)).isEqualTo(1);
+        quota.refundQuota(1L);
+        assertThat(quota.checkQuota(1L)).isEqualTo(2);
+        // 无已扣次数时的退还不产生负值污染：额度不超出上限，后续扣减判定不受影响
+        quota.refundQuota(1L);
+        assertThat(quota.checkQuota(1L)).isEqualTo(2);
+        assertThat(quota.consumeQuota(1L)).isTrue();
+        assertThat(quota.consumeQuota(1L)).isTrue();
+        assertThat(quota.consumeQuota(1L)).isFalse();
+    }
+
+    @Test
+    void refundIsNoOpWhenQuotaDisabled() {
+        QuotaService quota = service(false, 10, Clock.fixed(BASE_TIME, ZONE));
+
+        quota.refundQuota(1L);
+        assertThat(quota.checkQuota(1L)).isEqualTo(10);
+    }
 }

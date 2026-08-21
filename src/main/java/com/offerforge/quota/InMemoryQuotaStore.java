@@ -31,6 +31,15 @@ public class InMemoryQuotaStore implements QuotaStore {
         return counter == null ? 0 : counter.get();
     }
 
+    @Override
+    public void refund(Long userId, String day) {
+        resetIfNewDay(day);
+        AtomicLong counter = counters.get(key(userId, day));
+        if (counter != null) {
+            counter.updateAndGet(value -> Math.max(0, value - 1));
+        }
+    }
+
     private void resetIfNewDay(String day) {
         if (!day.equals(latestDay)) {
             synchronized (this) {

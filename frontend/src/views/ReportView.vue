@@ -207,7 +207,11 @@ onBeforeUnmount(() => {
           <p class="muted">{{ item.reason }}</p>
           <p>建议练习：<strong>{{ item.suggestedQuestion }}</strong></p>
         </div>
-        <p v-if="!report.recommendedMaterials.length" class="muted">整体表现稳定，暂无重点复习项</p>
+        <p v-if="!report.recommendedMaterials.length" class="muted">
+                  {{ report.overallScore < 60
+                    ? '本次面试有效作答不足、得分偏低，暂无足够数据定位薄弱点。建议下次至少完整作答 3 道题，报告将根据薄弱知识点推荐针对性复习材料。'
+                    : '整体表现稳定，暂无重点复习项' }}
+                </p>
       </div>
 
       <!-- 逐题点评 -->

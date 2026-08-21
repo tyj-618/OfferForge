@@ -44,8 +44,16 @@ public class InterviewService {
             + "基础考察、项目经历、深度追问与收尾总结。请先做一个简短的自我介绍（可包含项目经历与熟悉的技术栈），完成后我们正式开始。";
     /** 日志中用户回答预览的最大长度（脱敏：不打印全文） */
     private static final int ANSWER_LOG_PREVIEW_LENGTH = 100;
+    /** 简历背景摘要上限：超出截断，防止超长简历打爆话术 Prompt */
+    private static final int RESUME_SUMMARY_MAX_LENGTH = 600;
+    /** 简历背景摘要中单个项目描述/实习经历的截断长度 */
+    private static final int RESUME_SECTION_MAX_LENGTH = 120;
+    /** 简历背景摘要最多携带的项目数 */
+    private static final int RESUME_MAX_PROJECTS = 3;
     /** 面试岗位方向缺省值 */
     public static final String DEFAULT_POSITION = "Java 后端工程师";
+    /** 计次门槛：问答回合数不足该值的场次视为无效场次，结束时退还开局扣除的免费额度 */
+    public static final int MIN_BILLABLE_QUESTIONS = 5;
     /** 算法编程题官方分组名（任务 12：开启开关后 DEEP 阶段掺入） */
     static final String ALGORITHM_CATEGORY = "算法";
 
@@ -167,6 +175,7 @@ public class InterviewService {
         context.setPosition(position == null || position.isBlank() ? DEFAULT_POSITION : position.trim());
         context.setResumeId(resumeId);
         context.setMode(InterviewContext.MODE_TRAINING.equals(mode) ? InterviewContext.MODE_TRAINING : InterviewContext.MODE_PRACTICE);
+        context.setKeySource(keySource);
         context.setStyle(style);
         context.setSelectedCategories(normalizeSelectedCategories(categories));
         context.setIncludeAlgorithm(Boolean.TRUE.equals(includeAlgorithm));
@@ -243,6 +252,19 @@ public class InterviewService {
     }
 
     /**
+     * 短场免费退还：问答次数不足 {@link #MIN_BILLABLE_QUESTIONS} 的场次不消耗免费额度，
+     * 结束时退还开局扣除的次数（仅 system 凭证场次；自带 Key 与额度关闭场景无操作）。
+     */
+    private void refundIfShortSession(InterviewContext context) {
+        if (!"system".equals(context.getKeySource()) || context.totalQuestionsAsked() >= MIN_BILLABLE_QUESTIONS) {
+            return;
+        }
+        quotaService.refundQuota(context.getUserId());
+        log.info("short session quota refunded sessionId={} userId={} asked={} threshold={}",
+                context.getSessionId(), context.getUserId(), context.totalQuestionsAsked(), MIN_BILLABLE_QUESTIONS);
+    }
+
+    /**
      * 结束面试并返回工作记忆上下文：置终态、清理对话消息，供报告生成与归档使用。
      * 已结束的会话幂等返回当前上下文。
      */
@@ -254,6 +276,8 @@ public class InterviewService {
                 if (!context.getState().terminal()) {
                     finish(context, sessionId);
                     sessionStore.save(context);
+                    // 只在非终态→终态的这一次转换里退还，幂等重复调用不会多次退还
+                    refundIfShortSession(context);
                 }
                 log.info("interview finished sessionId={} userId={} asked={}",
                         sessionId, userId, context.totalQuestionsAsked());
@@ -791,7 +815,7 @@ public class InterviewService {
                                      InterviewStreamSink sink) throws IOException {
         List<ChatMessage> messages = promptBuilder.buildFollowUpMessages(
                 messageStore.list(sessionId), followUpQuestion, answerPreview, missedPoints, wrongPoints,
-                context.getStyle());
+                resumeSummaryShared(context), context.getStyle());
         streamAndRecord(sessionId, messages, sink);
         // 话术流式成功后才切换当前题：中途失败时当前题保持原题，客户端重试可完整重走回合
         context.setCurrentQuestion(followUpQuestion);
@@ -929,8 +953,8 @@ public class InterviewService {
     }
 
     /**
-     * 简历摘要（模式无关）：懒构建并缓存到会话，失败降级为 null 不阻断面试；
-     * 供面试官话术桥接与开场自我介绍完备性检查共用。
+     * 简历背景摘要（模式无关）：懒构建并缓存到会话，失败降级为 null 不阻断面试；
+     * 提取技术栈、实习经历、项目经历供面试官话术桥接、追问针对性提问与开场完备性检查共用。
      */
     private String resumeSummaryShared(InterviewContext context) {
         if (context.getResumeId() == null) {
@@ -942,25 +966,59 @@ public class InterviewService {
         try {
             var resume = resumeService.getOwned(context.getUserId(), context.getResumeId());
             StringBuilder summary = new StringBuilder();
-            if (resume.name() != null && !resume.name().isBlank()) {
-                summary.append("候选人：").append(resume.name()).append("。");
+            if (isNotBlank(resume.name())) {
+                summary.append("候选人：").append(resume.name().trim()).append("。");
             }
-            if (resume.skills() != null && !resume.skills().isBlank()) {
-                summary.append("技能：").append(resume.skills()).append("。");
+            if (isNotBlank(resume.skills())) {
+                summary.append("技术栈：").append(resume.skills().trim()).append("。");
+            }
+            if (isNotBlank(resume.internships())) {
+                summary.append("实习经历：").append(truncate(resume.internships(), RESUME_SECTION_MAX_LENGTH)).append("。");
             }
             if (resume.projects() != null && !resume.projects().isEmpty()) {
-                summary.append("项目经历：").append(resume.projects().stream()
-                        .map(p -> p.projectName() == null ? "" : p.projectName())
-                        .filter(name -> !name.isBlank())
-                        .collect(java.util.stream.Collectors.joining("、"))).append("。");
+                summary.append("项目经历：");
+                List<String> briefs = new java.util.ArrayList<>();
+                for (var project : resume.projects()) {
+                    if (briefs.size() >= RESUME_MAX_PROJECTS) {
+                        break;
+                    }
+                    String name = project.projectName() == null ? "" : project.projectName().trim();
+                    if (name.isEmpty()) {
+                        continue;
+                    }
+                    StringBuilder brief = new StringBuilder(name);
+                    if (isNotBlank(project.role())) {
+                        brief.append("（").append(project.role().trim()).append("）");
+                    }
+                    if (isNotBlank(project.techStack())) {
+                        brief.append("，技术栈：").append(project.techStack().trim());
+                    }
+                    if (isNotBlank(project.description())) {
+                        brief.append("，").append(truncate(project.description(), RESUME_SECTION_MAX_LENGTH));
+                    }
+                    briefs.add(brief.toString());
+                }
+                summary.append(String.join("；", briefs)).append("。");
             }
-            String result = preview(summary.toString());
+            String result = truncate(summary.toString(), RESUME_SUMMARY_MAX_LENGTH);
             context.setResumeSummary(result);
             return result;
         } catch (RuntimeException e) {
             log.warn("interview sessionId={} resume summary unavailable resumeId={}", context.getSessionId(), context.getResumeId());
             return null;
         }
+    }
+
+    private static boolean isNotBlank(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String truncate(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        String trimmed = value.trim();
+        return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength) + "…";
     }
 
     /**

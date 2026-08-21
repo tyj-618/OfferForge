@@ -15,4 +15,9 @@ public interface QuotaStore {
      * 当日已用次数（不含自增）；无记录返回 0。
      */
     long used(Long userId, String day);
+
+    /**
+     * 退还一次已扣次数：原子自减并保底 0（短场面试不消耗额度时回退开局扣减）。
+     */
+    void refund(Long userId, String day);
 }

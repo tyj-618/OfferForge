@@ -53,6 +53,16 @@ public class QuotaService {
         return store.consume(userId, today()) <= properties.getDailyLimit();
     }
 
+    /**
+     * 退还一次已扣次数：短场面试（问答次数不足计次门槛）结束时回退开局扣减；额度关闭时无操作。
+     */
+    public void refundQuota(Long userId) {
+        if (!properties.isEnabled()) {
+            return;
+        }
+        store.refund(userId, today());
+    }
+
     private String today() {
         return LocalDate.now(clock).format(DateTimeFormatter.BASIC_ISO_DATE);
     }

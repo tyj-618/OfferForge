@@ -177,6 +177,20 @@ class ReportServiceTests {
                 .containsExactly("问题C", "问题B");
     }
 
+    @Test
+    void emptySessionReportUsesLowScoreWordingInsteadOfStablePraise() {
+        // 无任何作答即结束（综合分 0）：不得出现“表现稳定”类措辞，改用低分引导文案
+        InterviewContext context = newContext();
+
+        InterviewReport report = reportService.generate(context);
+
+        assertThat(report.getOverallScore()).isZero();
+        assertThat(report.getRecommendedMaterials()).isEmpty();
+        assertThat(report.getStrengths()).isEmpty();
+        assertThat(report.getWeaknesses()).anyMatch(text -> text.contains("没有产生有效作答"));
+        assertThat(report.getSuggestions()).anyMatch(text -> text.contains("至少完整作答 3 道题"));
+    }
+
     /** 3 主问题（8/6/4）+ 1 追问（3）的样例会话 */
     private InterviewContext sampleContext() {
         InterviewContext context = newContext();

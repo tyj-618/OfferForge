@@ -47,6 +47,16 @@ public class RedisQuotaStore implements QuotaStore {
         }
     }
 
+    @Override
+    public void refund(Long userId, String day) {
+        String key = key(userId, day);
+        Long used = redisTemplate.opsForValue().decrement(key);
+        // 无计数器或已扣为 0 时 DECR 会得负值，保底归零避免污染后续扣减判定
+        if (used != null && used < 0) {
+            redisTemplate.opsForValue().set(key, "0", KEY_TTL);
+        }
+    }
+
     private String key(Long userId, String day) {
         return KEY_PREFIX + userId + ":" + day;
     }

@@ -309,6 +309,10 @@ const progressText = computed(() => {
 
 const isFinished = computed(() => status.value?.state === 'FINISHED')
 
+// 短场免费：问答不足 5 题的场次不消耗免费额度，结束确认时提示用户（仅免费额度用户展示）
+const finishFreeOfCharge = computed(() =>
+  !quotaInfo.value?.hasOwnKey && (status.value?.askedCount ?? 0) < 5)
+
 const modeLabel = computed(() => (mode.value === 'training' ? '训练模式' : '实战模式'))
 
 const quotaBannerClass = computed(() => {
@@ -1228,6 +1232,9 @@ function scrollDown() {
         <div class="card confirm-dialog">
           <h3>确定提前结束面试？</h3>
           <p class="muted">未作答的剩余题目将被跳过，报告将基于已作答题目生成（跳过的题计 0 分）。</p>
+          <p v-if="finishFreeOfCharge" class="muted finish-free-note">
+            💡 本次面试问答不足 5 题，结束面试不会扣除免费次数。
+          </p>
           <div class="confirm-actions">
             <button class="secondary" @click="cancelFinish">继续面试</button>
             <button @click="finishInterview">确认结束</button>

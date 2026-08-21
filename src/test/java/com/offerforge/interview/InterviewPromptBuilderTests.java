@@ -67,7 +67,7 @@ class InterviewPromptBuilderTests {
     void followUpCarriesCandidateAnswerAndFindings() {
         List<ChatMessage> messages = builder.buildFollowUpMessages(
                 List.of(), "HashMap 的原理？", "只知道是数组存的",
-                List.of("hash 冲突解决"), List.of("链表不会转红黑树"), AssistantStyle.FRIENDLY);
+                List.of("hash 冲突解决"), List.of("链表不会转红黑树"), null, AssistantStyle.FRIENDLY);
 
         String instruction = lastUserContent(messages);
         assertThat(instruction).contains("<task>followup</task>");
@@ -82,11 +82,47 @@ class InterviewPromptBuilderTests {
     @Test
     void followUpWithoutFindingsOmitsFindingsBlock() {
         List<ChatMessage> messages = builder.buildFollowUpMessages(
-                List.of(), "HashMap 的原理？", null, List.of(), List.of(), AssistantStyle.FRIENDLY);
+                List.of(), "HashMap 的原理？", null, List.of(), List.of(), null, AssistantStyle.FRIENDLY);
 
         String instruction = lastUserContent(messages);
         assertThat(instruction).doesNotContain("<candidate-answer>").doesNotContain("评估发现的薄弱点");
         assertThat(instruction).contains("<task>followup</task>");
+    }
+
+    @Test
+    void followUpInjectsResumeBackgroundForTargetedDigging() {
+        // 简历背景注入追问：供面试官结合项目/实习/技术栈针对性深挖，且不照念背景
+        List<ChatMessage> messages = builder.buildFollowUpMessages(
+                List.of(), "Redis 如何做缓存？", "只知道能存 key-value",
+                List.of("淘汰策略"), List.of(),
+                "候选人：张三。技术栈：Spring、Redis。实习经历：某厂后端。项目经历：商城系统（后端开发），技术栈：Spring、Redis。",
+                AssistantStyle.FRIENDLY);
+
+        String instruction = lastUserContent(messages);
+        assertThat(instruction).contains("<resume>候选人：张三。技术栈：Spring、Redis。");
+        assertThat(instruction).contains("结合其项目、实习经历与技术栈做针对性深挖");
+        assertThat(instruction).contains("不要照念");
+    }
+
+    @Test
+    void followUpWithoutResumeOmitsResumeBlock() {
+        List<ChatMessage> messages = builder.buildFollowUpMessages(
+                List.of(), "HashMap 的原理？", "回答", List.of(), List.of(), null, AssistantStyle.FRIENDLY);
+
+        // 未提供简历时不注入 <resume> 背景块（指令文案中提及的“（<resume>）”属条件引导，非实际背景）
+        assertThat(lastUserContent(messages)).doesNotContain("<resume>候选人");
+    }
+
+    @Test
+    void systemPromptRequiresResumeBasedQuestioning() {
+        List<ChatMessage> messages = builder.buildInterviewerMessages(
+                List.of(), InterviewState.BASICS, "新题", InterviewContext.MODE_PRACTICE, null, null,
+                AssistantStyle.FRIENDLY, null, List.of());
+
+        // 系统人设全局规则：有简历背景时衔接与追问需针对性提问，不虚构不照念
+        assertThat(messages.get(0).content())
+                .contains("结合其技术栈、项目与实习经历做针对性提问")
+                .contains("不得虚构候选人背景");
     }
 
     @Test

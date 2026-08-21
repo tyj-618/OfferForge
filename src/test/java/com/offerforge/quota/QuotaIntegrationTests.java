@@ -18,15 +18,22 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 免费额度端到端（daily-limit=2）：
- * 无 Key 用完额度 → 第 3 场被拒（429 QUOTA_EXCEEDED）→ 配置自带 Key → 无限制；删除 Key 后恢复额度约束。
+ * 免费额度端到端（daily-limit=2，各阶段题量 2，共 6 题）：
+ * 完整场次（问答≥5 题）消耗额度，用完后第 3 场被拒（429 QUOTA_EXCEEDED）→ 配置自带 Key → 无限制；
+ * 短场（问答不足 5 题）结束退还开局扣减，不消耗额度。
  */
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "offerforge.quota.enabled=true",
-        "offerforge.quota.daily-limit=2"
+        "offerforge.quota.daily-limit=2",
+        // 每阶段 2 题共 6 题：保证完整场次可达 5 题计次门槛（存量 test profile 共 3 题永不足门槛）
+        "offerforge.interview.max-basics-questions=2",
+        "offerforge.interview.max-project-questions=2",
+        "offerforge.interview.max-deep-questions=2"
 })
 class QuotaIntegrationTests {
+
+    private static final String LONG_ANSWER = "我对这个问题有比较深入的理解，从底层原理到工程实践都做过总结，包括核心流程、常见陷阱以及对应的优化方案。";
 
     @LocalServerPort
     private int port;
@@ -48,9 +55,9 @@ class QuotaIntegrationTests {
         assertThat(quota0.at("/data/dailyLimit").asInt()).isEqualTo(2);
         assertThat(quota0.at("/data/enabled").asBoolean()).isTrue();
 
-        // 第 1、2 场（边界）正常开始，结束后释放会话
-        startAndFinish(token);
-        startAndFinish(token);
+        // 第 1、2 场（边界）完整作答 6 题（≥5 题计次门槛）正常消耗额度，结束后释放会话
+        completeFullInterview(token);
+        completeFullInterview(token);
 
         JsonNode quota1 = get("/api/quota", token);
         assertThat(quota1.at("/data/remaining").asInt()).isZero();
@@ -80,6 +87,59 @@ class QuotaIntegrationTests {
     @Test
     void quotaEndpointRequiresLogin() throws Exception {
         assertCode(get("/api/quota", null), 40100);
+    }
+
+    @Test
+    void shortSessionUnderFiveQuestionsDoesNotConsumeQuota() throws Exception {
+        String token = newUser();
+
+        // 开局即扣 1 次；零作答直接结束触发短场退还，额度回满（防误触消耗）
+        JsonNode start = post("/api/interview/start", token, Map.of());
+        assertCode(start, 0);
+        String sessionId = start.at("/data/sessionId").asText();
+        assertThat(get("/api/quota", token).at("/data/remaining").asInt()).isEqualTo(1);
+        assertCode(post("/api/interview/" + sessionId + "/finish", token, Map.of()), 0);
+        assertThat(get("/api/quota", token).at("/data/remaining").asInt()).isEqualTo(2);
+
+        // 作答不足 5 题（仅 2 题）提前结束：同样退还，重复短场不消耗额度
+        JsonNode start2 = post("/api/interview/start", token, Map.of());
+        assertCode(start2, 0);
+        String session2 = start2.at("/data/sessionId").asText();
+        ask(session2, token, "我熟悉 Java 后端开发，做过电商项目。");
+        ask(session2, token, LONG_ANSWER);
+        ask(session2, token, LONG_ANSWER);
+        assertCode(post("/api/interview/" + session2 + "/finish", token, Map.of()), 0);
+        assertThat(get("/api/quota", token).at("/data/remaining").asInt()).isEqualTo(2);
+    }
+
+    /** 完整场次：开场自我介绍 + 逐题作答直到 CLOSING（6 题 ≥ 5 题计次门槛）后结束，真实消耗额度 */
+    private void completeFullInterview(String token) throws Exception {
+        // 导入知识库：BASICS/DEEP 官方题库依赖可见条目，否则整阶段跳过导致题数不足门槛
+        assertCode(post("/api/knowledge/import", token, Map.of()), 0);
+        JsonNode start = post("/api/interview/start", token, Map.of());
+        assertCode(start, 0);
+        String sessionId = start.at("/data/sessionId").asText();
+        ask(sessionId, token, "我熟悉 Java 后端开发，做过电商项目。");
+        for (int round = 0; round < 12; round++) {
+            String state = get("/api/interview/" + sessionId + "/status", token).at("/data/state").asText();
+            if ("CLOSING".equals(state) || "FINISHED".equals(state)) {
+                break;
+            }
+            ask(sessionId, token, LONG_ANSWER);
+        }
+        assertCode(post("/api/interview/" + sessionId + "/finish", token, Map.of()), 0);
+    }
+
+    /** SSE 问答：驱动面试回合推进 */
+    private void ask(String sessionId, String token, String message) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + port + "/api/interview/" + sessionId + "/ask"))
+                .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE)
+                .POST(HttpRequest.BodyPublishers.ofString(
+                        objectMapper.writeValueAsString(Map.of("message", message)), StandardCharsets.UTF_8))
+                .header("Authorization", "Bearer " + token);
+        httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private void startAndFinish(String token) throws Exception {

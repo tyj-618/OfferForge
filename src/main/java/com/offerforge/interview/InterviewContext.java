@@ -30,6 +30,8 @@ public class InterviewContext {
     private String resumeSummary;
     /** 面试模式：training / practice（旧会话反序列化为 null 时按 practice 处理） */
     private String mode;
+    /** 开局凭证来源：user=自带 Key 不占免费额度 / system=系统 Key 已扣免费额度（旧会话为 null 不退还） */
+    private String keySource;
     /** 助手语气风格：strict / friendly（旧会话缺失按 friendly） */
     private String style;
     /** 勾选的资料分组（可空）：非空时 BASICS/DEEP 出题仅用这些分组（旧会话为 null 按阶段默认） */
@@ -118,6 +120,14 @@ public class InterviewContext {
 
     public void setResumeSummary(String resumeSummary) {
         this.resumeSummary = resumeSummary;
+    }
+
+    public String getKeySource() {
+        return keySource;
+    }
+
+    public void setKeySource(String keySource) {
+        this.keySource = keySource;
     }
 
     /** 模式归一化：null/非法值一律按 practice，兼容旧会话 */
