@@ -1471,9 +1471,21 @@ function scrollDown() {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #fff;
+  /* 全局 button 默认白字，白底按钮必须显式指定深色文字，否则白底白字不可见 */
+  color: var(--text);
   font-size: 14px;
   cursor: pointer;
   justify-content: space-between;
+}
+
+.position-picker-btn:hover {
+  background: #fff;
+  border-color: var(--primary);
+}
+
+.position-picker-btn:disabled {
+  background: #fff;
+  color: var(--text-light);
 }
 
 .position-picker-btn.chosen {
@@ -1525,6 +1537,8 @@ function scrollDown() {
   border: none;
   border-radius: 6px;
   background: transparent;
+  /* 全局 button 默认白字，白底下拉选项必须显式指定深色文字 */
+  color: var(--text);
   font-size: 14px;
   text-align: left;
   cursor: pointer;
