@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 生产验证：面试岗位设置持久化（position-setting GET/PUT）+ 前端产物哈希
 set -uo pipefail
-BASE="https://offerforge.joinuninook.com/api"
+BASE="https://easyofferforge.com/api"
 U="posverify_$(date +%s)"
 
 echo "===== [1/6] register & login ====="

@@ -25,6 +25,8 @@ offerforge:
     max-project-questions: 1
     max-deep-questions: 1
     max-follow-ups: 2
+    # 开场追问上限调小：保持既有测试“第 3 次超限推进”语义（生产默认 10，由 LLM 判断话题结束）
+    max-opening-follow-ups: 2
     message-window: 12
   training:
     # 测试用小容量配置，便于快速走完专项训练流程

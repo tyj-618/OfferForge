@@ -58,8 +58,10 @@ public class InterviewContext {
     private int deepTrainingAsked;
     /** 深度训练：连续达标题数（≥ deepTrainingPassScore 累计，低分清零） */
     private int deepTrainingConsecutivePass;
-    /** 开场环节：自我介绍信息不全时的补充提问次数（上限 maxOpeningFollowUps，防无限追问） */
+    /** 开场环节：自我介绍信息不全时的补充提问轮数（安全上限 maxOpeningFollowUps，正常由 LLM 判断话题结束） */
     private int openingFollowUpCount;
+    /** 开场对话收集的候选人自述背景（技术栈/项目/实习）：未选简历时供 PROJECT 针对性出题与追问深挖（旧会话为 null） */
+    private String introBackground;
     /** 连续高分（>=7）次数，用于难度提升判定 */
     private int consecutiveHighScores;
     /** 连续低分（<4）次数，用于难度降低判定 */
@@ -282,6 +284,14 @@ public class InterviewContext {
         this.openingFollowUpCount = openingFollowUpCount;
     }
 
+    public String getIntroBackground() {
+        return introBackground;
+    }
+
+    public void setIntroBackground(String introBackground) {
+        this.introBackground = introBackground;
+    }
+
     public int getConsecutiveHighScores() {
         return consecutiveHighScores;
     }
@@ -425,10 +435,12 @@ public class InterviewContext {
     }
 
     /**
-     * 总共已问的题数（不含追问）。
+     * 总共已问的题数（不含追问；开场自我介绍回合仅展示不计入）。
      */
     public int totalQuestionsAsked() {
-        return (int) questionHistory.stream().filter(record -> !record.isFollowUp()).count();
+        return (int) questionHistory.stream()
+                .filter(record -> !record.isFollowUp() && record.getState() != InterviewState.OPENING)
+                .count();
     }
 
     /**
@@ -441,11 +453,11 @@ public class InterviewContext {
     }
 
     /**
-     * 主问题平均分（追问不计入）。
+     * 主问题平均分（追问与开场自我介绍回合不计入）。
      */
     public double averageScore() {
         return questionHistory.stream()
-                .filter(record -> !record.isFollowUp())
+                .filter(record -> !record.isFollowUp() && record.getState() != InterviewState.OPENING)
                 .mapToDouble(QuestionRecord::getScore)
                 .average()
                 .orElse(0.0);

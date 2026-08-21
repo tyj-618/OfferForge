@@ -54,6 +54,10 @@ public class InterviewService {
     public static final String DEFAULT_POSITION = "Java 后端工程师";
     /** 计次门槛：问答回合数不足该值的场次视为无效场次，结束时退还开局扣除的免费额度 */
     public static final int MIN_BILLABLE_QUESTIONS = 5;
+    /** 开场自我介绍回合的题面占位（导师反馈话术用；不渲染为独立题面气泡） */
+    static final String INTRO_QUESTION_LABEL = "自我介绍";
+    /** 开场自我介绍回合的知识点标记（不入知识库联动与报告） */
+    static final String INTRO_KNOWLEDGE_POINT = "自我介绍";
     /** 算法编程题官方分组名（任务 12：开启开关后 DEEP 阶段掺入） */
     static final String ALGORITHM_CATEGORY = "算法";
 
@@ -556,8 +560,16 @@ public class InterviewService {
      */
     private String generateMentorComment(InterviewContext context, String sessionId,
                                          AnswerEvaluation evaluation) {
+        return generateMentorComment(context, sessionId, evaluation, context.getCurrentQuestion());
+    }
+
+    /**
+     * 带题面标签的导师反馈：开场环节无当前题（question 为 null），用固定标签代替。
+     */
+    private String generateMentorComment(InterviewContext context, String sessionId,
+                                         AnswerEvaluation evaluation, String question) {
         List<ChatMessage> messages = promptBuilder.buildMentorFeedbackMessages(
-                messageStore.list(sessionId), context.getCurrentQuestion(), evaluation, context.getStyle());
+                messageStore.list(sessionId), question, evaluation, context.getStyle());
         try {
             StringBuilder fullText = new StringBuilder();
             aiModelClient.generateStream(messages, fullText::append);
@@ -815,7 +827,7 @@ public class InterviewService {
                                      InterviewStreamSink sink) throws IOException {
         List<ChatMessage> messages = promptBuilder.buildFollowUpMessages(
                 messageStore.list(sessionId), followUpQuestion, answerPreview, missedPoints, wrongPoints,
-                resumeSummaryShared(context), context.getStyle());
+                candidateBackground(context), context.getStyle());
         streamAndRecord(sessionId, messages, sink);
         // 话术流式成功后才切换当前题：中途失败时当前题保持原题，客户端重试可完整重走回合
         context.setCurrentQuestion(followUpQuestion);
@@ -915,41 +927,122 @@ public class InterviewService {
     }
 
     /**
-     * 开场环节作答处理：自我介绍信息充分直接推进；不足时主动向候选人索取缺失信息
-     * （补充提问次数上限 maxOpeningFollowUps，超限或检查失败均降级推进，不阻断面试）。
+     * 开场环节作答处理：是否继续深挖由 LLM 判断（项目/经历挖到足够细节或候选人明确表示无可补充才结束话题，
+     * 信息不足时主动索取），超限安全上限后强制推进不阻断面试。
+     * 训练模式每次开场作答均评分并出导师反馈（仅展示，不入报告）；话题结束时提取候选人自述背景，
+     * 未选简历时供 PROJECT 阶段针对性出题与追问深挖。
      */
     private InterviewTurnResult handleOpeningAnswer(InterviewContext context, String sessionId,
                                                     String intro, InterviewStreamSink sink) throws IOException {
+        // 训练模式：先评估本次开场作答并生成导师反馈（不影响去留决策，仅展示）
+        AnswerEvaluation introEvaluation = null;
+        String mentorComment = null;
+        if (context.isTrainingMode()) {
+            sink.progress("正在评估你的自我介绍…");
+            introEvaluation = evaluationService.evaluateIntro(intro, context.getPosition());
+            recordIntroAnswer(context, intro, introEvaluation);
+            mentorComment = generateMentorComment(context, sessionId, introEvaluation, INTRO_QUESTION_LABEL);
+        }
+        String followUp = null;
         if (context.getOpeningFollowUpCount() < properties.getMaxOpeningFollowUps()) {
             sink.progress("正在整理你的自我介绍…");
-            String followUp = null;
             try {
                 // 携带开场环节完整对话历史：候选人后续补充常省略主语/用指代，
                 // 无历史时模型无法消解指代，会重复索要已提供过的信息
                 followUp = aiModelClient.generateIntroFollowUp(promptBuilder.buildIntroCheckPrompt(
-                        intro, resumeSummaryShared(context), context.getPosition(), messageStore.list(sessionId)));
+                        intro, candidateBackground(context), context.getPosition(), messageStore.list(sessionId)));
             } catch (RuntimeException exception) {
                 log.warn("intro completeness check failed sessionId={}", sessionId, exception);
             }
-            if (followUp != null && !followUp.isBlank()) {
-                context.setOpeningFollowUpCount(context.getOpeningFollowUpCount() + 1);
-                log.info("interview sessionId={} intro follow-up {} requested preview={}",
-                        sessionId, context.getOpeningFollowUpCount(), preview(followUp));
-                messageStore.append(sessionId, List.of(ChatMessage.assistant(followUp)));
-                sink.chunk(followUp);
-                return new InterviewTurnResult(null, null, StateTransitionStrategy.Action.FOLLOW_UP, statusView(context));
+        } else {
+            log.info("interview sessionId={} opening follow-ups reached safety cap {}", sessionId,
+                    properties.getMaxOpeningFollowUps());
+        }
+        if (followUp != null && !followUp.isBlank()) {
+            context.setOpeningFollowUpCount(context.getOpeningFollowUpCount() + 1);
+            log.info("interview sessionId={} intro follow-up {} requested preview={}",
+                    sessionId, context.getOpeningFollowUpCount(), preview(followUp));
+            messageStore.append(sessionId, List.of(ChatMessage.assistant(followUp)));
+            if (context.isTrainingMode()) {
+                // 先流导师反馈气泡（携带得分），再流追问气泡
+                attachIntroComment(context, mentorComment, introEvaluation);
+                emitMentorFeedback(context, sessionId, mentorComment, sink);
+                sink.segment();
             }
+            sink.chunk(followUp);
+            return introTurnResult(context, introEvaluation, StateTransitionStrategy.Action.FOLLOW_UP);
+        }
+        // 话题结束：提取候选人自述背景（未选简历时供 PROJECT 针对性出题/追问），再推进基础考察
+        extractIntroBackground(context, sessionId);
+        if (context.isTrainingMode()) {
+            attachIntroComment(context, mentorComment, introEvaluation);
+            emitMentorFeedback(context, sessionId, mentorComment, sink);
+            sink.segment();
         }
         advance(context, sessionId, sink);
-        context.setEvaluating(false);
-        return new InterviewTurnResult(null, null, StateTransitionStrategy.Action.ADVANCE, statusView(context));
+        return introTurnResult(context, introEvaluation, StateTransitionStrategy.Action.ADVANCE);
+    }
+
+    /** 开场回合 done 载荷：训练模式携带得分/点评/详细评估，实战模式保持免评分 */
+    private InterviewTurnResult introTurnResult(InterviewContext context, AnswerEvaluation evaluation,
+                                                StateTransitionStrategy.Action action) {
+        if (!context.isTrainingMode() || evaluation == null) {
+            return new InterviewTurnResult(null, null, action, statusView(context));
+        }
+        return new InterviewTurnResult(evaluation.overall(), evaluation.feedback(), action,
+                statusView(context), evaluation);
+    }
+
+    /** 记录一次开场自我介绍作答：state=OPENING，不入主流程统计（题数/平均分）与报告，仅展示 */
+    private void recordIntroAnswer(InterviewContext context, String intro, AnswerEvaluation evaluation) {
+        QuestionRecord record = new QuestionRecord(null, intro, evaluation, INTRO_KNOWLEDGE_POINT,
+                false, InterviewState.OPENING);
+        context.getQuestionHistory().add(record);
+    }
+
+    /** 导师点评与详细评估写入开场回合记录（刷新恢复回放用） */
+    private void attachIntroComment(InterviewContext context, String mentorComment, AnswerEvaluation evaluation) {
+        List<QuestionRecord> history = context.getQuestionHistory();
+        if (!history.isEmpty()) {
+            QuestionRecord record = history.get(history.size() - 1);
+            record.setMentorComment(mentorComment);
+            record.setEvaluation(evaluation);
+        }
     }
 
     /**
-     * 简历摘要（仅实战模式注入话术）：实际构建逻辑模式无关，见 {@link #resumeSummaryShared}。
+     * 开场对话提取候选人自述背景（离开开场环节时）：未选简历时供 PROJECT 针对性出题、
+     * 追问深挖与面试官桥接；失败降级 null 不阻断面试，已选简历时不重复提取。
+     */
+    private void extractIntroBackground(InterviewContext context, String sessionId) {
+        if (context.getIntroBackground() != null || context.getResumeId() != null) {
+            return;
+        }
+        try {
+            String summary = aiModelClient.generateText(List.of(
+                    ChatMessage.user(promptBuilder.buildIntroSummaryPrompt(messageStore.list(sessionId))))).content();
+            if (summary != null && !summary.isBlank()) {
+                context.setIntroBackground(truncate(summary.trim(), RESUME_SUMMARY_MAX_LENGTH));
+                log.info("interview sessionId={} intro background collected preview={}",
+                        sessionId, preview(context.getIntroBackground()));
+            }
+        } catch (RuntimeException exception) {
+            log.warn("intro background extraction failed sessionId={}", sessionId, exception);
+        }
+    }
+
+    /** 候选人背景：简历摘要优先；未选简历时降级开场对话收集的自述背景（可空） */
+    private String candidateBackground(InterviewContext context) {
+        String resume = resumeSummaryShared(context);
+        return resume != null ? resume : context.getIntroBackground();
+    }
+
+    /**
+     * 简历摘要（仅实战模式注入话术）：实战模式无简历时降级开场收集的自述背景；
+     * 实际构建逻辑模式无关，见 {@link #resumeSummaryShared}。
      */
     private String resumeSummaryFor(InterviewContext context) {
-        return context.isTrainingMode() ? null : resumeSummaryShared(context);
+        return context.isTrainingMode() ? null : candidateBackground(context);
     }
 
     /**
@@ -1113,6 +1206,15 @@ public class InterviewService {
                             context.getUserId(), context.getResumeId()));
                 } catch (RuntimeException exception) {
                     log.warn("project question generation failed, fallback to generic bank sessionId={}",
+                            context.getSessionId(), exception);
+                }
+            } else if (context.getIntroBackground() != null && !context.getIntroBackground().isBlank()) {
+                // 未选简历时基于开场对话收集的自述背景生成针对性项目题，失败同样降级通用题库
+                try {
+                    context.getPreparedQuestions().addAll(projectQuestionGenerator.generateProjectQuestionsFromBackground(
+                            context.getIntroBackground()));
+                } catch (RuntimeException exception) {
+                    log.warn("background project question generation failed, fallback to generic bank sessionId={}",
                             context.getSessionId(), exception);
                 }
             }

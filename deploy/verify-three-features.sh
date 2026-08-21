@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 三需求生产验证：短场免费退还 / 空作答报告低分措辞 / 简历背景注入 AI 面试官
 set -u
-BASE=https://offerforge.joinuninook.com/api
+BASE=https://easyofferforge.com/api
 
 reg_token() {
   local u="vf_$1_$(date +%s)_$RANDOM"

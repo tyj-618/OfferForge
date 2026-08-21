@@ -4,8 +4,8 @@ import com.offerforge.ai.AnswerEvaluation;
 
 /**
  * 单轮问答完成事件（SSE done 事件载荷）：评分、转移动作、最新进度视图与详细评估。
- * OPENING/CLOSING 等无评分轮次 score/action 为 null；实战模式过程免评分，
- * score/evaluationComment/evaluation 均为 null（评分仍完整入库供结束报告使用）。
+ * CLOSING 等无评分轮次 score/action 为 null；开场环节训练模式携带评分（仅展示不入报告），实战模式免评分；
+ * 实战模式过程免评分，知识题 score/evaluationComment/evaluation 均为 null（评分仍完整入库供结束报告使用）。
  */
 public record InterviewTurnResult(
         Double score,

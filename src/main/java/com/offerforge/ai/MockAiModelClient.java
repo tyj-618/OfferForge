@@ -106,6 +106,39 @@ public class MockAiModelClient implements AiModelClient {
     }
 
     @Override
+    public AnswerEvaluation evaluateIntroDetail(String intro, String position) {
+        // 确定性分档与知识题评估一致（按长度），便于测试控制分支；点评文案面向自我介绍场景（信息完整度/表达）
+        if (intro == null || intro.isBlank()) {
+            return new AnswerEvaluation(0, 0, 0, 0, 0,
+                    List.of(), List.of("未提供自我介绍"), List.of(), "未作答",
+                    List.of(), List.of("未提供自我介绍"),
+                    "（改进示范）可从教育/工作背景、主要项目经历与技术栈三方面简要介绍自己。");
+        }
+        int length = intro.trim().length();
+        if (length < 10) {
+            return new AnswerEvaluation(3, 3, 3, 3, 3,
+                    List.of("教育或工作背景", "项目经历与技术栈"),
+                    List.of("自我介绍过于简短，缺少项目经历与技术栈信息"), List.of(),
+                    "自我介绍过于简短，建议补充项目经历与技术栈",
+                    List.of(), List.of("信息太少，建议补充项目经历、个人职责与技术栈"),
+                    "（改进示范）先讲基本背景，再介绍主要项目经历与个人职责，最后说明熟悉的技术栈与求职方向。");
+        }
+        if (length < 30) {
+            return new AnswerEvaluation(5, 5, 5, 5, 5,
+                    List.of("教育或工作背景", "项目经历与技术栈"),
+                    List.of("项目职责与技术细节展开不足"), List.of(),
+                    "自我介绍覆盖部分信息，但项目与技术细节不够充分",
+                    List.of("提供了基本背景信息"), List.of("项目职责与技术细节展开不足"),
+                    "（改进示范）在现有基础上补充项目中的个人职责、技术难点与量化成果。");
+        }
+        return new AnswerEvaluation(8, 8, 8, 8, 8,
+                List.of("教育或工作背景", "项目经历与技术栈"), List.of(), List.of(),
+                "自我介绍信息充分，背景、项目与技术栈表达清晰",
+                List.of("背景、项目经历与技术栈信息充分，表达清晰"), List.of(),
+                "（改进示范）自我介绍已基本完善，可进一步补充项目中的量化成果与设计亮点。");
+    }
+
+    @Override
     public String generateFollowUpQuestion(String prompt) {
         Matcher matcher = FOLLOW_UP_SOURCE_PATTERN.matcher(prompt);
         String source = matcher.find() ? matcher.group(1).trim() : "原问题";
@@ -229,6 +262,10 @@ public class MockAiModelClient implements AiModelClient {
     private String mockAnswer(String userPrompt) {
         Matcher questionMatcher = QUESTION_PATTERN.matcher(userPrompt);
         String question = questionMatcher.find() ? questionMatcher.group(1).trim() : "未提供问题";
+        if (userPrompt.contains("<task>intro-summary</task>")) {
+            // 开场背景提取 mock：携带「项目名称」标记行，便于 PROJECT 阶段背景出题的确定性断言
+            return "候选人自述背景：\n项目名称：面试对话项目\n技术栈：Java\n";
+        }
         if (userPrompt.contains("<task>mentor-feedback</task>")) {
             // 导师反馈 mock：不重复题面、不携带分数，便于断言独立气泡与顺序
             return "【导师反馈】针对你刚才的回答，我已给出人性化点评，继续保持。";

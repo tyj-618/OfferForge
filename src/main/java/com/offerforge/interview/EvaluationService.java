@@ -63,6 +63,28 @@ public class EvaluationService {
     }
 
     /**
+     * 评估开场自我介绍（仅训练模式展示用，不入报告）：无知识点标准答案，
+     * 按信息完整度/表达/岗位相关性评估；无效回答快捷键与知识题评估一致。
+     */
+    public AnswerEvaluation evaluateIntro(String intro, String position) {
+        if (isInvalidAnswer(intro)) {
+            log.info("interview evaluate-intro invalid-answer shortcut");
+            return new AnswerEvaluation(1, 1, 1, 1, 1,
+                    List.of(), List.of("未提供有效自我介绍"), List.of(),
+                    "该自我介绍未提供实质内容。建议从教育/工作背景、项目经历与技术栈三方面重新组织。",
+                    List.of(), List.of("未提供有效自我介绍，无实质内容"),
+                    "（改进示范）可从教育/工作背景、主要项目经历与个人职责、熟悉的技术栈三方面简要介绍自己。");
+        }
+        AnswerEvaluation evaluation = aiModelClient.evaluateIntroDetail(intro, position);
+        if (evaluation == null) {
+            log.warn("interview evaluate-intro fallback");
+            return new AnswerEvaluation(5, 5, 5, 5, 5, List.of(), List.of(), List.of(),
+                    "评估服务异常，按中等处理", List.of(), List.of(), null);
+        }
+        return evaluation;
+    }
+
+    /**
      * 无效回答检测：trim 后 ≤ 20 字且命中“不知道/不会”等关键词。
      */
     static boolean isInvalidAnswer(String userAnswer) {

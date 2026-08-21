@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 验证历史记录改造：面试归档 mode + history 模式过滤 + 训练记录分页 + 训练报告明细
 set -u
-B=https://offerforge.joinuninook.com/api
+B=https://easyofferforge.com/api
 U="hist_$(date +%s%N)"
 
 curl -s -X POST "$B/auth/register" -H 'Content-Type: application/json' \

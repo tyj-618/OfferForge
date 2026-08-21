@@ -23,8 +23,8 @@ public class InterviewProperties {
     private int deepTrainingPassScore = 6;
     /** 深度训练达标所需连续达标题数 */
     private int deepTrainingPassStreak = 2;
-    /** 开场环节：自我介绍信息不全时最多补充提问次数 */
-    private int maxOpeningFollowUps = 2;
+    /** 开场环节：深挖追问轮数安全上限（正常由 LLM 判断话题是否结束，超限强制推进防无限追问） */
+    private int maxOpeningFollowUps = 10;
 
     public int maxQuestionsFor(InterviewState state) {
         return switch (state) {

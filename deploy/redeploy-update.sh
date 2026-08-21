@@ -37,7 +37,7 @@ echo
 echo "--- frontend (localhost:8082) ---"
 curl -s -o /dev/null -w "frontend_http_code=%{http_code}\n" -m 10 http://localhost:8082/
 echo "--- domain (Host header) ---"
-curl -s -m 10 -H "Host: offerforge.joinuninook.com" http://localhost/api/health
+curl -s -m 10 -H "Host: easyofferforge.com" http://localhost/api/health
 echo
 echo "--- backend last 30 log lines ---"
 docker logs --tail 30 offerforge-backend 2>&1

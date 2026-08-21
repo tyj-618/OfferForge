@@ -249,8 +249,8 @@ public class InterviewPromptBuilder {
     }
 
     /**
-     * 开场自我介绍信息完备性检查 Prompt：信息充分输出 NONE；
-     * 不足时输出一条针对最缺失维度的补充提问，主动向候选人索取完整信息。
+     * 开场自我介绍完备性与话题深挖检查 Prompt：话题已充分展开时输出 NONE；
+     * 否则输出一条追问——信息不足时主动索取，已提及的项目/经历只提了个开头时继续深挖当前话题直至充分。
      * 携带开场环节完整对话历史（借鉴 UniNook AI 助手“每次调用必注入历史”的做法），
      * 供模型消解候选人省略主语/指代的表述，避免重复索要已提供过的信息。
      */
@@ -267,16 +267,35 @@ public class InterviewPromptBuilder {
                     .append(transcript).append("</dialogue-history>\n");
         }
         prompt.append("候选人刚才的自我介绍：").append(intro).append("\n\n")
-                .append("请结合对话历史判断候选人的自我介绍累计信息是否足以支撑后续面试，考察维度：\n")
+                .append("请结合对话历史判断开场环节的话题是否可以结束，考察维度：\n")
                 .append("1. 教育背景或工作/实习经历\n")
-                .append("2. 主要项目或实践经历（哪怕一句话提及）\n")
+                .append("2. 主要项目或实践经历（含具体职责、技术难点、解决方案或数据量级等细节）\n")
                 .append("3. 技术栈或擅长的技术方向\n\n")
                 .append("语境理解：候选人可能省略主语或使用指代（如“这个项目”“都是我一个人做的”），")
                 .append("必须结合对话历史理解其指向；候选人在历史中已提供的信息（项目名称、职责、技术栈等）不得重复索要。\n\n")
                 .append("输出规则：\n")
-                .append("- 若信息已足够支撑后续面试，只输出：NONE\n")
-                .append("- 若明显不足，只输出一条自然的补充提问（中文，两句话以内），向候选人索取最欠缺的那类信息，")
+                .append("- 话题结束条件（满足才输出：NONE）：候选人提到的项目/经历已挖到足够细节（有具体职责、技术亮点或数据量级），")
+                .append("或候选人明确表示没有更多可补充，且基础背景信息不再明显缺失\n")
+                .append("- 若候选人提到的项目/经历只有名称或一句话概述，应围绕当前话题继续深挖（个人职责、技术难点、解决方案、量化成果），不要跳到其他话题\n")
+                .append("- 若基础背景信息明显不足，只输出一条自然的追问（中文，两句话以内），向候选人索取最欠缺的那类信息，")
                 .append("像真实面试官那样基于已知信息深入追问（如“你刚才提到……，能具体说说……”），不要输出任何解释、前缀或编号。");
+        return prompt.toString();
+    }
+
+    /**
+     * 开场对话背景提取 Prompt：从开场完整对话中总结候选人自述的技术栈、
+     * 项目经历（名称/角色/技术亮点）与实习经历，未选简历时作为面试官针对性出题与追问的背景。
+     */
+    public String buildIntroSummaryPrompt(List<ChatMessage> history) {
+        StringBuilder prompt = new StringBuilder("<task>intro-summary</task>\n");
+        String transcript = formatHistory(history);
+        if (!transcript.isEmpty()) {
+            prompt.append("<dialogue-history>开场环节完整对话：\n").append(transcript).append("</dialogue-history>\n");
+        }
+        prompt.append("请总结候选人在上述开场对话中自述的背景信息，供面试官后续针对性提问使用。要求：\n")
+                .append("1. 按技术栈、项目经历（名称、角色、技术亮点）、实习/工作经历三类归纳\n")
+                .append("2. 只整理候选人明确说过的信息，不得虚构或推断\n")
+                .append("3. 直接输出总结文本，不超过 300 字，不要输出解释或前缀");
         return prompt.toString();
     }
 

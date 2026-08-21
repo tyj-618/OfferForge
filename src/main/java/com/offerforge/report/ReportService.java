@@ -153,11 +153,14 @@ public class ReportService {
     }
 
     /**
-     * 基于会话工作记忆生成完整报告；只统计主问题（追问不计入均分）。
+     * 基于会话工作记忆生成完整报告；只统计主问题（追问不计入均分）；
+     * 开场自我介绍记录仅展示不入报告，统计与逐题评估均排除。
      */
     public InterviewReport generate(InterviewContext context) {
         List<QuestionRecord> history = context.getQuestionHistory();
-        List<QuestionRecord> mains = history.stream().filter(record -> !record.isFollowUp()).toList();
+        List<QuestionRecord> effective = history.stream()
+                .filter(record -> record.getState() != InterviewState.OPENING).toList();
+        List<QuestionRecord> mains = effective.stream().filter(record -> !record.isFollowUp()).toList();
 
         InterviewReport report = new InterviewReport();
         report.setInterviewId(context.getSessionId());
@@ -166,7 +169,7 @@ public class ReportService {
         report.setPosition(context.getPosition() == null || context.getPosition().isBlank()
                 ? InterviewService.DEFAULT_POSITION : context.getPosition());
         report.setTotalQuestions(mains.size());
-        report.setTotalFollowUps(history.size() - mains.size());
+        report.setTotalFollowUps(effective.size() - mains.size());
         report.setDurationMinutes((int) ((System.currentTimeMillis() - context.getCreatedAtEpochMillis()) / 60_000L));
 
         report.setOverallScore(round1(mainAverage(mains, QuestionRecord::getScore) * 10));
@@ -180,8 +183,8 @@ public class ReportService {
         report.setDeepScore(round1(phaseAverage(mains, InterviewState.DEEP)));
 
         List<QuestionEvaluation> evaluations = new ArrayList<>();
-        for (int index = 0; index < history.size(); index++) {
-            QuestionRecord record = history.get(index);
+        for (int index = 0; index < effective.size(); index++) {
+            QuestionRecord record = effective.get(index);
             evaluations.add(new QuestionEvaluation(index + 1, record.getQuestion(), record.getUserAnswer(),
                     record.getScore(), record.getState(), record.isFollowUp(), record.getFeedback()));
         }
@@ -245,11 +248,14 @@ public class ReportService {
             records.append("- 「").append(record.getQuestion()).append("」得分").append(record.getScore())
                     .append("（").append(record.getState() == null ? "未知阶段" : record.getState().label()).append("）\n");
         }
+        long followUps = context.getQuestionHistory().stream()
+                .filter(record -> record.getState() != InterviewState.OPENING)
+                .count() - mains.size();
         return "<task>report-summary</task>\n"
                 + "你是一个资深技术面试官，请根据以下面试记录生成综合反馈报告。\n\n"
                 + "面试岗位：" + context.getPosition() + "\n"
                 + "总题数：" + mains.size() + "\n"
-                + "总追问次数：" + (context.getQuestionHistory().size() - mains.size()) + "\n\n"
+                + "总追问次数：" + followUps + "\n\n"
                 + "各题评估记录：\n" + records + "\n"
                 + "请生成报告，包含：\n"
                 + "1. 亮点总结（2-3条，基于表现好的回答）\n"

@@ -42,9 +42,16 @@ public record InterviewStatusResponse(
         boolean training = context.isTrainingMode();
         boolean deepTrainingActive = context.getState() == InterviewState.DEEP_TRAINING;
         var history = context.getQuestionHistory();
-        String lastAnswerCategory = history.isEmpty()
-                ? null
-                : history.get(history.size() - 1).getKnowledgePoint();
+        // 从尾部向前找最近一道非开场记录：开场自我介绍的知识点（“自我介绍”）不属于任何资料分组，
+        // 若不过滤会导致“深入该模块”跳转到无效分组；无非开场作答时为 null
+        String lastAnswerCategory = null;
+        for (int index = history.size() - 1; index >= 0; index--) {
+            QuestionRecord record = history.get(index);
+            if (record.getState() != InterviewState.OPENING) {
+                lastAnswerCategory = record.getKnowledgePoint();
+                break;
+            }
+        }
         return new InterviewStatusResponse(
                 context.getSessionId(),
                 context.getState(),

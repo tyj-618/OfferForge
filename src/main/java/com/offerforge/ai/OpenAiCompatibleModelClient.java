@@ -277,6 +277,52 @@ public class OpenAiCompatibleModelClient implements AiModelClient {
     }
 
     @Override
+    public AnswerEvaluation evaluateIntroDetail(String intro, String position) {
+        // 开场自我介绍评估：无知识点标准答案，按信息完整度/表达结构/岗位相关性评估，与知识题评分分离
+        String prompt = """
+                你是一位资深技术面试官，正在评估候选人的开场自我介绍。
+                注意：这不是知识问答，没有标准答案，不得以知识点正确性评分。
+
+                候选人求职岗位：%s
+                候选人自我介绍：%s
+
+                评分维度（分值均为 0-10 数字）：
+                1. accuracy：经历描述的具体可信度（是否有具体职责、技术选型、数据量级等可验证细节，而非泛泛而谈）
+                2. completeness：信息完整度（教育/工作/实习背景、项目或实践经历、技术栈三方面是否齐备）
+                3. clarity：表达是否条理清晰、重点突出、逻辑连贯
+                4. depth：项目与经历是否有深度（技术难点、解决方案、量化成果），与目标岗位的相关性如何
+                5. 若自我介绍内容几乎为空或与求职无关，各维度应给低分，feedback 指出应补充的方向
+
+                请返回 JSON 格式：
+                {
+                  "accuracy": 数字,
+                  "completeness": 数字,
+                  "clarity": 数字,
+                  "depth": 数字,
+                  "overall": 数字,
+                  "keyPoints": ["自我介绍应包含的信息维度1"],
+                  "missedPoints": ["候选人尚未提供的信息1"],
+                  "wrongPoints": [],
+                  "feedback": "2-3句话的综合点评，基于候选人实际提供的信息与表达，指出亮点和可补充的方向",
+                  "goodPoints": ["自我介绍中的亮点1"],
+                  "badPoints": ["自我介绍中的不足1"],
+                  "improvedAnswer": "一份基于候选人自述信息润色后的改进示范自我介绍（保留其真实信息，不得虚构经历）"
+                }
+                只输出 JSON 本身，不要输出其他内容。
+                """.formatted(
+                position == null || position.isBlank() ? "（未指定）" : position,
+                intro == null ? "" : intro);
+        AiTextResult result = generateText(List.of(ChatMessage.user(prompt)));
+        AnswerEvaluation parsed = parseAnswerEvaluation(result.content());
+        if (parsed == null) {
+            log.warn("qa stage=llm mode=evaluate-intro status=unparsable model={} requestId={}",
+                    properties.getModel(), result.requestId());
+            return null;
+        }
+        return parsed;
+    }
+
+    @Override
     public String generateFollowUpQuestion(String prompt) {
         AiTextResult result = generateText(List.of(ChatMessage.user(prompt)));
         String content = result.content() == null ? "" : result.content().trim();

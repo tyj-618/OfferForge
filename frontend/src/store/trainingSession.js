@@ -86,7 +86,7 @@ function runTurn(request, userText, initialThinkingText) {
       trainingSession.thinkingText = progressText
     },
     onDone: (result) => {
-      attachScore(result)
+      attachScore(firstBubble, result)
       trainingSession.status = result.status
       trainingSession.sending = false
       trainingSession.thinkingText = ''
@@ -102,7 +102,7 @@ function runTurn(request, userText, initialThinkingText) {
   })
 }
 
-function attachScore(result) {
+function attachScore(commentBubble, result) {
   if (result.score == null) {
     // 「已掌握」回合无评分：在用户标记气泡上挂绿勾标记，不展示得分徽章
     for (let i = trainingSession.messages.length - 1; i >= 0; i--) {
@@ -114,14 +114,11 @@ function attachScore(result) {
     }
     return
   }
-  // 得分徽章挂在最近一个有内容的气泡上（导师点评气泡），附带详细评估供「具体分析」展开
-  for (let i = trainingSession.messages.length - 1; i >= 0; i--) {
-    const item = trainingSession.messages[i]
-    if (item.role === 'assistant' && item.content && item.score == null) {
-      item.score = result.score
-      item.evaluation = result.evaluation || null
-      break
-    }
+  // 得分徽章挂在本回合的导师点评气泡（回合开始的第一个助手气泡）上，
+  // 保证「得分 + 具体分析」展示在下一题气泡之前；不能倒序找最近气泡（那是下一题）
+  if (commentBubble && commentBubble.role === 'assistant') {
+    commentBubble.score = result.score
+    commentBubble.evaluation = result.evaluation || null
   }
 }
 

@@ -62,6 +62,15 @@ public interface AiModelClient {
     }
 
     /**
+     * 开场自我介绍结构化评估：不对照知识点标准答案，按信息完整度/表达结构/岗位相关性评估；
+     * 需携带 goodPoints/badPoints/improvedAnswer 详细反馈；返回值保证合法，解析失败时返回 null 由调用方兜底。
+     * 默认实现返回 null，Mock 等实现无需感知。
+     */
+    default AnswerEvaluation evaluateIntroDetail(String intro, String position) {
+        return null;
+    }
+
+    /**
      * 追问生成：基于原题与评估发现的遗漏/错误要点，生成同知识点换角度的追问题面（纯文本）。
      */
     String generateFollowUpQuestion(String prompt);

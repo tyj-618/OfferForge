@@ -122,6 +122,33 @@ class ProjectQuestionGeneratorTests {
         assertThat(questions.get(0).difficulty()).isEqualTo(Difficulty.HARD);
     }
 
+    @Test
+    void generatesProjectQuestionsFromIntroBackground() {
+        when(aiModelClient.generateProjectQuestions(anyString())).thenReturn(List.of(
+                new AiGeneratedQuestion("介绍你的项目架构", "项目架构", List.of("要点1"), "MEDIUM"),
+                new AiGeneratedQuestion("技术难点追问", "", List.of("要点2"), null)));
+
+        List<InterviewQuestionBank.InterviewQuestion> questions =
+                generator.generateProjectQuestionsFromBackground("候选人自述背景：\n项目名称：UniNook\n技术栈：Java");
+
+        // Prompt 携带自述背景并说明未提供简历，避免模型虚构前提
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(aiModelClient).generateProjectQuestions(prompt.capture());
+        assertThat(prompt.getValue()).contains("候选人未提供简历").contains("项目名称：UniNook");
+
+        assertThat(questions).hasSize(2);
+        assertThat(questions.get(0).knowledgePoint()).isEqualTo("项目架构");
+        // 知识点空白回退「项目经历」；难度缺省 MEDIUM
+        assertThat(questions.get(1).knowledgePoint()).isEqualTo("项目经历");
+        assertThat(questions.get(1).difficulty()).isEqualTo(Difficulty.MEDIUM);
+    }
+
+    @Test
+    void backgroundQuestionsEmptyWhenBackgroundBlank() {
+        assertThat(generator.generateProjectQuestionsFromBackground(null)).isEmpty();
+        assertThat(generator.generateProjectQuestionsFromBackground("  ")).isEmpty();
+    }
+
     private QuestionRecord projectRecord(String question, String answer, double score, List<String> missedPoints) {
         AnswerEvaluation evaluation = new AnswerEvaluation(score, score, score, score, score,
                 List.of(), missedPoints, List.of(), "点评", null, null, null);

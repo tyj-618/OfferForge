@@ -16,10 +16,11 @@ import java.util.List;
 /**
  * 项目题与深挖题生成：
  * <ul>
- *   <li>PROJECT 阶段：从简历项目经历中选技术栈最丰富的项目，调 LLM 生成 2-3 个问题</li>
+ *   <li>PROJECT 阶段：从简历项目经历中选技术栈最丰富的项目，调 LLM 生成 2-3 个问题；
+ *       未选简历时基于开场对话收集的自述背景生成针对性项目题</li>
  *   <li>DEEP 阶段：基于 PROJECT 阶段的问题与回答（低分优先）生成深挖题</li>
  * </ul>
- * 生成失败或无简历时由调用方降级到通用题库。
+ * 生成失败或无可用素材时由调用方降级到通用题库。
  */
 @Component
 public class ProjectQuestionGenerator {
@@ -54,6 +55,26 @@ public class ProjectQuestionGenerator {
                         question.question(),
                         String.join("\n", question.referenceAnswer()),
                         knowledgePoint,
+                        parseDifficulty(question.difficulty(), Difficulty.MEDIUM)))
+                .toList();
+    }
+
+    /**
+     * 基于开场对话收集的候选人自述背景生成项目题（未选简历时的替代链路）：
+     * 背景为空白返回空列表，生成失败同样返回空由调用方降级到通用题库。
+     */
+    public List<InterviewQuestionBank.InterviewQuestion> generateProjectQuestionsFromBackground(String background) {
+        if (background == null || background.isBlank()) {
+            return List.of();
+        }
+        List<AiGeneratedQuestion> generated = aiModelClient.generateProjectQuestions(buildBackgroundProjectPrompt(background));
+        return generated.stream()
+                .map(question -> new InterviewQuestionBank.InterviewQuestion(
+                        question.question(),
+                        String.join("\n", question.referenceAnswer()),
+                        question.knowledgePoint() == null || question.knowledgePoint().isBlank()
+                                ? PROJECT_KNOWLEDGE_POINT
+                                : question.knowledgePoint(),
                         parseDifficulty(question.difficulty(), Difficulty.MEDIUM)))
                 .toList();
     }
@@ -142,6 +163,35 @@ public class ProjectQuestionGenerator {
                 orDefault(project.techStack()),
                 orDefault(project.role()),
                 orDefault(project.highlights()));
+    }
+
+    String buildBackgroundProjectPrompt(String background) {
+        return """
+                你是一个技术面试官，正在面试一位候选人。候选人未提供简历，以下是开场对话中收集到的候选人自述背景：
+
+                %s
+
+                请根据候选人的自述背景生成 2-3 个面试问题，要求：
+                1. 第一个问题围绕项目整体架构或设计思路（宏观）
+                2. 第二个问题深入某个技术细节或难点（微观）
+                3. 第三个问题考察候选人在项目中的思考和成长（反思）
+                4. 问题必须紧扣候选人提到的具体项目与技术栈，不要泛泛而谈；
+                   背景中信息不足时可围绕候选人提到的模块追问具体职责与实现
+                5. 用中文提问，每个问题附带标准答案要点（3-5 个关键要点）
+                6. 不得虚构背景中未提及的项目或技术栈作为提问前提，
+                   但可针对背景内容要求候选人补充细节（如数据量、方案对比）
+                7. 请返回与简历出题相同格式的 JSON：
+                {
+                  "questions": [
+                    {
+                      "question": "问题内容",
+                      "knowledgePoint": "考察的知识点",
+                      "referenceAnswer": ["要点1", "要点2", "要点3"],
+                      "difficulty": "EASY/MEDIUM/HARD"
+                    }
+                  ]
+                }
+                """.formatted(background);
     }
 
     String buildDeepPrompt(String projectName, String question, String userAnswer,

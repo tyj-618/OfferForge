@@ -10,11 +10,11 @@ for kw in '训练模式' '实战模式' '深度训练' '下一板块' '退出深
   echo "$kw: $n"
 done
 echo "--- backend endpoints (no-auth http codes) ---"
-curl -sk -o /dev/null -w "deep-training=%{http_code} " -X POST "https://offerforge.joinuninook.com/api/interview/nonexist/deep-training"
-curl -sk -o /dev/null -w "deep-training-exit=%{http_code} " -X POST "https://offerforge.joinuninook.com/api/interview/nonexist/deep-training/exit"
-curl -sk -o /dev/null -w "next-question=%{http_code} " -X POST "https://offerforge.joinuninook.com/api/interview/nonexist/next-question"
-curl -sk -o /dev/null -w "followup-removed=%{http_code} " -X POST "https://offerforge.joinuninook.com/api/interview/nonexist/followup"
-curl -sk -o /dev/null -w "auth-me=%{http_code}\n" "https://offerforge.joinuninook.com/api/auth/me"
+curl -sk -o /dev/null -w "deep-training=%{http_code} " -X POST "https://easyofferforge.com/api/interview/nonexist/deep-training"
+curl -sk -o /dev/null -w "deep-training-exit=%{http_code} " -X POST "https://easyofferforge.com/api/interview/nonexist/deep-training/exit"
+curl -sk -o /dev/null -w "next-question=%{http_code} " -X POST "https://easyofferforge.com/api/interview/nonexist/next-question"
+curl -sk -o /dev/null -w "followup-removed=%{http_code} " -X POST "https://easyofferforge.com/api/interview/nonexist/followup"
+curl -sk -o /dev/null -w "auth-me=%{http_code}\n" "https://easyofferforge.com/api/auth/me"
 echo "--- sse resilience + user cache keywords in index bundle ---"
 IDX=$(docker exec offerforge-frontend sh -c 'ls /usr/share/nginx/html/assets/index-*.js' | head -1)
 for kw in authRetry 40100 'AI 响应超时' '连接已中断' offerforge_user 'deep-training' '/api/auth/me'; do

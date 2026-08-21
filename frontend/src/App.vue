@@ -3,6 +3,8 @@ import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ToastHub from './components/ToastHub.vue'
 import { authApi, authState, clearToken, currentUser, fetchCurrentUser } from './api'
+// 品牌横版 logo（透明底）：替代旧版 emoji + 文字品牌区，Vite 构建时指纹化到 dist
+import logoUrl from './assets/logo.png'
 
 const route = useRoute()
 const router = useRouter()
@@ -50,7 +52,9 @@ async function logout() {
 <template>
   <div class="app">
     <header v-if="loggedIn" class="topbar">
-      <div class="brand">🎯 Easy Offer Forge</div>
+      <div class="brand">
+        <img :src="logoUrl" alt="Easy Offer Forge" class="brand-logo" />
+      </div>
       <nav class="nav">
         <RouterLink
           v-for="item in navItems"
@@ -87,6 +91,12 @@ async function logout() {
   font-weight: 700;
 }
 
+.brand-logo {
+  display: block;
+  height: 30px;
+  width: auto;
+}
+
 .nav {
   display: flex;
   gap: 24px;
@@ -117,6 +127,10 @@ async function logout() {
 
   .brand {
     font-size: 16px;
+  }
+
+  .brand-logo {
+    height: 24px;
   }
 
   /* 移动端导航单行横向滑动，避免 8 个入口折行显得杂乱 */

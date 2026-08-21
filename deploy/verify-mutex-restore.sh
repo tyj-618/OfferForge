@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 验证互斥与刷新恢复新字段：注册新用户 -> 开始训练模式面试 -> 检查 status 新字段 -> 面试进行中开训练被拒 -> 收尾
 set -u
-B=https://offerforge.joinuninook.com/api
+B=https://easyofferforge.com/api
 U="mutex_$(date +%s%N)"
 
 curl -s -X POST "$B/auth/register" -H 'Content-Type: application/json' \
