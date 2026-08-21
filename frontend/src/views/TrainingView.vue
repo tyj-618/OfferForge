@@ -131,9 +131,20 @@ onMounted(async () => {
   loadCategories()
   loadRecords()
   refreshQuota()
+  const targetCategory = typeof route.query.category === 'string' ? route.query.category.trim() : ''
   // 恢复会话：切标签回来直接沿用模块级消息；刷新页面按后端历史完整重建对话
   const restored = await restoreTrainingSession()
   if (restored) {
+    // 面试「深入该模块」跳转带目标分组，但存在未完成的旧训练：
+    // 后端同一时刻只能有一场训练，直接开局必被拒；弹确认结束旧训练后再开局
+    if (targetCategory) {
+      confirmReplaceSession.value = {
+        oldSessionId: trainingSession.sessionId,
+        oldCategory: trainingSession.status?.category || '当前训练',
+        targetCategory
+      }
+      return
+    }
     phase.value = 'active'
     scrollDown()
     return
@@ -141,11 +152,35 @@ onMounted(async () => {
   // 无可恢复会话：回到选题页
   phase.value = 'select'
   // 任务 4：带目标分组跳转而来（面试「深入该模块」）：自动开启该分组专项训练
-  const targetCategory = route.query.category
-  if (typeof targetCategory === 'string' && targetCategory.trim()) {
-    startTraining(targetCategory.trim())
+  if (targetCategory) {
+    startTraining(targetCategory)
   }
 })
+
+// 深入跳转撞上未完成旧训练的二次确认：确认则结束旧训练（成绩归档）后开局目标分组
+const confirmReplaceSession = ref(null)
+
+async function confirmReplaceAndStart() {
+  const payload = confirmReplaceSession.value
+  confirmReplaceSession.value = null
+  if (!payload) {
+    return
+  }
+  try {
+    await trainingApi.finish(payload.oldSessionId)
+  } catch {
+    // finish 幂等；归档失败不阻断新训练开局
+  }
+  clearTrainingSession()
+  startTraining(payload.targetCategory)
+}
+
+function cancelReplaceSession() {
+  confirmReplaceSession.value = null
+  // 放弃深入：沿用已恢复的旧训练继续作答
+  phase.value = 'active'
+  scrollDown()
+}
 
 // 流式内容/新消息/阶段提示变化时滚到底部，保证最新内容可见
 watch(
@@ -462,6 +497,21 @@ function scrollDown() {
     <div v-else class="card restoring-card">
       <p class="muted">正在恢复训练会话…</p>
     </div>
+
+    <!-- 深入跳转撞上未完成旧训练：确认结束旧训练后才开局目标分组 -->
+    <div v-if="confirmReplaceSession" class="loading-overlay">
+      <div class="card confirm-dialog">
+        <h3>开始「{{ confirmReplaceSession.targetCategory }}」专项训练？</h3>
+        <p class="muted">
+          你有一场未完成的「{{ confirmReplaceSession.oldCategory }}」训练，
+          继续将结束并归档该训练后开始新训练。
+        </p>
+        <div class="confirm-actions">
+          <button class="secondary" @click="cancelReplaceSession">继续上次训练</button>
+          <button @click="confirmReplaceAndStart">结束旧训练并开始</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -479,6 +529,25 @@ function scrollDown() {
 .restoring-card {
   padding: 48px 20px;
   text-align: center;
+}
+
+/* 深入跳转替换旧训练的二次确认弹窗：与面试页确认弹窗同款 */
+.confirm-dialog {
+  width: 380px;
+  max-width: 90vw;
+  text-align: center;
+  padding: 28px;
+}
+
+.confirm-dialog h3 {
+  margin-bottom: 10px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 20px;
 }
 
 /* 气泡内 Markdown 渲染（与面试页同配置）：v-html 内容需穿透 scoped 样式 */
