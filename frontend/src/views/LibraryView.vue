@@ -754,25 +754,112 @@ onMounted(() => {
 }
 
 @media (max-width: 767px) {
+  /* 小屏收窄卡片内边距与标题，内容区更宽敞 */
+  .card {
+    padding: 14px 12px;
+  }
+
+  .page-head .page-title {
+    font-size: 18px;
+  }
+
+  /* 页头：标题与上传按钮单行排布，按钮紧凑不被挤压 */
+  .page-head {
+    gap: 8px;
+  }
+
+  .pick-file-btn {
+    flex-shrink: 0;
+    padding: 7px 12px;
+    font-size: 13px;
+  }
+
+  /* 两个标签等宽铺满，对称整齐 */
+  .tab {
+    flex: 1;
+    padding: 8px 0;
+    text-align: center;
+    font-size: 13px;
+  }
+
+  /* 筛选区纵向：chips 在上，搜索框全宽在下 */
   .filter-bar {
     flex-direction: column;
     align-items: stretch;
+    gap: 10px;
   }
 
   .search-input {
     width: 100%;
+    min-width: 0;
   }
 
+  /* 批量操作栏：第一行全选+计数，第二行两个等宽按钮 */
   .batch-bar {
-    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+
+  .batch-bar .ghost {
+    flex: 1 1 45%;
+    min-width: 0;
+    padding: 8px 6px;
+    font-size: 13px;
+  }
+
+  /* 条目行：题面独占一行，标签与展开箭头落第二行，层次清晰 */
+  .item-head {
+    padding: 10px 2px;
+  }
+
+  .item-main {
+    gap: 6px;
+  }
+
+  .item-question {
+    flex: 1 1 100%;
+    line-height: 1.5;
+  }
+
+  .badges .badge {
+    max-width: 150px;
   }
 
   .item-body {
-    padding-left: 4px;
+    padding: 0 2px 12px;
+  }
+
+  .answer-block {
+    padding: 10px 12px;
+    font-size: 12.5px;
+  }
+
+  /* 单条操作按钮等宽铺开，拇指易点 */
+  .item-actions {
+    gap: 10px;
+  }
+
+  .item-actions .ghost {
+    flex: 1;
+    padding: 8px 0;
+    text-align: center;
+  }
+
+  /* 迁移面板纵向堆叠，控件全部全宽 */
+  .move-panel {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px;
   }
 
   .move-select {
     max-width: 100%;
+  }
+
+  .move-input {
+    min-width: 0;
   }
 }
 </style>

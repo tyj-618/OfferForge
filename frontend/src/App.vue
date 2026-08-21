@@ -111,15 +111,39 @@ async function logout() {
 @media (max-width: 767px) {
   .topbar {
     flex-wrap: wrap;
-    gap: 8px 16px;
-    padding: 10px 16px;
+    gap: 6px 12px;
+    padding: 10px 14px;
   }
 
+  .brand {
+    font-size: 16px;
+  }
+
+  /* 移动端导航单行横向滑动，避免 8 个入口折行显得杂乱 */
   .nav {
-    gap: 14px;
+    gap: 16px;
     font-size: 13px;
     order: 3;
     flex-basis: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav a {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  /* 小屏空间有限：用户名让位给导航与退出按钮 */
+  .user-chip {
+    display: none;
   }
 }
 </style>
