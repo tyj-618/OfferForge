@@ -183,4 +183,21 @@ class InterviewPromptBuilderTests {
 
         assertThat(prompt).doesNotContain("<dialogue-history>").contains("NONE");
     }
+
+    @Test
+    void mentorFeedbackForbidsEmptyPlatitudesAndEmojis() {
+        // 反馈话术必须句句指向作答具体内容，禁止“继续保持…习惯”类空洞客套与表情符号
+        com.offerforge.ai.AnswerEvaluation evaluation = new com.offerforge.ai.AnswerEvaluation(
+                8, 8, 8, 8, 8, List.of("覆盖主要要点"), List.of(), List.of(), "回答良好", null, null, null);
+
+        List<ChatMessage> messages = builder.buildMentorFeedbackMessages(
+                List.of(), "Redis 常用数据类型？", evaluation, AssistantStyle.FRIENDLY);
+
+        assertThat(messages.get(0).content())
+                .contains("只表扬作答中具体做到的点").contains("空洞客套话");
+        String instruction = lastUserContent(messages);
+        assertThat(instruction).contains("每句话都必须针对作答的具体内容")
+                .contains("不使用表情符号")
+                .contains("不要加“继续保持…习惯”“继续加油”这类无信息量的客套话");
+    }
 }
