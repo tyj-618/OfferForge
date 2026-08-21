@@ -5,6 +5,8 @@ import com.offerforge.auth.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.List;
 import java.util.Map;
@@ -14,8 +16,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,7 +42,8 @@ class KnowledgeMasteryServiceTests {
         masteryRepository = mock(KnowledgeMasteryRepository.class);
         knowledgeRepository = mock(KnowledgeRepository.class);
         userRepository = mock(UserRepository.class);
-        service = new KnowledgeMasteryService(masteryRepository, knowledgeRepository, userRepository);
+        service = new KnowledgeMasteryService(masteryRepository, knowledgeRepository, userRepository,
+                mock(PlatformTransactionManager.class));
     }
 
     private KnowledgeMastery mastery(KnowledgeMastery.MarkType type, int count) {
@@ -175,6 +180,43 @@ class KnowledgeMasteryServiceTests {
         assertThat(fresh.getKnowledgeItemId()).isEqualTo(405L);
         assertThat(fresh.getMarkType()).isEqualTo(KnowledgeMastery.MarkType.CROSS);
         assertThat(fresh.getMarkCount()).isEqualTo(1);
+    }
+
+    @Test
+    void insertConflictRetriesOnceAndCancelsExistingMark() {
+        // 并发首次写入撞唯一键（竞争者已先写入 1 红叉）：重试一次走已有记录分支做抵消
+        KnowledgeMastery rivalCross = mastery(KnowledgeMastery.MarkType.CROSS, 1);
+        when(masteryRepository.findByUserIdAndKnowledgeItemId(USER_ID, ITEM_ID))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(rivalCross));
+        doThrow(new DataIntegrityViolationException("uk_mastery_user_item"))
+                .when(masteryRepository).save(any(KnowledgeMastery.class));
+
+        service.recordCheck(USER_ID, ITEM_ID);
+
+        // save 仅首次尝试调用过一次（抛冲突），重试走抵消分支归零删除，不再新增记录
+        verify(masteryRepository, times(1)).save(any(KnowledgeMastery.class));
+        verify(masteryRepository).delete(rivalCross);
+    }
+
+    @Test
+    void weeklyDecayIsolatesFailurePerUser() {
+        // 单用户衰减失败（如唯一键竞争）仅告警跳过，不影响其余用户
+        UserEntity failing = new UserEntity();
+        failing.setId(10L);
+        UserEntity healthy = new UserEntity();
+        healthy.setId(11L);
+        when(userRepository.findAll()).thenReturn(List.of(failing, healthy));
+        when(masteryRepository.findByUserId(10L)).thenThrow(new RuntimeException("simulated conflict"));
+        KnowledgeMastery cross = masteryOf(11L, 501L, KnowledgeMastery.MarkType.CROSS, 1);
+        when(masteryRepository.findByUserId(11L)).thenReturn(List.of(cross));
+        when(knowledgeRepository.findVisibleItemIds(11L)).thenReturn(List.of(501L));
+
+        service.weeklyDecay();
+
+        // 失败用户未落库，健康用户照常衰减（红叉 +1）
+        assertThat(cross.getMarkCount()).isEqualTo(2);
+        verify(masteryRepository, never()).findByUserIdAndKnowledgeItemId(anyLong(), anyLong());
     }
 
     @Test

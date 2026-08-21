@@ -298,8 +298,6 @@ public class InterviewService {
                     InterviewState phase = context.getState();
                     String question = context.getCurrentQuestion();
                     log.info("interview sessionId={} phase={} question marked mastered", sessionId, phase);
-                    masteryService.resolveItemId(question, context.getUserId())
-                            .ifPresent(itemId -> masteryService.recordCheck(context.getUserId(), itemId));
                     messageStore.append(sessionId, List.of(ChatMessage.user("（已掌握本题，继续下一题）")));
                     context.recordPassedQuestion(question);
                     // 同作答回合：标记评估中，正常/异常路径均复位
@@ -315,6 +313,9 @@ public class InterviewService {
                         action = StateTransitionStrategy.Action.NEW_QUESTION;
                         askNextQuestion(context, sessionId, phase, sink);
                     }
+                    // 回合推进成功后才落库绿勾：LLM 中途失败时前端重试将重走整回合，
+                    // 避免把绿勾记到已推进但用户未见的新题上；失败仅告警不打断已完成的回合
+                    recordCheckQuietly(context.getUserId(), question, sessionId);
                     context.setEvaluating(false);
                     sessionStore.save(context);
                     // score 为 null：前端不展示得分徽章
@@ -345,14 +346,17 @@ public class InterviewService {
                 InterviewContext context = requireOwnedSession(userId, sessionId);
                 requireMarkablePhase(context);
                 InterviewState phase = context.getState();
+                String question = context.getCurrentQuestion();
                 log.info("interview sessionId={} phase={} question marked dont-know", sessionId, phase);
-                masteryService.resolveItemId(context.getCurrentQuestion(), context.getUserId())
-                        .ifPresent(itemId -> masteryService.recordCross(context.getUserId(), itemId));
                 LlmCallContext.bind(credentialResolver.resolveFor(userId));
                 LlmCallContext.setUsageListener(context::addTokenUsage);
                 try {
-                    // 复用作答主流程：红叉已预先记录，强制 0 分后联动跳过避免重复记录
-                    return answerInternal(context, sessionId, "不知道", true, sink);
+                    // 复用作答主流程：强制 0 分且跳过评分联动
+                    InterviewTurnResult result = answerInternal(context, sessionId, "不知道", true, sink);
+                    // 整回合（含评估与推进）成功后才落库红叉：中途失败时前端重试重走整回合，
+                    // 避免同一题累计多个红叉；失败仅告警不打断已完成的回合
+                    recordCrossQuietly(context.getUserId(), question, sessionId);
+                    return result;
                 } finally {
                     LlmCallContext.clear();
                 }
@@ -401,7 +405,7 @@ public class InterviewService {
         context.recordAnswer(context.getCurrentQuestion(), userMessage, evaluation);
         updateScoreStreaks(context, overall);
 
-        // 训练模式评分联动：>8 分加绿勾、<5 分加红叉；「不知道」已预记红叉不重复（forceZeroScore 跳过）
+        // 训练模式评分联动：>8 分加绿勾、<5 分加红叉；「不知道」在回合成功后单独记红叉（见 markDontKnow）
         if (!forceZeroScore && context.isTrainingMode()) {
             linkMastery(context, overall);
         }
@@ -500,6 +504,26 @@ public class InterviewService {
                         masteryService.recordCross(context.getUserId(), itemId);
                     }
                 });
+    }
+
+    /** mastered 绿勾落库（降级）：回合已推进完成，落库失败仅告警不让用户重试整回合 */
+    private void recordCheckQuietly(Long userId, String question, String sessionId) {
+        try {
+            masteryService.resolveItemId(question, userId)
+                    .ifPresent(itemId -> masteryService.recordCheck(userId, itemId));
+        } catch (RuntimeException exception) {
+            log.warn("interview sessionId={} record check failed question={}", sessionId, preview(question), exception);
+        }
+    }
+
+    /** dontknow 红叉落库（降级）：回合已完成，落库失败仅告警不让用户重试整回合 */
+    private void recordCrossQuietly(Long userId, String question, String sessionId) {
+        try {
+            masteryService.resolveItemId(question, userId)
+                    .ifPresent(itemId -> masteryService.recordCross(userId, itemId));
+        } catch (RuntimeException exception) {
+            log.warn("interview sessionId={} record cross failed question={}", sessionId, preview(question), exception);
+        }
     }
 
     /**
@@ -765,13 +789,14 @@ public class InterviewService {
     private void askFollowUpQuestion(InterviewContext context, String sessionId, String followUpQuestion,
                                      String answerPreview, List<String> missedPoints, List<String> wrongPoints,
                                      InterviewStreamSink sink) throws IOException {
-        context.setCurrentQuestion(followUpQuestion);
-        context.setCurrentQuestionFollowUp(true);
-        context.setCurrentFollowUpCount(context.getCurrentFollowUpCount() + 1);
         List<ChatMessage> messages = promptBuilder.buildFollowUpMessages(
                 messageStore.list(sessionId), followUpQuestion, answerPreview, missedPoints, wrongPoints,
                 context.getStyle());
         streamAndRecord(sessionId, messages, sink);
+        // 话术流式成功后才切换当前题：中途失败时当前题保持原题，客户端重试可完整重走回合
+        context.setCurrentQuestion(followUpQuestion);
+        context.setCurrentQuestionFollowUp(true);
+        context.setCurrentFollowUpCount(context.getCurrentFollowUpCount() + 1);
     }
 
     /**
@@ -820,6 +845,15 @@ public class InterviewService {
             advance(context, sessionId, sink);
             return;
         }
+        log.info("interview question asked sessionId={} phase={} difficulty={} question={}",
+                sessionId, phase, context.getCurrentDifficulty(), preview(question.question()));
+        List<ChatMessage> messages = promptBuilder.buildInterviewerMessages(
+                messageStore.list(sessionId), phase, question.question(), context.getMode(),
+                lastAnswerSummary(context), resumeSummaryFor(context), context.getStyle(),
+                context.getPosition(), context.getSelectedCategories());
+        streamAndRecord(sessionId, messages, sink);
+        // 话术流式成功后才提交当前题切换：中途失败时当前题保持原题，
+        // 客户端重试标记端点可完整重走回合，不会静默消耗用户未见的新题
         context.setCurrentQuestion(question.question());
         context.setCurrentCandidateAnswer(question.candidateAnswer());
         context.setCurrentQuestionPhase(phase);
@@ -827,14 +861,6 @@ public class InterviewService {
         context.setCurrentQuestionFollowUp(false);
         context.setCurrentFollowUpCount(0);
         context.recordQuestionAsked(phase);
-        log.info("interview question asked sessionId={} phase={} difficulty={} followUp={} question={}",
-                sessionId, phase, context.getCurrentDifficulty(), context.isCurrentQuestionFollowUp(),
-                preview(question.question()));
-        List<ChatMessage> messages = promptBuilder.buildInterviewerMessages(
-                messageStore.list(sessionId), phase, question.question(), context.getMode(),
-                lastAnswerSummary(context), resumeSummaryFor(context), context.getStyle(),
-                context.getPosition(), context.getSelectedCategories());
-        streamAndRecord(sessionId, messages, sink);
     }
 
     /**

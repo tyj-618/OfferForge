@@ -206,8 +206,6 @@ public class TrainingService {
             }
             String question = context.getCurrentQuestion();
             log.info("training sessionId={} question marked mastered", sessionId);
-            masteryService.resolveItemId(question, context.getUserId())
-                    .ifPresent(itemId -> masteryService.recordCheck(context.getUserId(), itemId));
             messageStore.append(sessionId, List.of(ChatMessage.user("（已掌握本题，继续下一题）")));
             context.recordPassedQuestion(question);
             // 同作答回合：标记评估中，正常/异常路径均复位
@@ -216,6 +214,9 @@ public class TrainingService {
             LlmCallContext.bind(credentialResolver.resolveFor(userId));
             try {
                 boolean finished = advanceToNextOrFinish(context, sessionId, sink);
+                // 回合推进成功后才落库绿勾：LLM 中途失败时前端重试重走整回合，
+                // 避免把绿勾记到已切换但用户未见的新题上；失败仅告警不打断已完成的回合
+                recordCheckQuietly(context.getUserId(), question, sessionId);
                 context.setEvaluating(false);
                 sessionStore.save(context);
                 // score 为 null：前端不展示得分徽章
@@ -242,13 +243,16 @@ public class TrainingService {
             if (context.isFinished()) {
                 throw new BusinessException(ErrorCode.CONFLICT, "本场专项训练已完成");
             }
+            String question = context.getCurrentQuestion();
             log.info("training sessionId={} question marked dont-know", sessionId);
-            masteryService.resolveItemId(context.getCurrentQuestion(), context.getUserId())
-                    .ifPresent(itemId -> masteryService.recordCross(context.getUserId(), itemId));
             LlmCallContext.bind(credentialResolver.resolveFor(userId));
             try {
-                // 复用作答主流程：红叉已预先记录，强制 0 分后联动跳过避免重复记录
-                return answerInternal(context, sessionId, "不知道", true, sink);
+                // 复用作答主流程：强制 0 分且跳过评分联动
+                TrainingTurnResult result = answerInternal(context, sessionId, "不知道", true, sink);
+                // 整回合（含评估与推进）成功后才落库红叉：中途失败时前端重试重走整回合，
+                // 避免同一题累计多个红叉；失败仅告警不打断已完成的回合
+                recordCrossQuietly(context.getUserId(), question, sessionId);
+                return result;
             } catch (IOException | RuntimeException exception) {
                 context.setEvaluating(false);
                 sessionStore.save(context);
@@ -293,7 +297,7 @@ public class TrainingService {
                 context.getCurrentQuestion(), context.getCurrentKnowledgePoint(), overall,
                 userMessage, comment, evaluation));
         updateScoreStreaks(context, overall);
-        // 评分联动：>8 分绿勾、<5 分红叉；「不知道」已预记红叉不重复（forceZeroScore 跳过）
+        // 评分联动：>8 分绿勾、<5 分红叉；「不知道」在回合成功后单独记红叉（见 dontknow）
         if (!forceZeroScore) {
             linkMastery(context, overall);
         }
@@ -326,13 +330,34 @@ public class TrainingService {
             finish(context, sessionId);
             return true;
         }
-        applyQuestion(context, next.get());
         sink.progress("正在准备下一题…");
         streamAndRecordSink(sessionId, promptBuilder.buildCoachMessages(
                 messageStore.list(sessionId), context.getCategory(),
-                context.getCurrentQuestion(), context.askedCount() + 1,
+                next.get().question(), context.askedCount() + 1,
                 context.getCurrentDifficulty().label(), context.getStyle()), sink);
+        // 话术流式成功后才切换当前题：中途失败时当前题保持原题，客户端重试可完整重走回合
+        applyQuestion(context, next.get());
         return false;
+    }
+
+    /** mastered 绿勾落库（降级）：回合已推进完成，落库失败仅告警不让用户重试整回合 */
+    private void recordCheckQuietly(Long userId, String question, String sessionId) {
+        try {
+            masteryService.resolveItemId(question, userId)
+                    .ifPresent(itemId -> masteryService.recordCheck(userId, itemId));
+        } catch (RuntimeException exception) {
+            log.warn("training sessionId={} record check failed question={}", sessionId, preview(question), exception);
+        }
+    }
+
+    /** dontknow 红叉落库（降级）：回合已完成，落库失败仅告警不让用户重试整回合 */
+    private void recordCrossQuietly(Long userId, String question, String sessionId) {
+        try {
+            masteryService.resolveItemId(question, userId)
+                    .ifPresent(itemId -> masteryService.recordCross(userId, itemId));
+        } catch (RuntimeException exception) {
+            log.warn("training sessionId={} record cross failed question={}", sessionId, preview(question), exception);
+        }
     }
 
     /** 评分联动掌握度：高于 8 分加绿勾，低于 5 分加红叉；题库外题目 resolveItemId 返回 empty 天然不记录 */
