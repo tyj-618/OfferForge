@@ -84,6 +84,17 @@ CREATE TABLE IF NOT EXISTS training_record (
 -- 存量库升级（训练报告逐题明细）：旧记录 details_json 为 NULL，报告页降级为仅概要
 -- ALTER TABLE training_record ADD COLUMN details_json LONGTEXT NULL AFTER finished_at;
 
+-- 面试岗位设置：当前选中岗位 + 用户自定义岗位清单（岗位选择持久保留直到用户更改）
+CREATE TABLE IF NOT EXISTS position_setting (
+    id                   BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id              BIGINT      NOT NULL,
+    current_position     VARCHAR(64) NULL,
+    custom_positions_json LONGTEXT   NULL,
+    UNIQUE KEY uk_position_setting_user (user_id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS api_key (
     id            BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id       BIGINT       NOT NULL,

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { marked } from 'marked'
 import {
@@ -133,21 +133,15 @@ async function loadCategories() {
   }
 }
 
-// 有简历时按简历技能关键词推荐分组并默认勾选（仅追加，不覆盖用户手动勾选）
+// 有简历时按简历技能关键词推荐分组（仅 ⭐ 展示；无持久化岗位时默认勾选）
 async function loadRecommendedCategories() {
   if (!selectedResumeId.value) {
     return
   }
   try {
-    const recommended = await knowledgeApi.recommend(selectedResumeId.value)
-    recommendedCategories.value = recommended || []
-    for (const name of recommendedCategories.value) {
-      if (!selectedCategories.value.includes(name)) {
-        selectedCategories.value.push(name)
-      }
-    }
+    recommendedCategories.value = (await knowledgeApi.recommend(selectedResumeId.value)) || []
   } catch {
-    // 推荐失败静默降级：不勾选任何分组
+    // 推荐失败静默降级：不展示推荐
   }
 }
 
@@ -155,43 +149,131 @@ async function loadRecommendedCategories() {
 const officialOptions = computed(() => categoryOptions.value.filter((opt) => opt.official))
 const customOptions = computed(() => categoryOptions.value.filter((opt) => !opt.official))
 
-// 岗位与资料标签的关键词匹配：取岗位中英文词/两字中文段，与标签名双向包含匹配
-const positionSuggestions = computed(() => {
-  const text = position.value.trim().toLowerCase()
-  if (!text) {
-    return []
+// 预设岗位：每个岗位预先绑定官方题库技术栈标签（选择后自动勾选，非关键词匹配）
+const PRESET_POSITIONS = [
+  {
+    name: 'Java 后端工程师',
+    tags: ['Java基础', 'Java集合', 'Java并发', 'JVM', 'Spring', 'Spring Boot', 'MySQL', 'Redis', '计算机网络', '设计模式']
+  },
+  {
+    name: 'Java 开发实习生',
+    tags: ['Java基础', 'Java集合', 'Spring', 'Spring Boot', 'MySQL', '计算机网络']
+  },
+  {
+    name: 'Java 高级工程师',
+    tags: ['Java并发', 'JVM', 'Spring', 'Spring Boot', 'MySQL', 'Redis', '设计模式', '计算机网络']
   }
-  const tokens = new Set()
-  for (const word of text.match(/[a-z0-9+#.]{2,}/g) || []) {
-    tokens.add(word)
+]
+
+// 岗位设置持久化：当前选中岗位 + 用户自定义岗位（后端保存，一直保持直到用户更改）
+const customPositions = ref([])
+const positionPickerOpen = ref(false)
+const positionPickerRef = ref(null)
+
+const currentPositionTags = computed(() => {
+  const preset = PRESET_POSITIONS.find((p) => p.name === position.value)
+  if (preset) {
+    return preset.tags
   }
-  for (let i = 0; i + 2 <= text.length; i++) {
-    const seg = text.slice(i, i + 2)
-    if (/^[\u4e00-\u9fa5]{2}$/.test(seg)) {
-      tokens.add(seg)
-    }
-  }
-  return categoryOptions.value
-    .filter((opt) => [...tokens].some((token) => opt.name.toLowerCase().includes(token)))
-    .map((opt) => opt.name)
+  const custom = customPositions.value.find((p) => p.name === position.value)
+  return custom ? custom.tags : []
 })
 
-// 填入岗位后自动勾选匹配标签（仅追加）；岗位与所选标签随 start 传给后端作为面试官设定
-watch(positionSuggestions, (names) => {
-  for (const name of names) {
-    if (!selectedCategories.value.includes(name)) {
-      selectedCategories.value.push(name)
-    }
-  }
-})
+// 选中岗位：自动勾选其绑定的官方标签，同名自定义标签一并勾选（替换式，随后用户可手动微调）
+function selectPosition(name) {
+  position.value = name
+  positionPickerOpen.value = false
+  applyPositionTags(name)
+  savePositionSetting()
+}
 
-function toggleCategory(name) {
-  const idx = selectedCategories.value.indexOf(name)
-  if (idx >= 0) {
-    selectedCategories.value.splice(idx, 1)
+function clearPosition() {
+  position.value = ''
+  positionPickerOpen.value = false
+  savePositionSetting()
+}
+
+function applyPositionTags(name) {
+  const preset = PRESET_POSITIONS.find((p) => p.name === name)
+  const custom = customPositions.value.find((p) => p.name === name)
+  const tags = preset ? preset.tags : (custom ? custom.tags : [])
+  const known = new Set(categoryOptions.value.map((opt) => opt.name))
+  selectedCategories.value = tags.filter((tag) => known.has(tag))
+}
+
+async function savePositionSetting() {
+  try {
+    await interviewApi.savePositionSetting({
+      currentPosition: position.value || null,
+      customPositions: customPositions.value
+    })
+  } catch {
+    // 保存失败不阻断面试（岗位与勾选本轮会话内仍生效）
+  }
+}
+
+// 恢复持久化岗位设置：需等分组列表加载完成后再勾选标签
+async function loadPositionSetting() {
+  try {
+    const setting = await interviewApi.positionSetting()
+    customPositions.value = setting?.customPositions || []
+    if (setting?.currentPosition) {
+      position.value = setting.currentPosition
+      applyPositionTags(setting.currentPosition)
+    }
+  } catch {
+    // 加载失败静默降级：不预设岗位
+  }
+}
+
+function onDocumentClick(event) {
+  if (positionPickerOpen.value && positionPickerRef.value && !positionPickerRef.value.contains(event.target)) {
+    positionPickerOpen.value = false
+  }
+}
+
+// 自定义岗位模态窗：补充岗位名 + 勾选绑定标签，保存后自动选中该岗位
+const customModalOpen = ref(false)
+const customModalError = ref('')
+const customPositionName = ref('')
+const customPositionTags = ref([])
+
+function openCustomPositionModal() {
+  positionPickerOpen.value = false
+  customModalError.value = ''
+  customPositionName.value = position.value && !PRESET_POSITIONS.some((p) => p.name === position.value) ? position.value : ''
+  // 预填当前已勾选标签，便于在此基础上微调
+  customPositionTags.value = [...selectedCategories.value]
+  customModalOpen.value = true
+}
+
+function saveCustomPosition() {
+  const name = customPositionName.value.trim()
+  if (!name) {
+    customModalError.value = '请输入岗位名称'
+    return
+  }
+  if (PRESET_POSITIONS.some((p) => p.name === name)) {
+    customModalError.value = '该名称与预设岗位重复，请换一个'
+    return
+  }
+  const tags = [...customPositionTags.value]
+  const existing = customPositions.value.findIndex((p) => p.name === name)
+  if (existing >= 0) {
+    customPositions.value[existing] = { name, tags }
   } else {
-    selectedCategories.value.push(name)
+    customPositions.value.push({ name, tags })
   }
+  customModalOpen.value = false
+  selectPosition(name)
+}
+
+function deleteCustomPosition(name) {
+  customPositions.value = customPositions.value.filter((p) => p.name !== name)
+  if (position.value === name) {
+    position.value = ''
+  }
+  savePositionSetting()
 }
 
 // 额度横幅三状态：有 Key 无限制 / 无 Key 剩余额度 / 额度用完引导配置
@@ -282,6 +364,7 @@ function isStreamingItem(item) {
 }
 
 onMounted(async () => {
+  document.addEventListener('click', onDocumentClick)
   // 开始卡片展示简历选择：一份自动选中，多份下拉选择
   try {
     resumes.value = await resumeApi.list()
@@ -291,8 +374,20 @@ onMounted(async () => {
   } catch {
     // 简历列表加载失败不阻断面试开始（后端会降级为通用项目题）
   }
-  loadCategories()
-  loadRecommendedCategories()
+  await loadCategories()
+  // 恢复持久化岗位设置（选择与自动勾选一直保留直到用户更改）
+  await loadPositionSetting()
+  if (!position.value) {
+    // 未选岗位：按简历推荐默认勾选；已选岗位则以岗位绑定的标签为准
+    await loadRecommendedCategories()
+    for (const name of recommendedCategories.value) {
+      if (!selectedCategories.value.includes(name)) {
+        selectedCategories.value.push(name)
+      }
+    }
+  } else {
+    loadRecommendedCategories()
+  }
   refreshQuota()
   // 刷新页面后恢复进行中的会话（状态栏与当前题；历史消息不回放）
   const saved = sessionStorage.getItem(SESSION_KEY)
@@ -311,6 +406,10 @@ onMounted(async () => {
   } catch {
     // 查询失败静默降级：不展示续考入口
   }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick)
 })
 
 // 恢复既有会话：刷新恢复与「继续未完成的面试」共用；
@@ -716,7 +815,53 @@ function scrollDown() {
 
     <!-- 开始卡片 -->
     <div v-if="phase === 'idle'" class="card start-card">
-      <h2>开始一场模拟面试</h2>
+      <div class="start-head">
+        <h2>开始一场模拟面试</h2>
+        <!-- 岗位选择器：预设/自定义岗位下拉，选择持久保留直到用户更改 -->
+        <div ref="positionPickerRef" class="position-picker">
+          <button type="button" class="position-picker-btn" :class="{ chosen: !!position }" :disabled="sending" @click="positionPickerOpen = !positionPickerOpen">
+            <span class="position-picker-label">{{ position || '选择面试岗位' }}</span>
+            <span class="picker-caret">▾</span>
+          </button>
+          <div v-if="positionPickerOpen" class="position-dropdown">
+            <button v-if="position" type="button" class="position-option clear-option" @click="clearPosition">✕ 不按岗位限定出题</button>
+            <div class="position-group-label">预设岗位</div>
+            <button
+              v-for="opt in PRESET_POSITIONS"
+              :key="opt.name"
+              type="button"
+              class="position-option"
+              :class="{ active: position === opt.name }"
+              @click="selectPosition(opt.name)"
+            >
+              <span class="position-name">{{ opt.name }}</span>
+              <span class="muted position-tag-count">{{ opt.tags.length }} 项技术栈</span>
+              <span v-if="position === opt.name" class="position-check">✓</span>
+            </button>
+            <template v-if="customPositions.length">
+              <div class="position-group-label">自定义岗位</div>
+              <div v-for="opt in customPositions" :key="opt.name" class="position-option-row">
+                <button
+                  type="button"
+                  class="position-option"
+                  :class="{ active: position === opt.name }"
+                  @click="selectPosition(opt.name)"
+                >
+                  <span class="position-name">{{ opt.name }}</span>
+                  <span class="muted position-tag-count">{{ opt.tags.length }} 项技术栈</span>
+                  <span v-if="position === opt.name" class="position-check">✓</span>
+                </button>
+                <button type="button" class="position-delete" title="删除该岗位" @click="deleteCustomPosition(opt.name)">×</button>
+              </div>
+            </template>
+            <div class="position-dropdown-divider"></div>
+            <button type="button" class="position-option add-option" @click="openCustomPositionModal">＋ 自定义岗位…</button>
+          </div>
+        </div>
+      </div>
+      <p v-if="position && currentPositionTags.length" class="position-applied muted">
+        已按岗位「{{ position }}」自动勾选 {{ currentPositionTags.length }} 项技术栈，可在下方出题范围中微调
+      </p>
       <!-- 任务 4：暂存续考入口（深入模块跳专项训练后回来接着考） -->
       <div v-if="resumableSession" class="resume-banner">
         <span>
@@ -746,7 +891,6 @@ function scrollDown() {
         </template>
       </div>
       <form class="start-row" @submit.prevent="proceedToModeSelect">
-        <input v-model="position" placeholder="面试岗位方向，如：Java 后端工程师（可留空）" :disabled="sending" />
         <button type="submit" :disabled="sending">开始面试</button>
       </form>
       <div class="resume-row">
@@ -772,22 +916,6 @@ function scrollDown() {
         <div class="category-head">
           <span class="muted">出题范围（可选，不勾选使用默认题库；所选标签会一并提供给面试官作为设定）：</span>
           <RouterLink class="category-link" to="/library">管理资源库 →</RouterLink>
-        </div>
-        <div v-if="positionSuggestions.length" class="suggest-row">
-          <span class="muted">🎯 根据岗位快捷选择：</span>
-          <div class="category-chips">
-            <button
-              v-for="name in positionSuggestions"
-              :key="'s' + name"
-              type="button"
-              class="chip-btn"
-              :class="{ active: selectedCategories.includes(name) }"
-              :disabled="sending"
-              @click="toggleCategory(name)"
-            >
-              {{ name }}
-            </button>
-          </div>
         </div>
         <template v-if="officialOptions.length">
           <div class="chip-group-title muted">官方题库标签</div>
@@ -1131,6 +1259,33 @@ function scrollDown() {
         <div v-if="phaseBanner" class="phase-banner">进入：{{ phaseBanner }}</div>
       </Transition>
     </template>
+
+    <!-- 自定义岗位模态窗：补充岗位名与对应技术栈标签，保存后持久生效 -->
+    <div v-if="customModalOpen" class="loading-overlay" @click.self="customModalOpen = false">
+      <div class="card confirm-dialog custom-position-dialog">
+        <h3>自定义岗位</h3>
+        <p class="muted">保存后可在岗位下拉中随时选用，岗位选择会一直保留直到你更改。</p>
+        <input
+          v-model="customPositionName"
+          class="custom-position-input"
+          placeholder="岗位名称，如：大数据开发工程师"
+          maxlength="64"
+          :disabled="sending"
+        />
+        <p class="muted custom-position-tip">选择该岗位对应的技术栈（官方题库与你的标签）：</p>
+        <div class="custom-tag-grid">
+          <label v-for="opt in categoryOptions" :key="'cp' + opt.name" class="chip-check">
+            <input v-model="customPositionTags" type="checkbox" :value="opt.name" :disabled="sending" />
+            <span>{{ opt.name }}<span v-if="opt.official" class="muted"> ·官方</span></span>
+          </label>
+        </div>
+        <p v-if="customModalError" class="error-text">{{ customModalError }}</p>
+        <div class="confirm-actions">
+          <button class="secondary" :disabled="sending" @click="customModalOpen = false">取消</button>
+          <button :disabled="sending" @click="saveCustomPosition">保存并使用</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1285,45 +1440,193 @@ function scrollDown() {
   font-size: 12px;
 }
 
-/* 岗位快捷选择：标题行 + 可点选矩形块（选中态对齐 chip-check 高亮） */
-.suggest-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.chip-group-title {
-  font-size: 12px;
-  margin-top: 2px;
-}
-
-.chip-btn {
+/* 岗位选择器：标题行右侧下拉，预设/自定义岗位持久保存 */
+.start-head {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.start-head h2 {
+  margin-bottom: 0;
+}
+
+.position-picker {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.position-picker-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 180px;
+  max-width: 280px;
   padding: 8px 12px;
-  border: 1px dashed var(--border);
-  border-radius: 4px;
-  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   background: #fff;
+  font-size: 14px;
   cursor: pointer;
-  user-select: none;
+  justify-content: space-between;
+}
+
+.position-picker-btn.chosen {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.position-picker-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chip-btn:hover {
-  border-color: var(--primary);
+.picker-caret {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.position-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  min-width: 280px;
+  max-width: 340px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card, #fff);
+  box-shadow: 0 8px 24px rgba(20, 30, 60, 0.12);
+  display: flex;
+  flex-direction: column;
+}
+
+.position-group-label {
+  padding: 6px 10px 2px;
+  font-size: 12px;
+  color: var(--muted, #8a8f99);
+}
+
+.position-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.position-option:hover {
+  background: #f2f5fb;
+}
+
+.position-option.active {
+  color: var(--primary);
+  background: rgba(64, 128, 255, 0.06);
+}
+
+.position-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.position-tag-count {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.position-check {
   color: var(--primary);
 }
 
-.chip-btn.active {
-  border-style: solid;
-  border-color: var(--primary);
+.position-option-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.position-option-row .position-option {
+  flex: 1;
+  min-width: 0;
+}
+
+.position-delete {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted, #8a8f99);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.position-delete:hover {
+  background: #fff1f0;
+  color: #e5484d;
+}
+
+.clear-option {
+  color: var(--muted, #8a8f99);
+  font-size: 13px;
+}
+
+.add-option {
   color: var(--primary);
-  background: rgba(64, 128, 255, 0.06);
+}
+
+.position-dropdown-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+.position-applied {
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+
+/* 自定义岗位模态窗 */
+.custom-position-dialog {
+  width: min(560px, 92vw);
+}
+
+.custom-position-input {
+  width: 100%;
+  margin: 10px 0 4px;
+}
+
+.custom-position-tip {
+  margin: 8px 0 6px;
+  font-size: 13px;
+}
+
+.custom-tag-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.chip-group-title {
+  font-size: 12px;
+  margin-top: 2px;
 }
 
 .resume-row select {
@@ -1913,7 +2216,27 @@ function scrollDown() {
     flex-basis: 100%;
   }
 
-  /* 开局卡片：岗位输入与开始面试按钮纵向铺开，避免窄屏挤压 */
+  /* 开局卡片：标题与岗位选择器纵向铺开，开始面试按钮铺满，避免窄屏挤压 */
+  .start-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .position-picker {
+    width: 100%;
+  }
+
+  .position-picker-btn {
+    width: 100%;
+    max-width: none;
+  }
+
+  .position-dropdown {
+    left: 0;
+    right: 0;
+    max-width: none;
+  }
+
   .start-row {
     flex-direction: column;
     align-items: stretch;

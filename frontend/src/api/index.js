@@ -184,7 +184,10 @@ export const interviewApi = {
   status: (sessionId) => http.get(`/interview/${sessionId}/status`),
   // 暂存续考（任务 4）：取未结束的面试会话，无则返回 null
   activeSession: () => http.get('/interview/active-session'),
-  finish: (sessionId) => http.post(`/interview/${sessionId}/finish`, null)
+  finish: (sessionId) => http.post(`/interview/${sessionId}/finish`, null),
+  // 岗位设置：当前选中岗位 + 自定义岗位清单（持久保存直到用户更改）
+  positionSetting: () => http.get('/interview/position-setting'),
+  savePositionSetting: (payload) => http.put('/interview/position-setting', payload)
 }
 
 // ---------- 简历 ----------
