@@ -13,6 +13,9 @@ spring:
       ddl-auto: create-drop
 
 offerforge:
+  admin:
+    # 集成测试专用管理员账号（AdminConsoleIntegrationTests 验证身份认定/封禁）
+    usernames: admin_tester
   ai:
     provider: mock
   search:

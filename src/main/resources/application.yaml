@@ -54,6 +54,9 @@ offerforge:
     refresh-cookie-secure: ${OFFERFORGE_AUTH_REFRESH_COOKIE_SECURE:false}
     access-token-ttl-seconds: ${OFFERFORGE_AUTH_ACCESS_TOKEN_TTL_SECONDS:7200}
     refresh-token-ttl-seconds: ${OFFERFORGE_AUTH_REFRESH_TOKEN_TTL_SECONDS:604800}
+  # 管理台：逗号分隔的管理员名单（用户名或邮箱均可，邮箱兼容验证码自动注册账号），未配置时无人具备管理员权限
+  admin:
+    usernames: ${OFFERFORGE_ADMIN_USERNAMES:}
   ai:
     provider: ${OFFERFORGE_AI_PROVIDER:mock}
     base-url: ${OFFERFORGE_AI_BASE_URL:}
@@ -101,10 +104,12 @@ offerforge:
     key: ${APIKEY_ENCRYPT_KEY:}
 
 # 腾讯云 SES 邮件推送（邮箱验证码）：凭据仅通过环境变量注入（禁止入库），
-# 生产（redis profile）必须配置 TENCENT_SECRET_ID/TENCENT_SECRET_KEY，否则发信失败
+# 生产（redis profile）必须配置 TENCENT_SECRET_ID/TENCENT_SECRET_KEY，否则发信失败；
+# 未开通「自定义发送」权限的账号必须配置 TENCENT_SES_TEMPLATE_ID（控制台已审核模板，内容含 {code} 变量）
 tencent:
   ses:
     secret-id: ${TENCENT_SECRET_ID:}
     secret-key: ${TENCENT_SECRET_KEY:}
     region: ${TENCENT_SES_REGION:ap-hongkong}
     from-email: ${TENCENT_SES_FROM_EMAIL:noreply@easyofferforge.com}
+    template-id: ${TENCENT_SES_TEMPLATE_ID:}

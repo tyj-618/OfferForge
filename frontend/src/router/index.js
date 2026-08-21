@@ -18,6 +18,8 @@ const routes = [
   // 训练报告详情：概要 + 逐题明细，支持查看/打印
   { path: '/training-report/:id', name: 'trainingReport', component: () => import('../views/TrainingReportView.vue') },
   { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
+  // 管理台：仅管理员可见入口（顶栏按 /api/admin/whoami 认定），非管理员直接访问由后端 40300 拒绝
+  { path: '/admin', name: 'admin', component: () => import('../views/AdminView.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/' }
 ]
 

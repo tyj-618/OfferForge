@@ -1,8 +1,8 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ToastHub from './components/ToastHub.vue'
-import { authApi, authState, clearToken, currentUser, fetchCurrentUser } from './api'
+import { adminApi, authApi, authState, clearToken, currentUser, fetchCurrentUser } from './api'
 // 品牌横版 logo（透明底）：替代旧版 emoji + 文字品牌区，Vite 构建时指纹化到 dist
 import logoUrl from './assets/logo.png'
 
@@ -21,8 +21,29 @@ onMounted(() => {
   }
 })
 
+// 管理台入口仅管理员可见：登录态变化时经 whoami 重新认定；未登录/非管理员隐藏入口项，
+// 避免非管理员看到无效入口；手动直访 /admin 由后端 40300 拒绝兼做兜底。
+const isAdmin = ref(false)
+
+function refreshAdminFlag() {
+  if (!authState.token) {
+    isAdmin.value = false
+    return
+  }
+  adminApi
+    .whoami()
+    .then((result) => {
+      isAdmin.value = !!result?.admin
+    })
+    .catch(() => {
+      isAdmin.value = false
+    })
+}
+
+watch(() => authState.token, refreshAdminFlag, { immediate: true })
+
 // 报告详情需 interviewId 参数，从历史记录列表进入；报告详情路由也高亮历史记录
-const navItems = [
+const baseNavItems = [
   { to: '/interview', label: '模拟面试', routes: ['interview'] },
   { to: '/training', label: '专项训练', routes: ['training'] },
   { to: '/', label: '快捷提问', routes: ['qa'] },
@@ -32,6 +53,11 @@ const navItems = [
   { to: '/docs', label: '文档', routes: ['docs'] },
   { to: '/settings', label: '设置', routes: ['settings'] }
 ]
+
+// 管理台入口动态追加，非管理员不可见
+const navItems = computed(() =>
+  isAdmin.value ? [...baseNavItems, { to: '/admin', label: '管理台', routes: ['admin'] }] : baseNavItems
+)
 
 // 按路由名精确匹配高亮，避免 vue-router 对 "/" 的前缀匹配导致快捷提问在所有页面常亮
 function isActive(item) {

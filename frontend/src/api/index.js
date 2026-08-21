@@ -450,3 +450,14 @@ export const reportApi = {
     http.get('/report/history', { params: mode ? { page, size, mode } : { page, size } }),
   progress: (limit = 10) => http.get('/report/progress', { params: { limit } })
 }
+
+// ---------- 管理台 ----------
+export const adminApi = {
+  // whoami 仅需登录：返回 { admin } 供顶栏判断是否展示管理入口；未登录报错由调用方忽略
+  whoami: () => http.get('/admin/whoami'),
+  stats: () => http.get('/admin/stats'),
+  // 用户分页：page 从 1 开始；keyword 按用户名/昵称/邮箱模糊匹配
+  users: (params) => http.get('/admin/users', { params }),
+  ban: (id) => http.post(`/admin/users/${id}/ban`, null),
+  unban: (id) => http.post(`/admin/users/${id}/unban`, null)
+}
