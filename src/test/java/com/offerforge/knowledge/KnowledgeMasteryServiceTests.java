@@ -21,11 +21,12 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
  * 掌握度标记服务单元测试：勾叉抵消规则、1~10 上下限、选题权重公式、
- * 资料库计数视图与每周衰减（绿勾 -1 / 其余题红叉 +1）。
+ * 资料库计数视图与每周衰减（仅针对训练过的题：绿勾 -1 / 红叉 +1）。
  */
 class KnowledgeMasteryServiceTests {
 
@@ -147,7 +148,7 @@ class KnowledgeMasteryServiceTests {
     }
 
     @Test
-    void weeklyDecayReducesChecksRaisesCrossesAndMarksUnseenItems() {
+    void weeklyDecayOnlyAffectsPracticedQuestions() {
         UserEntity user = new UserEntity();
         user.setId(USER_ID);
         when(userRepository.findAll()).thenReturn(List.of(user));
@@ -157,8 +158,6 @@ class KnowledgeMasteryServiceTests {
         KnowledgeMastery cross = masteryOf(USER_ID, 403L, KnowledgeMastery.MarkType.CROSS, 2);
         KnowledgeMastery fullCross = masteryOf(USER_ID, 404L, KnowledgeMastery.MarkType.CROSS, 10);
         when(masteryRepository.findByUserId(USER_ID)).thenReturn(List.of(singleCheck, multiCheck, cross, fullCross));
-        // 404 已标记、405 无标记：无标记题新增 1 红叉
-        when(knowledgeRepository.findVisibleItemIds(USER_ID)).thenReturn(List.of(404L, 405L));
 
         service.weeklyDecay();
 
@@ -167,19 +166,16 @@ class KnowledgeMasteryServiceTests {
         // 满 10 红叉不再累加
         assertThat(fullCross.getMarkCount()).isEqualTo(10);
 
-        // 两次 saveAll：第一次为衰减后的既有记录（3 勾→2、2 叉→3；满 10 叉不参与），第二次为无标记题新增红叉
+        // 仅一次 saveAll：衰减后的既有记录（3 勾→2、2 叉→3；满 10 叉不参与）
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<KnowledgeMastery>> captor = ArgumentCaptor.forClass(List.class);
-        verify(masteryRepository, org.mockito.Mockito.times(2)).saveAll(captor.capture());
-        List<List<KnowledgeMastery>> saved = captor.getAllValues();
-        assertThat(saved.get(0)).containsExactlyInAnyOrder(multiCheck, cross);
+        verify(masteryRepository, times(1)).saveAll(captor.capture());
+        assertThat(captor.getValue()).containsExactlyInAnyOrder(multiCheck, cross);
         assertThat(multiCheck.getMarkCount()).isEqualTo(2);
         assertThat(cross.getMarkCount()).isEqualTo(3);
-        assertThat(saved.get(1)).hasSize(1);
-        KnowledgeMastery fresh = saved.get(1).get(0);
-        assertThat(fresh.getKnowledgeItemId()).isEqualTo(405L);
-        assertThat(fresh.getMarkType()).isEqualTo(KnowledgeMastery.MarkType.CROSS);
-        assertThat(fresh.getMarkCount()).isEqualTo(1);
+        // 未练过的题不再新增红叉：无任何新增写入，也不查可见题集合
+        verify(masteryRepository, never()).save(any(KnowledgeMastery.class));
+        verifyNoInteractions(knowledgeRepository);
     }
 
     @Test
@@ -210,7 +206,6 @@ class KnowledgeMasteryServiceTests {
         when(masteryRepository.findByUserId(10L)).thenThrow(new RuntimeException("simulated conflict"));
         KnowledgeMastery cross = masteryOf(11L, 501L, KnowledgeMastery.MarkType.CROSS, 1);
         when(masteryRepository.findByUserId(11L)).thenReturn(List.of(cross));
-        when(knowledgeRepository.findVisibleItemIds(11L)).thenReturn(List.of(501L));
 
         service.weeklyDecay();
 

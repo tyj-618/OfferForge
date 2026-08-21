@@ -12,18 +12,16 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * 资料掌握度标记服务（绿勾/红叉）：
  * <ul>
  *   <li>抵消规则——同一题只存在一种标记：已有红叉时获绿勾则红叉 -1，反之亦然；</li>
  *   <li>数量上限 {@link #MAX_MARK_COUNT}：10 绿勾出题权重为 0（永不出题），10 红叉权重最高；</li>
- *   <li>每周衰减模拟遗忘：有绿勾则绿勾 -1，其余题目（含无标记）红叉 +1。</li>
+ *   <li>每周衰减模拟遗忘，仅针对训练过（已有标记）的知识点：绿勾 -1、红叉 +1；未练过的题不加红叉。</li>
  * </ul>
  */
 @Service
@@ -157,8 +155,9 @@ public class KnowledgeMasteryService {
     }
 
     /**
-     * 每周衰减（模拟遗忘）：绿勾 -1；其余题目（红叉与无标记）红叉 +1（上限 10）。
-     * 周一 04:00（Asia/Shanghai）执行；按用户独立小事务，单用户失败（如唯一键竞争）仅告警跳过不影响全局。
+     * 每周衰减（模拟遗忘）：仅处理训练过（已有标记）的知识点——绿勾 -1（归零删除）、红叉 +1（上限 10）；
+     * 未练过的题目不再自动加红叉。周一 04:00（Asia/Shanghai）执行；按用户独立小事务，
+     * 单用户失败（如唯一键竞争）仅告警跳过不影响全局。
      */
     @Scheduled(cron = "0 0 4 * * MON", zone = "Asia/Shanghai")
     public void weeklyDecay() {
@@ -176,12 +175,10 @@ public class KnowledgeMasteryService {
         log.info("mastery weekly decay finished users={} failed={}", succeeded, failed);
     }
 
-    /** 单用户衰减：绿勾 -1（归零删除）、红叉 +1（上限 10）、无标记可见题新增 1 个红叉 */
+    /** 单用户衰减：仅处理已有标记的题（标记均来自真实训练行为）——绿勾 -1（归零删除）、红叉 +1（上限 10） */
     private void decayForUser(Long userId) {
-        Map<Long, KnowledgeMastery> byItem = new HashMap<>();
         List<KnowledgeMastery> toSave = new ArrayList<>();
         for (KnowledgeMastery mastery : masteryRepository.findByUserId(userId)) {
-            byItem.put(mastery.getKnowledgeItemId(), mastery);
             if (mastery.getMarkType() == KnowledgeMastery.MarkType.CHECK) {
                 mastery.setMarkCount(mastery.getMarkCount() - 1);
                 mastery.setUpdatedAt(Instant.now());
@@ -196,22 +193,6 @@ public class KnowledgeMasteryService {
                 toSave.add(mastery);
             }
         }
-        // 无标记的可见题：新增 1 个红叉（长期未练逐渐滑向需复习状态）
-        Set<Long> marked = new HashSet<>(byItem.keySet());
-        List<KnowledgeMastery> freshCrosses = new ArrayList<>();
-        for (Long itemId : knowledgeRepository.findVisibleItemIds(userId)) {
-            if (marked.contains(itemId)) {
-                continue;
-            }
-            KnowledgeMastery cross = new KnowledgeMastery();
-            cross.setUserId(userId);
-            cross.setKnowledgeItemId(itemId);
-            cross.setMarkType(KnowledgeMastery.MarkType.CROSS);
-            cross.setMarkCount(1);
-            cross.setUpdatedAt(Instant.now());
-            freshCrosses.add(cross);
-        }
         masteryRepository.saveAll(toSave);
-        masteryRepository.saveAll(freshCrosses);
     }
 }
