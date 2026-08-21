@@ -156,4 +156,31 @@ class InterviewPromptBuilderTests {
 
         assertThat(lastUserContent(messages)).doesNotContain("<setup>");
     }
+
+    @Test
+    void introCheckPromptCarriesDialogueHistoryForCoreference() {
+        // 借鉴 UniNook AI 助手：每次调用必注入对话历史，供模型消解省略主语/指代的表述
+        List<ChatMessage> history = List.of(
+                ChatMessage.assistant("请先做一个简短的自我介绍。"),
+                ChatMessage.user("我是张三，有一个线上全栈项目 UniNook。"),
+                ChatMessage.assistant("能具体说说 UniNook 的 Java 后端部分吗？"));
+
+        String prompt = builder.buildIntroCheckPrompt("项目完全由我一人实现，技术栈有 spring boot、redis。",
+                null, "Java 后端工程师", history);
+
+        assertThat(prompt).contains("<dialogue-history>");
+        assertThat(prompt).contains("面试官：能具体说说 UniNook 的 Java 后端部分吗？");
+        assertThat(prompt).contains("候选人：我是张三，有一个线上全栈项目 UniNook。");
+        // 指代消解与防重复索要指令
+        assertThat(prompt).contains("结合对话历史理解其指向").contains("不得重复索要");
+        // 兼容 Mock 的确定性标记格式保持不变
+        assertThat(prompt).contains("自我介绍：项目完全由我一人实现");
+    }
+
+    @Test
+    void introCheckPromptWithoutHistoryOmitsDialogueBlock() {
+        String prompt = builder.buildIntroCheckPrompt("信息不全", null, null, List.of());
+
+        assertThat(prompt).doesNotContain("<dialogue-history>").contains("NONE");
+    }
 }

@@ -803,8 +803,10 @@ public class InterviewService {
             sink.progress("正在整理你的自我介绍…");
             String followUp = null;
             try {
+                // 携带开场环节完整对话历史：候选人后续补充常省略主语/用指代，
+                // 无历史时模型无法消解指代，会重复索要已提供过的信息
                 followUp = aiModelClient.generateIntroFollowUp(promptBuilder.buildIntroCheckPrompt(
-                        intro, resumeSummaryShared(context), context.getPosition()));
+                        intro, resumeSummaryShared(context), context.getPosition(), messageStore.list(sessionId)));
             } catch (RuntimeException exception) {
                 log.warn("intro completeness check failed sessionId={}", sessionId, exception);
             }
