@@ -94,13 +94,14 @@ public class BillingProperties {
         }
     }
 
-    /** 模型价目条目：paidOnly=true 的模型需充值后才可选用 */
+    /** 模型价目条目：paidOnly=true 的模型需充值后才可选用；provider 指定模型所属官方端点（system=默认，deepseek=DeepSeek 官方） */
     public static class ModelConfig {
         private String id;
         private String name;
         private long inputPerMillionCents;
         private long outputPerMillionCents;
         private boolean paidOnly;
+        private String provider = "system";
 
         public String getId() {
             return id;
@@ -140,6 +141,14 @@ public class BillingProperties {
 
         public void setPaidOnly(boolean paidOnly) {
             this.paidOnly = paidOnly;
+        }
+
+        public String getProvider() {
+            return provider;
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider;
         }
     }
 }

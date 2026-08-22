@@ -13,6 +13,8 @@ public class AiProperties {
     private int streamReadTimeoutSeconds = 60;
     private int maxRetries = 1;
     private int maxOutputTokens = 1024;
+    /** DeepSeek 官方接口独立端点：价目目录中 provider=deepseek 的模型走此凭据 */
+    private DeepSeek deepseek = new DeepSeek();
 
     public String getProvider() {
         return provider;
@@ -76,5 +78,35 @@ public class AiProperties {
 
     public void setMaxOutputTokens(int maxOutputTokens) {
         this.maxOutputTokens = maxOutputTokens;
+    }
+
+    public DeepSeek getDeepseek() {
+        return deepseek;
+    }
+
+    public void setDeepseek(DeepSeek deepseek) {
+        this.deepseek = deepseek;
+    }
+
+    /** DeepSeek 官方 OpenAI 兼容接口配置（base-url + 独立 API Key） */
+    public static class DeepSeek {
+        private String baseUrl = "";
+        private String apiKey = "";
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
+        }
     }
 }
