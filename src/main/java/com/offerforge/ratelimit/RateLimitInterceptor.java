@@ -105,6 +105,10 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         if ("POST".equalsIgnoreCase(method) && uri.equals("/api/billing/orders")) {
             return new Route("billing-order", qaAskLimit, false);
         }
+        // 模拟支付确认：同复用 qa 限额，防反复触发确认到账（仅 mock 渠道装配）
+        if ("POST".equalsIgnoreCase(method) && uri.matches("/api/billing/mock-pay/[^/]+")) {
+            return new Route("billing-mock-pay", qaAskLimit, false);
+        }
         // 快捷提问流式端点：同为重 LLM 开销，共用 qa 限额；429 需以 SSE error 帧下发
         if ("POST".equalsIgnoreCase(method) && uri.equals("/api/qa/ask-stream")) {
             return new Route("qa-ask", qaAskLimit, true);

@@ -54,11 +54,11 @@ public class RechargeOrderService {
 
     /**
      * 确认到账：PENDING → PAID（幂等），同事务内钱包入账；
-     * 非待支付状态重复回调直接忽略（渠道可能重复通知）。
+     * 订单行加排他锁，渠道并发重复回调时仅首个事务入账，后续事务见 PAID 直接忽略。
      */
     @Transactional
     public boolean markPaid(String orderNo, String providerTxnId) {
-        RechargeOrder order = orderRepository.findByOrderNo(orderNo)
+        RechargeOrder order = orderRepository.lockedByOrderNo(orderNo)
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "订单不存在"));
         if (RechargeOrder.STATUS_PAID.equals(order.getStatus())) {
             return false;

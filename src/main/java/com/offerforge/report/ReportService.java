@@ -3,7 +3,10 @@ package com.offerforge.report;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.offerforge.ai.AiModelClient;
+import com.offerforge.ai.LlmCallContext;
+import com.offerforge.ai.LlmCredentialResolver;
 import com.offerforge.ai.ReportSummary;
+import com.offerforge.billing.BillingMeteringService;
 import com.offerforge.common.ErrorCode;
 import com.offerforge.exception.BusinessException;
 import com.offerforge.interview.InterviewContext;
@@ -48,17 +51,23 @@ public class ReportService {
     private final InterviewService interviewService;
     private final InterviewSessionRepository sessionRepository;
     private final ObjectMapper objectMapper;
+    private final LlmCredentialResolver credentialResolver;
+    private final BillingMeteringService billingMeteringService;
 
     public ReportService(AiModelClient aiModelClient,
                          KnowledgeService knowledgeService,
                          InterviewService interviewService,
                          InterviewSessionRepository sessionRepository,
-                         ObjectMapper objectMapper) {
+                         ObjectMapper objectMapper,
+                         LlmCredentialResolver credentialResolver,
+                         BillingMeteringService billingMeteringService) {
         this.aiModelClient = aiModelClient;
         this.knowledgeService = knowledgeService;
         this.interviewService = interviewService;
         this.sessionRepository = sessionRepository;
         this.objectMapper = objectMapper;
+        this.credentialResolver = credentialResolver;
+        this.billingMeteringService = billingMeteringService;
     }
 
     /**
@@ -220,10 +229,21 @@ public class ReportService {
             summary = emptySessionSummary();
         } else {
             summary = null;
+            // 计费场次：报告总结同口径纳入计量，绑定本场凭据与用量监听，结束后必须清理防线程复用泄漏
+            boolean billable = context.isBillable();
+            if (billable) {
+                LlmCallContext.bind(credentialResolver.resolveFor(context.getUserId(), context.getSelectedModel()));
+                LlmCallContext.setUsageListener((inputTokens, outputTokens) -> billingMeteringService.recordUsage(
+                        context.getUserId(), context.getSelectedModel(), inputTokens, outputTokens));
+            }
             try {
                 summary = aiModelClient.generateReportSummary(buildSummaryPrompt(context, mains));
             } catch (Exception exception) {
                 log.warn("report summary generation failed, fallback to server-side summary: {}", exception.getMessage());
+            } finally {
+                if (billable) {
+                    LlmCallContext.clear();
+                }
             }
             if (summary == null) {
                 summary = fallbackSummary(mains, weakQuestions);

@@ -107,12 +107,26 @@ class BillingAccessServiceTest {
 
     @Test
     void paidOnlyModelWithoutBalanceThrowsInsufficientBalance() {
+        properties.setEnabled(true);
         when(apiKeyService.hasKey(1L)).thenReturn(false);
         when(walletService.canBill(1L)).thenReturn(false);
         when(walletService.balance(1L)).thenReturn(0L);
 
         assertThatThrownBy(() -> accessService.decide(1L, "test-paid"))
                 .isInstanceOf(InsufficientBalanceException.class);
+    }
+
+    @Test
+    void paidOnlyModelWhileBillingDisabledThrowsServiceUnavailable() {
+        properties.setEnabled(false);
+        when(apiKeyService.hasKey(1L)).thenReturn(false);
+
+        assertThatThrownBy(() -> accessService.decide(1L, "test-paid"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("充值服务暂未开放");
+        // 开关关闭时不应误报余额不足，也不触碰钱包查询
+
+        verify(walletService, never()).canBill(1L);
     }
 
     @Test

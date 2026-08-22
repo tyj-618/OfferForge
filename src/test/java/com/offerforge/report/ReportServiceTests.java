@@ -2,7 +2,9 @@ package com.offerforge.report;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.offerforge.ai.AnswerEvaluation;
+import com.offerforge.ai.LlmCredentialResolver;
 import com.offerforge.ai.MockAiModelClient;
+import com.offerforge.billing.BillingMeteringService;
 import com.offerforge.interview.InterviewContext;
 import com.offerforge.interview.InterviewService;
 import com.offerforge.interview.InterviewState;
@@ -35,7 +37,8 @@ class ReportServiceTests {
     private final ReportService reportService = new ReportService(
             new MockAiModelClient(), knowledgeService,
             mock(InterviewService.class), sessionRepository,
-            new ObjectMapper().findAndRegisterModules());
+            new ObjectMapper().findAndRegisterModules(),
+            mock(LlmCredentialResolver.class), mock(BillingMeteringService.class));
 
     @Test
     void reportComputesOverallDimensionAndPhaseAverages() {

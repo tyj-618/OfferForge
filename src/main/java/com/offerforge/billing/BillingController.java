@@ -146,22 +146,15 @@ public class BillingController {
     }
 
     /**
-     * 支付回调桩：mock 渠道按 orderNo 确认到账（联调用）；
-     * wechat 渠道审核通过后在此接入验签与到账确认，当前未验签一律不处理。
+     * 支付回调桩：仅预留给 wechat 渠道（审核通过后在此接入验签与到账确认）；
+     * 验签未接入前一律不处理任何通知。mock 渠道的到账确认走带鉴权与归属校验的 mock-pay 端点，
+     * 不在回调口开放匿名入账，避免订单号可枚举时被他人冒充入账。
      */
     @PostMapping("/notify")
     public ApiResponse<Map<String, Boolean>> notify(@RequestBody(required = false) Map<String, String> payload) {
-        if (!"mock".equals(paymentProvider.name())) {
-            // TODO 微信支付回调：验签 → markPaid；验签未接入前不处理任何通知
-            log.warn("billing notify received while provider={}, ignored", paymentProvider.name());
-            return ApiResponse.success(Map.of("accepted", false));
-        }
-        String orderNo = payload == null ? null : payload.get("orderNo");
-        if (orderNo == null || orderNo.isBlank()) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "缺少订单号");
-        }
-        boolean paid = orderService.markPaid(orderNo.trim(), "MOCK-" + System.currentTimeMillis());
-        return ApiResponse.success(Map.of("accepted", paid));
+        // TODO 微信支付回调：验签 → markPaid；验签未接入前不处理任何通知（含 mock 渠道）
+        log.warn("billing notify received while provider={}, ignored", paymentProvider.name());
+        return ApiResponse.success(Map.of("accepted", false));
     }
 
     private OrderView toView(RechargeOrder order) {

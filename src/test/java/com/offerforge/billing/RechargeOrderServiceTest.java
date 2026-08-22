@@ -93,7 +93,7 @@ class RechargeOrderServiceTest {
     @Test
     void markPaidTransitionsPendingToPaidAndRechargesWallet() {
         RechargeOrder pending = order("OF002", 1L, RechargeOrder.STATUS_PENDING);
-        when(orderRepository.findByOrderNo("OF002")).thenReturn(Optional.of(pending));
+        when(orderRepository.lockedByOrderNo("OF002")).thenReturn(Optional.of(pending));
         when(orderRepository.save(any(RechargeOrder.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         assertThat(orderService.markPaid("OF002", "MOCK-1")).isTrue();
@@ -106,7 +106,7 @@ class RechargeOrderServiceTest {
     @Test
     void markPaidIsIdempotentForAlreadyPaidOrder() {
         RechargeOrder paid = order("OF003", 1L, RechargeOrder.STATUS_PAID);
-        when(orderRepository.findByOrderNo("OF003")).thenReturn(Optional.of(paid));
+        when(orderRepository.lockedByOrderNo("OF003")).thenReturn(Optional.of(paid));
 
         assertThat(orderService.markPaid("OF003", "MOCK-2")).isFalse();
         // 重复回调不得二次入账
@@ -116,7 +116,7 @@ class RechargeOrderServiceTest {
     @Test
     void markPaidIgnoresCancelledOrder() {
         RechargeOrder cancelled = order("OF004", 1L, RechargeOrder.STATUS_CANCELLED);
-        when(orderRepository.findByOrderNo("OF004")).thenReturn(Optional.of(cancelled));
+        when(orderRepository.lockedByOrderNo("OF004")).thenReturn(Optional.of(cancelled));
 
         assertThat(orderService.markPaid("OF004", "MOCK-3")).isFalse();
         assertThat(cancelled.getStatus()).isEqualTo(RechargeOrder.STATUS_CANCELLED);

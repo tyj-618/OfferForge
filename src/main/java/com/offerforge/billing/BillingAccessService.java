@@ -50,7 +50,11 @@ public class BillingAccessService {
             return new Decision("user", false);
         }
         if (model != null && model.isPaidOnly()) {
+            // 总开关关闭时选付费模型：提示功能未开放而非余额不足，避免引导去不可用的充值页
             // 付费模型：必须有余额（且付费开关开启），直接进计费模式不占免费额度
+            if (!properties.isEnabled()) {
+                throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE, "充值服务暂未开放");
+            }
             if (!walletService.canBill(userId)) {
                 throw new InsufficientBalanceException(walletService.balance(userId));
             }
