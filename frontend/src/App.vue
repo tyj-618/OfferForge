@@ -60,7 +60,7 @@ watch(
 const baseNavItems = [
   { to: '/interview', label: '模拟面试', routes: ['interview'] },
   { to: '/training', label: '专项训练', routes: ['training'] },
-  { to: '/', label: '快捷提问', routes: ['qa'] },
+  { to: '/qa', label: '快捷提问', routes: ['qa'] },
   { to: '/history', label: '历史记录', routes: ['history', 'report'] },
   { to: '/resume', label: '简历', routes: ['resume'] },
   { to: '/library', label: '资源库', routes: ['library'] },

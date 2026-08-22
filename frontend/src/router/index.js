@@ -3,7 +3,8 @@ import { getToken } from '../api'
 
 const routes = [
   { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
-  { path: '/', name: 'qa', component: () => import('../views/QaView.vue') },
+  { path: '/', name: 'home', component: () => import('../views/HomeView.vue') },
+  { path: '/qa', name: 'qa', component: () => import('../views/QaView.vue') },
   { path: '/interview', name: 'interview', component: () => import('../views/InterviewView.vue') },
   { path: '/training', name: 'training', component: () => import('../views/TrainingView.vue') },
   { path: '/report/:interviewId', name: 'report', component: () => import('../views/ReportView.vue') },
