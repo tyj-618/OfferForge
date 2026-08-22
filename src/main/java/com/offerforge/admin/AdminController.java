@@ -2,6 +2,7 @@ package com.offerforge.admin;
 
 import com.offerforge.auth.CurrentUserService;
 import com.offerforge.common.ApiResponse;
+import com.offerforge.feedback.FeedbackService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,10 +23,13 @@ public class AdminController {
 
     private final AdminService adminService;
     private final CurrentUserService currentUserService;
+    private final FeedbackService feedbackService;
 
-    public AdminController(AdminService adminService, CurrentUserService currentUserService) {
+    public AdminController(AdminService adminService, CurrentUserService currentUserService,
+                           FeedbackService feedbackService) {
         this.adminService = adminService;
         this.currentUserService = currentUserService;
+        this.feedbackService = feedbackService;
     }
 
     @GetMapping("/whoami")
@@ -68,5 +72,15 @@ public class AdminController {
         adminService.requireAdmin(authorization);
         adminService.unban(id);
         return ApiResponse.success(true);
+    }
+
+    /** 问题反馈列表（倒序分页）：含提交用户、类型、正文与图片 */
+    @GetMapping("/feedbacks")
+    public ApiResponse<FeedbackService.FeedbackPage> feedbacks(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam(value = "page", defaultValue = "1") int page,
+            @RequestParam(value = "size", defaultValue = "10") int size) {
+        adminService.requireAdmin(authorization);
+        return ApiResponse.success(feedbackService.listAll(page, size));
     }
 }

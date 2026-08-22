@@ -184,3 +184,22 @@ CREATE TABLE IF NOT EXISTS recharge_order (
 -- CREATE TABLE IF NOT EXISTS user_wallet ( ... 同上定义 ... );
 -- CREATE TABLE IF NOT EXISTS wallet_transaction ( ... 同上定义 ... );
 -- CREATE TABLE IF NOT EXISTS recharge_order ( ... 同上定义 ... );
+
+-- 用户问题反馈：图文提交（图片 data URL 数组 JSON 存 LONGTEXT），管理台只读查看；
+-- username/email 为提交时刻快照，便于管理台直接展示不关联查用户表
+CREATE TABLE IF NOT EXISTS user_feedback (
+    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id    BIGINT      NOT NULL,
+    username   VARCHAR(64) NOT NULL,
+    email      VARCHAR(128) NULL,
+    type       VARCHAR(32) NOT NULL DEFAULT 'OTHER',
+    content    TEXT        NOT NULL,
+    images     LONGTEXT    NULL,
+    created_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_user_feedback_user_time (user_id, created_at)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+
+-- 存量库升级（问题反馈新增 1 张表）：
+-- CREATE TABLE IF NOT EXISTS user_feedback ( ... 同上定义 ... );

@@ -499,6 +499,12 @@ export const billingApi = {
   transactions: () => http.get('/billing/transactions')
 }
 
+// ---------- 问题反馈：图文提交（图片为 data URL 数组，最多 3 张单张≤1MB） ----------
+export const feedbackApi = {
+  submit: (type, content, images) => http.post('/feedback', { type, content, images }),
+  mine: () => http.get('/feedback/mine')
+}
+
 // ---------- 报告 ----------
 export const reportApi = {
   get: (interviewId) => http.get(`/report/${interviewId}`),
@@ -516,5 +522,7 @@ export const adminApi = {
   // 用户分页：page 从 1 开始；keyword 按用户名/昵称/邮箱模糊匹配
   users: (params) => http.get('/admin/users', { params }),
   ban: (id) => http.post(`/admin/users/${id}/ban`, null),
-  unban: (id) => http.post(`/admin/users/${id}/unban`, null)
+  unban: (id) => http.post(`/admin/users/${id}/unban`, null),
+  // 问题反馈列表（倒序分页）：仅管理员可访问，非管理员 40300
+  feedbacks: (params) => http.get('/admin/feedbacks', { params })
 }

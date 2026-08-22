@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { adminApi } from '../api'
 import { toast } from '../toast'
 
-// 管理台：统计概览 + 用户分页检索 + 封禁/解封（二次确认模态）
+// 管理台：用户管理（统计+分页检索+封禁/解封）与问题反馈（图文列表）两个标签页
 const stats = ref({ totalUsers: 0, todayNew: 0, bannedUsers: 0 })
 const keyword = ref('')
 const page = ref(1)
@@ -95,8 +95,43 @@ async function unban(user) {
 }
 
 onMounted(() => {
-  Promise.all([loadStats(), loadUsers()])
+  Promise.all([loadStats(), loadUsers(), loadFeedbacks()])
 })
+
+// ---------- 问题反馈标签页 ----------
+const activeTab = ref('users')
+const feedbackItems = ref([])
+const feedbackPage = ref(1)
+const feedbackSize = ref(10)
+const feedbackTotal = ref(0)
+const feedbackLoading = ref(false)
+// 图片放大预览：缩略图点击后模态展示原图
+const previewImage = ref('')
+
+const feedbackTypeLabels = { BUG: '问题缺陷', SUGGESTION: '功能建议', OTHER: '其他' }
+const feedbackTotalPages = computed(() => Math.max(1, Math.ceil(feedbackTotal.value / feedbackSize.value)))
+
+async function loadFeedbacks() {
+  feedbackLoading.value = true
+  try {
+    const result = await adminApi.feedbacks({ page: feedbackPage.value, size: feedbackSize.value })
+    feedbackItems.value = result.items
+    feedbackTotal.value = result.total
+  } catch (error) {
+    // 非管理员 40300：交由页面顶部禁用提示统一呈现，不另弹 toast
+    loadError.value = error.message || '加载失败'
+  } finally {
+    feedbackLoading.value = false
+  }
+}
+
+function gotoFeedbackPage(target) {
+  if (target < 1 || target > feedbackTotalPages.value || target === feedbackPage.value) {
+    return
+  }
+  feedbackPage.value = target
+  loadFeedbacks()
+}
 </script>
 
 <template>
@@ -105,6 +140,24 @@ onMounted(() => {
       <h2 class="page-title">管理台</h2>
       <p v-if="loadError" class="forbidden-tip">{{ loadError }}（仅管理员可访问此页面）</p>
       <template v-else>
+        <div class="admin-tabs">
+          <button
+            type="button"
+            :class="['admin-tab', { active: activeTab === 'users' }]"
+            @click="activeTab = 'users'"
+          >
+            用户管理
+          </button>
+          <button
+            type="button"
+            :class="['admin-tab', { active: activeTab === 'feedbacks' }]"
+            @click="activeTab = 'feedbacks'"
+          >
+            问题反馈（{{ feedbackTotal }}）
+          </button>
+        </div>
+
+        <template v-if="activeTab === 'users'">
         <div class="stats-row">
           <div class="stat-box">
             <span class="stat-value">{{ stats.totalUsers }}</span>
@@ -184,8 +237,50 @@ onMounted(() => {
             下一页
           </button>
         </div>
+        </template>
+
+        <!-- 问题反馈：倒序列表，含提交用户、类型、正文与图片（点击放大） -->
+        <template v-if="activeTab === 'feedbacks'">
+          <p v-if="feedbackLoading" class="empty-tip">加载中…</p>
+          <p v-else-if="!feedbackItems.length" class="empty-tip">暂无反馈</p>
+          <div v-for="item in feedbackItems" v-else :key="item.id" class="feedback-card">
+            <div class="feedback-head">
+              <span class="feedback-type">{{ feedbackTypeLabels[item.type] || item.type }}</span>
+              <span class="feedback-user">👤 {{ item.username }}<span v-if="item.email" class="feedback-email">（{{ item.email }}）</span></span>
+              <span class="feedback-time">{{ item.createdAt }}</span>
+            </div>
+            <p class="feedback-content">{{ item.content }}</p>
+            <div v-if="item.images && item.images.length" class="feedback-images">
+              <img
+                v-for="(src, index) in item.images"
+                :key="index"
+                :src="src"
+                alt="反馈截图"
+                @click="previewImage = src"
+              />
+            </div>
+          </div>
+          <div v-if="feedbackItems.length" class="pagination">
+            <button class="ghost" :disabled="feedbackPage <= 1" @click="gotoFeedbackPage(feedbackPage - 1)">
+              上一页
+            </button>
+            <span class="page-info">{{ feedbackPage }} / {{ feedbackTotalPages }} 页，共 {{ feedbackTotal }} 条</span>
+            <button
+              class="ghost"
+              :disabled="feedbackPage >= feedbackTotalPages"
+              @click="gotoFeedbackPage(feedbackPage + 1)"
+            >
+              下一页
+            </button>
+          </div>
+        </template>
       </template>
     </section>
+
+    <!-- 反馈图片放大预览 -->
+    <div v-if="previewImage" class="modal-overlay" @click.self="previewImage = ''">
+      <img :src="previewImage" class="preview-image" alt="反馈截图放大" />
+    </div>
 
     <!-- 封禁二次确认模态：风格与快捷提问清空会话确认一致 -->
     <div v-if="banTarget" class="modal-overlay" @click.self="cancelBan">
@@ -385,6 +480,109 @@ button.danger:disabled {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+/* ---------- 标签页与问题反馈列表 ---------- */
+.admin-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-tab {
+  padding: 8px 18px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font-size: 14px;
+  color: var(--text-light);
+  cursor: pointer;
+}
+
+.admin-tab:hover {
+  color: var(--primary);
+}
+
+.admin-tab.active {
+  color: var(--primary);
+  font-weight: 600;
+  border-bottom-color: var(--primary);
+}
+
+.empty-tip {
+  padding: 32px 0;
+  text-align: center;
+  color: var(--text-light);
+}
+
+.feedback-card {
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  background: #f5f6fa;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.feedback-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.feedback-type {
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--primary);
+  background: rgba(59, 130, 246, 0.1);
+  border-radius: 999px;
+}
+
+.feedback-user {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.feedback-email {
+  font-weight: 400;
+  color: var(--text-light);
+}
+
+.feedback-time {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+.feedback-content {
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.feedback-images {
+  display: flex;
+  gap: 8px;
+}
+
+.feedback-images img {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: zoom-in;
+}
+
+.preview-image {
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  border-radius: var(--radius);
+  background: #fff;
 }
 
 @media (max-width: 767px) {
