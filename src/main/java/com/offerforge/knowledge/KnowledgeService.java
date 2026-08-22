@@ -38,7 +38,8 @@ public class KnowledgeService {
             "knowledge/java-backend-questions.json",
             "knowledge/frontend-questions.json",
             "knowledge/go-testing-devops-questions.json",
-            "knowledge/ai-questions.json");
+            "knowledge/ai-questions.json",
+            "knowledge/algorithm-leetcode-questions.json");
     private static final int FALLBACK_TOKEN_LIMIT = 12;
     private static final int FALLBACK_CANDIDATES_PER_TOKEN = 20;
     /** 用户上传未指定分组时的默认分组 */

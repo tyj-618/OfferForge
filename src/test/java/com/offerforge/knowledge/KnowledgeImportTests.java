@@ -14,8 +14,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest
 class KnowledgeImportTests {
 
-    /** 内置官方题库总题数：4 个方向资源文件合计（64 Java + 52 前端 + 56 Go/测试/运维 + 46 AI） */
-    private static final int BUILTIN_TOTAL = 218;
+    /** 内置官方题库总题数：5 个方向资源文件合计（64 Java + 52 前端 + 56 Go/测试/运维 + 46 AI + 100 LeetCode 算法） */
+    private static final int BUILTIN_TOTAL = 318;
 
     @Autowired
     private KnowledgeService knowledgeService;
