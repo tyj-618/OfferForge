@@ -10,10 +10,12 @@ frontend/dist/
 data/
 *.log
 
-# 部署打包产物
+# 部署打包产物（排除日志文件，避免覆盖服务器运行日志）
 full-bundle.tar
 update-bundle.tar
 deploy-bundle.tar
+deploy-update.log
+deploy.log
 *.png
 !frontend/public/favicon.png
 !frontend/src/assets/logo.png
