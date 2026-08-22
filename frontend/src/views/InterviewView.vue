@@ -17,6 +17,7 @@ import {
 } from '../api'
 import { classifyError, notifyError } from '../utils/errors'
 import { isMobileViewport } from '../utils/device'
+import { getPreferredModel } from '../utils/modelPreference'
 import { toast } from '../toast'
 
 // 面试官话术含 Markdown（粗体/斜体/列表等），gfm + breaks；html 默认关闭，原始 HTML 会被转义
@@ -605,7 +606,7 @@ async function startInterview(selectedMode) {
   try {
     const data = await interviewApi.start(position.value.trim(), selectedResumeId.value || null, selectedMode,
       selectedCategories.value.length ? selectedCategories.value : null, includeAlgorithm.value || null,
-      selectedModel.value || null)
+      selectedModel.value || getPreferredModel() || null)
     mode.value = selectedMode
     sessionStorage.setItem(MODE_KEY, selectedMode)
     sessionId.value = data.sessionId

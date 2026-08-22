@@ -12,6 +12,7 @@ import {
 } from '../api'
 import { classifyError } from '../utils/errors'
 import { isMobileViewport } from '../utils/device'
+import { getPreferredModel } from '../utils/modelPreference'
 import { toast } from '../toast'
 import {
   trainingSession,
@@ -260,7 +261,7 @@ async function startTraining(category) {
   localError.value = ''
   starting.value = true
   try {
-    await startTrainingSession(category, fromInterview, selectedModel.value || null)
+    await startTrainingSession(category, fromInterview, selectedModel.value || getPreferredModel() || null)
     phase.value = 'active'
     refreshQuota()
     scrollDown()

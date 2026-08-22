@@ -1,8 +1,9 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { apiKeyApi } from '../api'
+import { apiKeyApi, billingApi, billingState, refreshBillingState } from '../api'
 import { notifyError } from '../utils/errors'
 import { toast } from '../toast'
+import { getPreferredModel, setPreferredModel } from '../utils/modelPreference'
 
 // 千问固定配置与后端 ApiKeyProvider 规则保持一致
 const QIANWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
@@ -92,6 +93,45 @@ async function removeKey() {
     removing.value = false
   }
 }
+
+// 官方模型选择：未配置自带 Key 时生效，模拟面试/专项训练将使用所选官方模型；
+// 计费开关关闭时仅官方免费档可选（如 DeepSeek-V4-Flash），付费档待充值功能开放后呈现
+const modelOptions = ref([])
+const preferredModel = ref(getPreferredModel())
+const savingModel = ref(false)
+
+const selectableModels = computed(() =>
+  modelOptions.value.filter((item) => billingState.enabled || !item.paidOnly)
+)
+
+async function loadModelOptions() {
+  try {
+    modelOptions.value = (await billingApi.models()) || []
+    // 已保存的偏好若已不可选（如付费档下线），回退系统默认
+    if (preferredModel.value && !selectableModels.value.some((item) => item.id === preferredModel.value)) {
+      preferredModel.value = ''
+    }
+  } catch {
+    // 价目加载失败不阻断页面：仅系统默认档可选，下次进入重试即恢复（此时偏好保留不重置）
+  }
+}
+
+function saveModelPreference() {
+  if (savingModel.value) {
+    return
+  }
+  savingModel.value = true
+  try {
+    setPreferredModel(preferredModel.value)
+    toast.success(preferredModel.value ? '已切换官方模型，下一场面试/训练生效' : '已恢复系统默认模型，下一场面试/训练生效')
+  } finally {
+    savingModel.value = false
+  }
+}
+
+onMounted(() => {
+  refreshBillingState().then(loadModelOptions)
+})
 </script>
 
 <template>
@@ -163,6 +203,29 @@ async function removeKey() {
           {{ saving ? '保存中…' : '保存' }}
         </button>
       </form>
+    </div>
+
+    <div class="card settings-card">
+      <h2>官方模型选择</h2>
+      <p class="muted">
+        未配置自带 API Key 时，模拟面试与专项训练将使用此处选择的官方模型（仍按每日免费额度计次）；
+        已配置自带 Key 时以你的 Key 为准，此选择不生效。
+      </p>
+      <div class="key-form">
+        <label class="field">
+          <span class="field-label muted">模型</span>
+          <select v-model="preferredModel" :disabled="savingModel">
+            <option value="">系统默认模型</option>
+            <option v-for="item in selectableModels" :key="item.id" :value="item.id">
+              {{ item.name }}
+            </option>
+          </select>
+        </label>
+        <p class="muted hint">切换后从下一场面试/训练开始生效，进行中的场次不受影响。</p>
+        <button type="button" :disabled="savingModel" @click="saveModelPreference">
+          {{ savingModel ? '保存中…' : '保存' }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

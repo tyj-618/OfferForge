@@ -468,11 +468,11 @@ data:{"code":40900,"message":"面试尚未开始"}
 ```json
 [
   { "id": "qwen-flash", "name": "通义千问 Flash（免费）", "inputPerMillionCents": 0, "outputPerMillionCents": 0, "paidOnly": false },
-  { "id": "deepseek-v4-flash", "name": "DeepSeek-V4-Flash（付费）", "inputPerMillionCents": 20, "outputPerMillionCents": 80, "paidOnly": true }
+  { "id": "deepseek-v4-flash", "name": "DeepSeek-V4-Flash（官方免费档）", "inputPerMillionCents": 20, "outputPerMillionCents": 80, "paidOnly": false }
 ]
 ```
 
-`deepseek-v4-flash` 走 DeepSeek 官方端点（独立 base-url / api-key 配置）；未配置凭据时回落系统默认端点。
+`deepseek-v4-flash` 为官方免费档：免费额度场次即可选用，走 DeepSeek 官方端点（独立 base-url / api-key 配置）；未配置凭据时回落系统默认端点。面试/训练开局通过 `model` 参数指定（设置页官方模型选择）。
 
 ### POST /billing/orders
 
