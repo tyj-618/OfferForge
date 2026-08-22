@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { apiKeyApi, billingApi, billingState, refreshBillingState } from '../api'
 import { notifyError } from '../utils/errors'
 import { toast } from '../toast'
@@ -98,7 +98,20 @@ async function removeKey() {
 // 计费开关关闭时仅官方免费档可选（如 DeepSeek-V4-Flash），付费档待充值功能开放后呈现
 const modelOptions = ref([])
 const preferredModel = ref(getPreferredModel())
+const savedModel = ref(getPreferredModel())
 const savingModel = ref(false)
+const modelJustSaved = ref(false)
+let modelSavedTimer = null
+
+// 下拉当前值与已保存值不同 → 有未保存变更（保存按钮仅此时可用）
+const modelDirty = computed(() => preferredModel.value !== savedModel.value)
+const savedModelName = computed(() => {
+  if (!savedModel.value) {
+    return ''
+  }
+  const found = modelOptions.value.find((item) => item.id === savedModel.value)
+  return found ? found.name : savedModel.value
+})
 
 const selectableModels = computed(() =>
   modelOptions.value.filter((item) => billingState.enabled || !item.paidOnly)
@@ -117,17 +130,28 @@ async function loadModelOptions() {
 }
 
 function saveModelPreference() {
-  if (savingModel.value) {
+  if (savingModel.value || !modelDirty.value) {
     return
   }
   savingModel.value = true
   try {
     setPreferredModel(preferredModel.value)
+    savedModel.value = preferredModel.value
+    // 卡片内联反馈短暂闪现后自动收起，常驻状态由下方「当前生效」条承载
+    modelJustSaved.value = true
+    clearTimeout(modelSavedTimer)
+    modelSavedTimer = setTimeout(() => {
+      modelJustSaved.value = false
+    }, 2400)
     toast.success(preferredModel.value ? '已切换官方模型，下一场面试/训练生效' : '已恢复系统默认模型，下一场面试/训练生效')
   } finally {
     savingModel.value = false
   }
 }
+
+onUnmounted(() => {
+  clearTimeout(modelSavedTimer)
+})
 
 onMounted(() => {
   refreshBillingState().then(loadModelOptions)
@@ -221,10 +245,29 @@ onMounted(() => {
             </option>
           </select>
         </label>
-        <p class="muted hint">切换后从下一场面试/训练开始生效，进行中的场次不受影响。</p>
-        <button type="button" :disabled="savingModel" @click="saveModelPreference">
-          {{ savingModel ? '保存中…' : '保存' }}
-        </button>
+        <p v-if="modelDirty" class="hint warning-text">有未保存的变更，保存后从下一场面试/训练开始生效。</p>
+        <p v-else class="muted hint">切换后保存，从下一场面试/训练开始生效，进行中的场次不受影响。</p>
+        <div class="model-action-row">
+          <button type="button" :disabled="savingModel || !modelDirty" @click="saveModelPreference">
+            {{ savingModel ? '保存中…' : '保存' }}
+          </button>
+          <span v-if="modelJustSaved" class="saved-flash">✓ 已保存</span>
+        </div>
+      </div>
+
+      <!-- 常驻生效状态：与 API Key「已配置」状态条同一呈现模式 -->
+      <div class="model-active">
+        <div class="key-status-row">
+          <span class="badge success">当前生效</span>
+          <span>{{ savedModel ? savedModelName : '系统默认模型' }}</span>
+        </div>
+        <p class="muted">
+          {{
+            savedModel
+              ? '下一场面试/训练将使用该官方模型（仍按每日免费额度计次）。'
+              : '下一场面试/训练将使用系统默认模型。'
+          }}
+        </p>
       </div>
     </div>
   </div>
@@ -294,5 +337,43 @@ input.readonly {
 
 .key-form button[type='submit'] {
   align-self: flex-start;
+}
+
+.model-action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.saved-flash {
+  color: var(--success);
+  font-size: 14px;
+  font-weight: 600;
+  animation: saved-flash-in 0.25s ease-out;
+}
+
+@keyframes saved-flash-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.warning-text {
+  color: var(--warning);
+}
+
+.model-active {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
 }
 </style>
