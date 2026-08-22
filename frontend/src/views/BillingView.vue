@@ -5,7 +5,8 @@ import { classifyError } from '../utils/errors'
 import { toast } from '../toast'
 
 // 充值中心：余额卡片 + 充值档位（下单 → 模拟支付 → 轮询到账）+ 模型价目 + 消费流水。
-// 支付渠道审核中：当前走 mock 渠道模拟支付，页面顶部给出内测提示条。
+// 审核期（计费开关关闭）页面完整展示，仅充值下单按钮提示审核中；
+// 支付渠道审核中且开关开启时走 mock 渠道模拟支付，页面顶部给出内测提示条。
 
 const packages = ref([])
 const models = ref([])
@@ -21,6 +22,9 @@ const pendingOrder = ref(null)
 let pollTimer = null
 
 const balanceYuan = computed(() => (billingState.balanceCents / 100).toFixed(2))
+
+// 审核期：开关关闭时页面正常展示，充值动作统一提示审核中（后端下单/支付同样拒绝兜底）
+const underReview = computed(() => billingState.loaded && !billingState.enabled)
 
 function yuan(cents) {
   return (cents / 100).toFixed(2)
@@ -44,16 +48,13 @@ async function loadAll() {
   loading.value = true
   localError.value = ''
   try {
-    const [status, packageList, modelList, transactionList, orderList] = await Promise.all([
+    const [, packageList, modelList, transactionList, orderList] = await Promise.all([
       refreshBillingState(),
       billingApi.packages(),
       billingApi.models(),
       billingApi.transactions(),
       billingApi.orders()
     ])
-    if (status && !status.enabled) {
-      localError.value = '充值功能暂未开放，敬请期待'
-    }
     packages.value = packageList || []
     models.value = modelList || []
     transactions.value = transactionList || []
@@ -70,7 +71,15 @@ function selectPackage(packageId) {
 }
 
 async function createOrder() {
-  if (!selectedPackageId.value || paying.value) {
+  if (paying.value) {
+    return
+  }
+  // 审核期：不发起下单，统一提示（后端 requireEnabled 同样会拒绝）
+  if (underReview.value) {
+    toast.info('相关功能正在审核中，敬请期待')
+    return
+  }
+  if (!selectedPackageId.value) {
     return
   }
   paying.value = true
@@ -150,7 +159,10 @@ function cancelPay() {
   <div class="page">
     <h1 class="page-title">充值中心</h1>
 
-    <p v-if="billingState.provider === 'mock'" class="beta-hint">
+    <p v-if="underReview" class="beta-hint">
+      充值功能正在审核中，当前页面仅供查看余额与价目；点击充值时暂不可用，审核通过后自动开放。
+    </p>
+    <p v-else-if="billingState.provider === 'mock'" class="beta-hint">
       内测提示：支付渠道审核中，当前为模拟支付（点击确认即到账），不涉及真实资金。
     </p>
 
@@ -187,7 +199,7 @@ function cancelPay() {
           </button>
         </div>
         <div class="package-actions">
-          <button :disabled="!selectedPackageId || paying" @click="createOrder">
+          <button :disabled="(!underReview && !selectedPackageId) || paying" @click="createOrder">
             {{ paying ? '处理中…' : '立即充值' }}
           </button>
         </div>

@@ -2,7 +2,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ToastHub from './components/ToastHub.vue'
-import { toast } from './toast'
 import { adminApi, authApi, authState, billingState, clearToken, currentUser, fetchCurrentUser, refreshBillingState } from './api'
 // 品牌横版 logo（透明底）：替代旧版 emoji + 文字品牌区，Vite 构建时指纹化到 dist
 import logoUrl from './assets/logo.png'
@@ -69,25 +68,19 @@ const baseNavItems = [
   { to: '/settings', label: '设置', routes: ['settings'] }
 ]
 
-// 充值入口常驻展示（设置之前）：开关关闭时点击提示审核中；管理台入口动态追加，非管理员不可见
+// 充值入口常驻展示（设置之前）：页面完整可进，仅充值按钮在审核期提示；管理台入口动态追加，非管理员不可见
 const navItems = computed(() => {
   const items = [...baseNavItems]
   items.splice(items.length - 1, 0, {
     to: '/billing',
     label: '充值',
-    routes: ['billing'],
-    disabled: !billingState.enabled
+    routes: ['billing']
   })
   if (isAdmin.value) {
     items.push({ to: '/admin', label: '管理台', routes: ['admin'] })
   }
   return items
 })
-
-// 审核中的功能入口：只展示不跳转，点击统一提示审核中（路由守卫另做直访拦截）
-function onDisabledNav() {
-  toast.info('相关功能正在审核中，敬请期待')
-}
 
 // 按路由名精确匹配高亮，避免 vue-router 对 "/" 的前缀匹配导致快捷提问在所有页面常亮
 function isActive(item) {
@@ -113,11 +106,7 @@ async function logout() {
       </div>
       <nav class="nav">
         <template v-for="item in navItems" :key="item.label">
-          <!-- 审核中的入口：保留展示，点击提示审核中不跳转 -->
-          <a v-if="item.disabled" href="#" class="nav-disabled" @click.prevent="onDisabledNav">
-            {{ item.label }}
-          </a>
-          <RouterLink v-else :to="item.to" :class="{ 'is-active': isActive(item) }">
+          <RouterLink :to="item.to" :class="{ 'is-active': isActive(item) }">
             {{ item.label }}
           </RouterLink>
         </template>
