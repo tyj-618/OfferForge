@@ -77,11 +77,12 @@ class MasteryMarkIntegrationTests {
         // 收尾环节无题可标记 → SSE error 40900
         assertThat(mark(sessionId, "mastered", token)).contains("event:error").contains("40900");
 
-        // 结束面试：3 题全部 mastered pass → 无作答记录，作答题数与综合分均为 0
+        // 结束面试：3 题全部 mastered pass → 无作答记录，属短场（问答不足门槛）：
+        // 不消耗免费次数且不记录历史，finish 返回 archived=false、无报告
         JsonNode finish = post("/api/interview/" + sessionId + "/finish", token, Map.of());
         assertCode(finish, 0);
-        assertThat(finish.at("/data/totalQuestions").asInt()).isZero();
-        assertThat(finish.at("/data/questionEvaluations").size()).isZero();
+        assertThat(finish.at("/data/archived").asBoolean()).isFalse();
+        assertThat(finish.at("/data/report").isNull()).isTrue();
     }
 
     @Test

@@ -93,12 +93,13 @@ class InterviewFlowIntegrationTests {
         String sse6 = ask(sessionId, token, "还能继续吗？");
         assertThat(sse6).contains("event:error").contains("面试已结束");
 
-        // finish：结束面试并返回综合反馈报告（3 题均 8 分 → 综合分 80）
+        // finish：结束面试并返回综合反馈报告（3 题均 8 分 → 综合分 80；达计次门槛正常归档）
         JsonNode finish = post("/api/interview/" + sessionId + "/finish", token, Map.of());
         assertCode(finish, 0);
-        assertThat(finish.at("/data/totalQuestions").asInt()).isEqualTo(3);
-        assertThat(finish.at("/data/overallScore").asDouble()).isEqualTo(80.0);
-        assertThat(finish.at("/data/questionEvaluations").size()).isEqualTo(3);
+        assertThat(finish.at("/data/archived").asBoolean()).isTrue();
+        assertThat(finish.at("/data/report/totalQuestions").asInt()).isEqualTo(3);
+        assertThat(finish.at("/data/report/overallScore").asDouble()).isEqualTo(80.0);
+        assertThat(finish.at("/data/report/questionEvaluations").size()).isEqualTo(3);
 
         // 报告可通过 GET 重复查询，且重复 finish 幂等
         JsonNode report = get("/api/report/" + sessionId, token);

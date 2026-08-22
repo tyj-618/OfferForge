@@ -33,6 +33,14 @@ public class QuotaService {
     }
 
     /**
+     * 有效场次计次门槛：问答次数不足该值的场次视为无效场次，
+     * 结束时不消耗免费额度（退还开局扣减）且不记录历史。
+     */
+    public int minBillableQuestions() {
+        return properties.getMinBillableQuestions();
+    }
+
+    /**
      * 剩余次数；额度关闭时返回 dailyLimit（展示上限，不约束）。
      */
     public int checkQuota(Long userId) {

@@ -54,8 +54,6 @@ public class InterviewService {
     private static final int RESUME_MAX_PROJECTS = 3;
     /** 面试岗位方向缺省值 */
     public static final String DEFAULT_POSITION = "Java 后端工程师";
-    /** 计次门槛：问答回合数不足该值的场次视为无效场次，结束时退还开局扣除的免费额度 */
-    public static final int MIN_BILLABLE_QUESTIONS = 5;
     /** 开场自我介绍回合的题面占位（导师反馈话术用；不渲染为独立题面气泡） */
     static final String INTRO_QUESTION_LABEL = "自我介绍";
     /** 开场自我介绍回合的知识点标记（不入知识库联动与报告） */
@@ -271,17 +269,26 @@ public class InterviewService {
     }
 
     /**
-     * 短场免费退还：问答次数不足 {@link #MIN_BILLABLE_QUESTIONS} 的场次不消耗免费额度，
+     * 有效场次计次门槛（可配，默认 5）：问答次数不足该值的场次不消耗免费额度且不记录历史。
+     */
+    public int minBillableQuestions() {
+        return quotaService.minBillableQuestions();
+    }
+
+    /**
+     * 短场免费退还：问答次数不足计次门槛的场次不消耗免费额度，
      * 结束时退还开局扣除的次数（仅 system 凭证场次；自带 Key 与额度关闭场景无操作）。
      */
     private void refundIfShortSession(InterviewContext context) {
         // 计费场次开局未扣免费额度，无需退还；仅 system 凭证的免费场次走退还
-        if (context.isBillable() || !"system".equals(context.getKeySource()) || context.totalQuestionsAsked() >= MIN_BILLABLE_QUESTIONS) {
+        if (context.isBillable() || !"system".equals(context.getKeySource())
+                || context.totalQuestionsAsked() >= quotaService.minBillableQuestions()) {
             return;
         }
         quotaService.refundQuota(context.getUserId());
         log.info("short session quota refunded sessionId={} userId={} asked={} threshold={}",
-                context.getSessionId(), context.getUserId(), context.totalQuestionsAsked(), MIN_BILLABLE_QUESTIONS);
+                context.getSessionId(), context.getUserId(), context.totalQuestionsAsked(),
+                quotaService.minBillableQuestions());
     }
 
     /**

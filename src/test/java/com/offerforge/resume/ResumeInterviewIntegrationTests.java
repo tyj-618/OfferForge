@@ -83,10 +83,11 @@ class ResumeInterviewIntegrationTests {
         // 报告：3 题均 8 分；逐题题面可验证项目题/深挖题与简历的关联
         JsonNode finish = post("/api/interview/" + sessionId + "/finish", token, Map.of());
         assertCode(finish, 0);
-        assertThat(finish.at("/data/totalQuestions").asInt()).isEqualTo(3);
-        assertThat(finish.at("/data/overallScore").asDouble()).isEqualTo(80.0);
-        assertThat(finish.at("/data/questionEvaluations/1/question").asText()).contains("秒杀系统");
-        assertThat(finish.at("/data/questionEvaluations/2/question").asText()).contains("深挖追问");
+        assertThat(finish.at("/data/archived").asBoolean()).isTrue();
+        assertThat(finish.at("/data/report/totalQuestions").asInt()).isEqualTo(3);
+        assertThat(finish.at("/data/report/overallScore").asDouble()).isEqualTo(80.0);
+        assertThat(finish.at("/data/report/questionEvaluations/1/question").asText()).contains("秒杀系统");
+        assertThat(finish.at("/data/report/questionEvaluations/2/question").asText()).contains("深挖追问");
     }
 
     @Test
@@ -122,7 +123,8 @@ class ResumeInterviewIntegrationTests {
         ask(sessionId, token, "结束");
         JsonNode finish = post("/api/interview/" + sessionId + "/finish", token, Map.of());
         assertCode(finish, 0);
-        assertThat(finish.at("/data/totalQuestions").asInt()).isEqualTo(3);
+        assertThat(finish.at("/data/archived").asBoolean()).isTrue();
+        assertThat(finish.at("/data/report/totalQuestions").asInt()).isEqualTo(3);
     }
 
     private String newUser() throws Exception {

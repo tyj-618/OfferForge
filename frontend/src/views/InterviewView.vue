@@ -361,7 +361,7 @@ const progressText = computed(() => {
 
 const isFinished = computed(() => status.value?.state === 'FINISHED')
 
-// 短场免费：问答不足 5 题的场次不消耗免费额度，结束确认时提示用户（仅免费额度用户展示）
+// 短场免费：问答不足 5 题的场次不消耗免费额度且不记录历史，结束确认时提示用户（仅免费额度用户展示）
 const finishFreeOfCharge = computed(() =>
   !quotaInfo.value?.hasOwnKey && (status.value?.askedCount ?? 0) < 5)
 
@@ -573,8 +573,13 @@ async function discardSavedInterview() {
     return
   }
   try {
-    await interviewApi.finish(target.sessionId)
-    toast.info('已放弃暂存的面试，报告已归档至历史记录')
+    const outcome = await interviewApi.finish(target.sessionId)
+    if (outcome && outcome.archived === false) {
+      toast.info('已放弃暂存的面试：本场问答不足 5 题，未消耗免费次数，也未记录到历史')
+      refreshQuota()
+    } else {
+      toast.info('已放弃暂存的面试，报告已归档至历史记录')
+    }
   } catch (e) {
     toast.error(classifyError(e).message)
   }
@@ -867,10 +872,20 @@ async function finishAndShowReport() {
   }
   phase.value = 'finishing'
   try {
-    // finish 触发报告生成与归档，随后跳转报告页
-    await interviewApi.finish(sessionId.value)
+    // finish 触发报告生成与归档；短场（问答不足门槛）不归档：提示后回开始页，不跳报告页
+    const outcome = await interviewApi.finish(sessionId.value)
     sessionStorage.removeItem(SESSION_KEY)
     sessionStorage.removeItem(MODE_KEY)
+    if (outcome && outcome.archived === false) {
+      toast.info('本场问答不足 5 题，未消耗免费次数，也未记录到历史')
+      refreshQuota()
+      sessionId.value = ''
+      status.value = null
+      messages.value = []
+      error.value = ''
+      phase.value = 'idle'
+      return
+    }
     router.push(`/report/${sessionId.value}`)
   } catch (e) {
     notifyError(e, finishAndShowReport)
@@ -1330,7 +1345,7 @@ function scrollDown() {
           <h3>确定提前结束面试？</h3>
           <p class="muted">未作答的剩余题目将被跳过，报告将基于已作答题目生成（跳过的题计 0 分）。</p>
           <p v-if="finishFreeOfCharge" class="muted finish-free-note">
-            💡 本次面试问答不足 5 题，结束面试不会扣除免费次数。
+            💡 本次面试问答不足 5 题，结束面试不会扣除免费次数，也不会记录到历史。
           </p>
           <div class="confirm-actions">
             <button class="secondary" @click="cancelFinish">继续面试</button>

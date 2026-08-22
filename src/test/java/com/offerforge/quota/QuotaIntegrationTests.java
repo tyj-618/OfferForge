@@ -22,12 +22,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * 免费额度端到端（daily-limit=2，各阶段题量 2，共 6 题）：
  * 完整场次（问答≥5 题）消耗额度，用完后第 3 场被拒（429 QUOTA_EXCEEDED）→ 配置自带 Key → 无限制；
- * 短场（问答不足 5 题）结束退还开局扣减，不消耗额度。
+ * 短场（问答不足 5 题）结束退还开局扣减，不消耗额度，且不记录历史。
  */
 @ActiveProfiles("test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "offerforge.quota.enabled=true",
         "offerforge.quota.daily-limit=2",
+        // 恢复生产计次门槛 5（test profile 降为 1）：短场退还与短场不记录历史的语义依赖该门槛
+        "offerforge.quota.min-billable-questions=5",
         // 每阶段 2 题共 6 题：保证完整场次可达 5 题计次门槛（存量 test profile 共 3 题永不足门槛）
         "offerforge.interview.max-basics-questions=2",
         "offerforge.interview.max-project-questions=2",
@@ -98,12 +100,16 @@ class QuotaIntegrationTests {
     void shortSessionUnderFiveQuestionsDoesNotConsumeQuota() throws Exception {
         String token = newUser();
 
-        // 开局即扣 1 次；零作答直接结束触发短场退还，额度回满（防误触消耗）
+        // 开局即扣 1 次；零作答直接结束触发短场退还，额度回满（防误触消耗）；
+        // 短场同时不记录历史：finish 返回 archived=false、report=null
         JsonNode start = post("/api/interview/start", token, Map.of());
         assertCode(start, 0);
         String sessionId = start.at("/data/sessionId").asText();
         assertThat(get("/api/quota", token).at("/data/remaining").asInt()).isEqualTo(1);
-        assertCode(post("/api/interview/" + sessionId + "/finish", token, Map.of()), 0);
+        JsonNode shortFinish = post("/api/interview/" + sessionId + "/finish", token, Map.of());
+        assertCode(shortFinish, 0);
+        assertThat(shortFinish.at("/data/archived").asBoolean()).isFalse();
+        assertThat(shortFinish.at("/data/report").isNull()).isTrue();
         assertThat(get("/api/quota", token).at("/data/remaining").asInt()).isEqualTo(2);
 
         // 作答不足 5 题（仅 2 题）提前结束：同样退还，重复短场不消耗额度
@@ -115,6 +121,11 @@ class QuotaIntegrationTests {
         ask(session2, token, LONG_ANSWER);
         assertCode(post("/api/interview/" + session2 + "/finish", token, Map.of()), 0);
         assertThat(get("/api/quota", token).at("/data/remaining").asInt()).isEqualTo(2);
+
+        // 两场短场均未归档：历史为空，报告查询 40400（不存在的会话）
+        assertThat(get("/api/report/history?page=0&size=10", token)
+                .at("/data/totalElements").asInt()).isZero();
+        assertCode(get("/api/report/" + sessionId, token), 40400);
     }
 
     /** 完整场次：开场自我介绍 + 逐题作答直到 CLOSING（6 题 ≥ 5 题计次门槛）后结束，真实消耗额度 */

@@ -184,7 +184,12 @@ async function confirmReplaceAndStart() {
     return
   }
   try {
-    await trainingApi.finish(payload.oldSessionId)
+    const result = await trainingApi.finish(payload.oldSessionId)
+    // 短场不归档：提示未消耗未记录，退还开局扣减后刷新额度横幅
+    if (result?.archived === false) {
+      toast.info('上一场训练作答不足 5 题，未消耗免费次数，也未记录到历史')
+      refreshQuota()
+    }
   } catch {
     // finish 幂等；归档失败不阻断新训练开局
   }
@@ -301,6 +306,11 @@ function onEnterSend(event) {
 function endSession() {
   phase.value = 'summary'
   loadRecords()
+  // 短场（问答不足门槛）：不消耗免费次数也不记录历史，提示用户并刷新额度横幅（退还开局扣减）
+  if (trainingSession.status?.archived === false) {
+    toast.info('本场作答不足 5 题，未消耗免费次数，也未记录到历史')
+    refreshQuota()
+  }
 }
 
 // 主动结束训练：归档已作答成绩后展示成绩卡
@@ -543,7 +553,8 @@ function scrollDown() {
           <span class="muted">最高难度</span>
         </div>
       </div>
-      <p class="muted">成绩已归档，可在本页「最近训练」中查看历史。</p>
+      <p v-if="status?.archived === false" class="muted">本场作答不足 5 题，未计入训练历史，也未消耗免费次数。</p>
+      <p v-else class="muted">成绩已归档，可在本页「最近训练」中查看历史。</p>
       <div class="summary-actions">
         <button v-if="fromInterview" :disabled="sending" @click="router.push('/interview')">← 返回模拟面试继续考试</button>
         <button :class="{ secondary: fromInterview }" :disabled="sending" @click="backToSelect">再来一轮</button>

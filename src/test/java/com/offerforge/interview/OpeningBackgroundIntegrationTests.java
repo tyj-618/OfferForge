@@ -94,7 +94,8 @@ class OpeningBackgroundIntegrationTests {
 
         JsonNode finish = post("/api/interview/" + sessionId + "/finish", token, Map.of());
         assertCode(finish, 0);
-        JsonNode report = finish.at("/data");
+        assertThat(finish.at("/data/archived").asBoolean()).isTrue();
+        JsonNode report = finish.at("/data/report");
         // 开场评分不入报告：题数/逐题评估均不含开场记录，综合分不受影响
         assertThat(report.at("/totalQuestions").asInt()).isEqualTo(3);
         assertThat(report.at("/overallScore").asDouble()).isEqualTo(80.0);

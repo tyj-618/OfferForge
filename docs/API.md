@@ -273,7 +273,9 @@ data:{"code":40900,"message":"面试尚未开始"}
 
 ### POST /interview/{sessionId}/finish
 
-结束面试：归档成绩、生成报告。响应 data 为最终 status。
+结束面试：问答次数达到计次门槛（默认 5 题）时归档成绩并生成报告；
+短场（问答不足门槛）不归档：不消耗免费次数（退还开局扣减）且不记录历史。
+响应 data 为 `{ report, archived }`：`report` 为综合反馈报告（短场为 null），`archived` 是否已归档。重复 finish 幂等。
 
 ### GET /interview/{sessionId}/status
 

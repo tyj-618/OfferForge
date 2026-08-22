@@ -134,11 +134,12 @@ class TrainingFlowIntegrationTests {
         assertThat(history.at("/score").asDouble()).isEqualTo(8.0);
         assertThat(history.at("/evaluation/improvedAnswer").asText()).isNotBlank();
 
-        // 主动结束：归档已作答成绩
+        // 主动结束：作答达计次门槛，归档已作答成绩（status 携带 archived=true）
         JsonNode finish = post("/api/training/" + sessionId + "/finish", token, Map.of());
         assertCode(finish, 0);
         assertThat(finish.at("/data/finished").asBoolean()).isTrue();
         assertThat(finish.at("/data/askedCount").asInt()).isEqualTo(1);
+        assertThat(finish.at("/data/archived").asBoolean()).isTrue();
 
         JsonNode records = get("/api/training/records", token);
         assertThat(records.at("/data/content/0/askedCount").asInt()).isEqualTo(1);
@@ -206,10 +207,33 @@ class TrainingFlowIntegrationTests {
         assertThat(answerDone.at("/score").asDouble()).isEqualTo(8.0);
         assertThat(answerDone.at("/status/askedCount").asInt()).isEqualTo(2);
 
-        // 主动结束归档：mastered 题不计入作答题数
+        // 主动结束归档：mastered 题不计入作答题数；2 题达门槛正常归档
         JsonNode finish = post("/api/training/" + sessionId + "/finish", token, Map.of());
         assertCode(finish, 0);
         assertThat(finish.at("/data/askedCount").asInt()).isEqualTo(2);
+        assertThat(finish.at("/data/archived").asBoolean()).isTrue();
+    }
+
+    @Test
+    void shortTrainingSessionNotArchivedNorListedInRecords() throws Exception {
+        String token = newUser();
+        assertCode(post("/api/knowledge/import", token, Map.of()), 0);
+
+        // 零作答直接结束：短场（问答不足门槛）不落训练记录，也不消耗免费次数（退还开局扣减）
+        JsonNode start = post("/api/training/start", token, Map.of("category", CATEGORY));
+        assertCode(start, 0);
+        String sessionId = start.at("/data/sessionId").asText();
+        JsonNode finish = post("/api/training/" + sessionId + "/finish", token, Map.of());
+        assertCode(finish, 0);
+        assertThat(finish.at("/data/finished").asBoolean()).isTrue();
+        assertThat(finish.at("/data/askedCount").asInt()).isZero();
+        assertThat(finish.at("/data/archived").asBoolean()).isFalse();
+
+        // 短场不入历史：训练记录列表为空，状态接口同样标记未归档
+        assertThat(get("/api/training/records", token).at("/data/content").size()).isZero();
+        JsonNode statusAfterShort = get("/api/training/" + sessionId + "/status", token);
+        assertCode(statusAfterShort, 0);
+        assertThat(statusAfterShort.at("/data/archived").asBoolean()).isFalse();
     }
 
     /** mastered / dontknow 标记当前题（SSE，无请求体），返回完整事件流文本 */

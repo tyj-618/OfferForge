@@ -27,6 +27,8 @@ public class TrainingContext {
     private String style;
     /** 付费计费模式：免费额度耗尽后以充值余额按 token 计费（旧会话缺失默认 false） */
     private boolean billable;
+    /** 开局凭证来源：user=自带 Key / system=系统凭证（旧会话缺失为 null，短场退还据此判断） */
+    private String keySource;
     /** 开局所选模型（付费模型选择；空为系统默认模型，旧会话缺失为 null） */
     private String selectedModel;
     private String state = STATE_ACTIVE;
@@ -89,6 +91,14 @@ public class TrainingContext {
 
     public void setBillable(boolean billable) {
         this.billable = billable;
+    }
+
+    public String getKeySource() {
+        return keySource;
+    }
+
+    public void setKeySource(String keySource) {
+        this.keySource = keySource;
     }
 
     public String getSelectedModel() {

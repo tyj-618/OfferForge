@@ -40,8 +40,11 @@ offerforge:
     qa-ask-limit: 1000
     report-limit: 1000
   quota:
-    # 存量集成测试不受额度约束；额度行为由 QuotaIntegrationTests 用属性覆盖专项验证
+    # 存量集成测试不受额度约束；额度行为由 QuotaIntegrationTests 用属性覆盖专项验证；
+    # 计次门槛降为 1：测试环境每阶段 1 题无法凑满生产门槛 5，保证有效场次正常归档；
+    # 短场（问答不足门槛）不消耗额度且不记录历史的行为由 QuotaIntegrationTests 覆盖门槛 5 专项验证
     enabled: false
+    min-billable-questions: 1
   billing:
     # 存量集成测试不受付费链影响（开关关）；计费链路行为由 BillingIntegrationTests 用属性覆盖专项验证；
     # 高价目 + Mock 客户端固定用量（100 输入/50 输出）：每次调用成本 10+10=20 分，×1.2 = 24 分，确定性可断言

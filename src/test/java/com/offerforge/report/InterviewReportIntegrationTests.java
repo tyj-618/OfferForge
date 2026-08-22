@@ -52,10 +52,11 @@ class InterviewReportIntegrationTests {
 
         runFullInterview(sessionId, token);
 
-        // finish：结束面试并生成报告；3 题均 8 分 → 综合分 = 主问题平均分 × 10 = 80
+        // finish：结束面试并生成报告；达计次门槛正常归档；3 题均 8 分 → 综合分 = 主问题平均分 × 10 = 80
         JsonNode finish = post("/api/interview/" + sessionId + "/finish", token, Map.of());
         assertCode(finish, 0);
-        JsonNode report = finish.at("/data");
+        assertThat(finish.at("/data/archived").asBoolean()).isTrue();
+        JsonNode report = finish.at("/data/report");
         assertThat(report.at("/interviewId").asText()).isEqualTo(sessionId);
         assertThat(report.at("/position").asText()).isEqualTo("Java 后端开发");
         assertThat(report.at("/totalQuestions").asInt()).isEqualTo(3);
@@ -77,12 +78,36 @@ class InterviewReportIntegrationTests {
         assertThat(report.at("/weaknesses").size()).isPositive();
         assertThat(report.at("/suggestions").size()).isPositive();
 
-        // GET 查询报告与 finish 返回一致；重复 finish 幂等
+        // GET 查询报告与 finish 返回一致；重复 finish 幂等（已归档会话直接返回既有报告）
         JsonNode fetched = get("/api/report/" + sessionId, token);
         assertCode(fetched, 0);
         assertThat(fetched.at("/data/overallScore").asDouble()).isEqualTo(80.0);
         assertThat(fetched.at("/data/questionEvaluations").size()).isEqualTo(3);
-        assertCode(post("/api/interview/" + sessionId + "/finish", token, Map.of()), 0);
+        JsonNode reFinish = post("/api/interview/" + sessionId + "/finish", token, Map.of());
+        assertCode(reFinish, 0);
+        assertThat(reFinish.at("/data/archived").asBoolean()).isTrue();
+        assertThat(reFinish.at("/data/report/overallScore").asDouble()).isEqualTo(80.0);
+    }
+
+    @Test
+    void shortSessionNotArchivedNorListedInHistory() throws Exception {
+        String token = newUser();
+        assertCode(post("/api/knowledge/import", token, Map.of()), 0);
+
+        // 仅完成自我介绍即结束：零作答主问题 → 短场（问答不足门槛）
+        String sessionId = post("/api/interview/start", token, Map.of())
+                .at("/data/sessionId").asText();
+        ask(sessionId, token, "我熟悉 Java 后端开发，做过电商项目。");
+        JsonNode finish = post("/api/interview/" + sessionId + "/finish", token, Map.of());
+        assertCode(finish, 0);
+        assertThat(finish.at("/data/archived").asBoolean()).isFalse();
+        assertThat(finish.at("/data/report").isNull()).isTrue();
+
+        // 短场不入历史：列表为空、进步曲线为空、报告查询 40400（不存在的会话）
+        assertThat(get("/api/report/history?page=0&size=10", token)
+                .at("/data/totalElements").asInt()).isZero();
+        assertThat(get("/api/report/progress?limit=10", token).at("/data").size()).isZero();
+        assertCode(get("/api/report/" + sessionId, token), 40400);
     }
 
     @Test

@@ -71,14 +71,27 @@ public class ReportService {
     }
 
     /**
-     * 结束面试并生成报告归档；重复调用幂等，已归档的会话直接返回既有报告。
+     * 结束面试结果：有效场次携带归档报告（archived=true）；
+     * 问答次数不足计次门槛的无效场次不记录历史，report 为 null 且 archived=false。
      */
-    public InterviewReport finishAndArchive(Long userId, String sessionId) {
+    public record FinishOutcome(InterviewReport report, boolean archived) {
+    }
+
+    /**
+     * 结束面试并生成报告归档；重复调用幂等，已归档的会话直接返回既有报告。
+     * 问答次数不足计次门槛的场次不消耗免费额度（结束时退还）且不记录历史。
+     */
+    public FinishOutcome finishAndArchive(Long userId, String sessionId) {
         InterviewSession existing = sessionRepository.findByUserIdAndSessionId(userId, sessionId).orElse(null);
         if (existing != null) {
-            return parseReport(existing);
+            return new FinishOutcome(parseReport(existing), true);
         }
         InterviewContext context = interviewService.finishInterview(userId, sessionId);
+        if (context.totalQuestionsAsked() < interviewService.minBillableQuestions()) {
+            log.info("short session skipped archive sessionId={} userId={} asked={} threshold={}",
+                    sessionId, userId, context.totalQuestionsAsked(), interviewService.minBillableQuestions());
+            return new FinishOutcome(null, false);
+        }
         InterviewReport report = generate(context);
         InterviewSession entity = new InterviewSession();
         entity.setUserId(userId);
@@ -92,7 +105,7 @@ public class ReportService {
         entity.setOverallScore(report.getOverallScore());
         entity.setReportJson(serialize(report));
         sessionRepository.save(entity);
-        return report;
+        return new FinishOutcome(report, true);
     }
 
     /**

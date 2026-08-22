@@ -156,6 +156,7 @@ public class TrainingService {
         context.setCategory(normalized);
         context.setStyle(style);
         context.setBillable(access.billable());
+        context.setKeySource(access.keySource());
         context.setSelectedModel(model == null || model.isBlank() ? null : model.trim());
         context.setCreatedAtEpochMillis(System.currentTimeMillis());
 
@@ -332,18 +333,19 @@ public class TrainingService {
     /** 推进下一题或完成：达标题数/题库耗尽则归档完成，否则教练话术出下一题；返回本场是否已完成 */
     private boolean advanceToNextOrFinish(TrainingContext context, String sessionId, InterviewStreamSink sink)
             throws IOException {
+        String finishTail = finishTailText(context);
         if (context.askedCount() >= properties.getMaxQuestions()) {
             sink.progress("正在生成训练成绩…");
             emitPlain(sessionId, "恭喜！你已完成「" + context.getCategory() + "」专项训练全部 "
                     + properties.getMaxQuestions() + " 题，平均得分 "
-                    + oneDecimal(context.averageScore()) + " 分，成绩已归档。", sink);
+                    + oneDecimal(context.averageScore()) + " 分，" + finishTail, sink);
             finish(context, sessionId);
             return true;
         }
         var next = nextQuestion(context);
         if (next.isEmpty()) {
             emitPlain(sessionId, "「" + context.getCategory() + "」分组的题目已全部练完，本场训练提前完成，"
-                    + "平均得分 " + oneDecimal(context.averageScore()) + " 分，成绩已归档。", sink);
+                    + "平均得分 " + oneDecimal(context.averageScore()) + " 分，" + finishTail, sink);
             finish(context, sessionId);
             return true;
         }
@@ -517,11 +519,31 @@ public class TrainingService {
         }
     }
 
-    /** 置完成态并归档简要成绩（幂等由调用方保证） */
+    /** 结束话术尾段：短场（问答不足计次门槛）不记录历史且不消耗免费次数，正常场次归档成绩 */
+    private String finishTailText(TrainingContext context) {
+        return context.askedCount() < quotaService.minBillableQuestions()
+                ? "本场作答不足 " + quotaService.minBillableQuestions() + " 题，不计入训练记录，也未消耗免费次数。"
+                : "成绩已归档。";
+    }
+
+    /**
+     * 置完成态并归档简要成绩（幂等由调用方保证）；
+     * 问答次数不足计次门槛的短场不记录历史，免费场次同时退还开局扣减的额度。
+     */
     private void finish(TrainingContext context, String sessionId) {
         context.setState(TrainingContext.STATE_FINISHED);
         context.setFinishedAtEpochMillis(System.currentTimeMillis());
         context.setCurrentQuestion(null);
+        if (context.askedCount() < quotaService.minBillableQuestions()) {
+            // 计费场次开局未扣免费额度，自带 Key 场次同样无退还；仅 system 凭证免费场次退还
+            if (!context.isBillable() && "system".equals(context.getKeySource())) {
+                quotaService.refundQuota(context.getUserId());
+            }
+            messageStore.clear(sessionId);
+            log.info("training short session skipped archive sessionId={} userId={} asked={} threshold={}",
+                    sessionId, context.getUserId(), context.askedCount(), quotaService.minBillableQuestions());
+            return;
+        }
         TrainingRecord record = new TrainingRecord();
         record.setUserId(context.getUserId());
         record.setSessionId(sessionId);
@@ -576,7 +598,7 @@ public class TrainingService {
     }
 
     private TrainingStatusResponse statusView(TrainingContext context) {
-        return TrainingStatusResponse.from(context, properties);
+        return TrainingStatusResponse.from(context, properties, quotaService.minBillableQuestions());
     }
 
     /**

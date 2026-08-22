@@ -83,8 +83,9 @@ class InterviewDifficultyIntegrationTests {
         ask(sessionId, token, "谢谢面试官。");
         JsonNode finish = post("/api/interview/" + sessionId + "/finish", token, Map.of());
         assertCode(finish, 0);
-        assertThat(finish.at("/data/totalQuestions").asInt()).isEqualTo(4);
-        assertThat(finish.at("/data/overallScore").asDouble()).isEqualTo(80.0);
+        assertThat(finish.at("/data/archived").asBoolean()).isTrue();
+        assertThat(finish.at("/data/report/totalQuestions").asInt()).isEqualTo(4);
+        assertThat(finish.at("/data/report/overallScore").asDouble()).isEqualTo(80.0);
     }
 
     private String newUser() throws Exception {

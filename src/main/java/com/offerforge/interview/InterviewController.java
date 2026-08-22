@@ -6,7 +6,6 @@ import com.offerforge.common.ErrorCode;
 import com.offerforge.exception.BusinessException;
 import com.offerforge.exception.InsufficientBalanceBody;
 import com.offerforge.exception.InsufficientBalanceException;
-import com.offerforge.report.InterviewReport;
 import com.offerforge.report.ReportService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -83,9 +82,10 @@ public class InterviewController {
 
     /**
      * 结束面试：置终态 + 生成综合反馈报告 + 归档；幂等，重复调用返回既有报告。
+     * 问答次数不足计次门槛的场次不记录历史，返回 archived=false 且 report 为 null。
      */
     @PostMapping("/{sessionId}/finish")
-    public ApiResponse<InterviewReport> finish(
+    public ApiResponse<ReportService.FinishOutcome> finish(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @PathVariable String sessionId) {
         MDC.put(INTERVIEW_ID_KEY, sessionId);
