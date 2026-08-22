@@ -101,9 +101,9 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
 
 ### POST /knowledge/import
 
-将内置官方题库导入知识库（幂等，已存在条目跳过）。题库按岗位方向拆分为 4 个资源文件：Java 后端（64）、前端（52）、Go/测试/运维（56）、AI（46），共 29 个官方分组 218 题。
+将内置官方题库导入知识库（幂等，已存在条目跳过）。题库按方向拆分为 5 个资源文件：Java 后端（64）、前端（52）、Go/测试/运维（56）、AI（46）、LeetCode 算法（100，含 Hot 100 全部题目及经典高频补位），共 30 个官方分组 318 题。
 
-响应 data：`{ "total": 218, "inserted": 218, "skipped": 0 }`
+响应 data：`{ "total": 318, "inserted": 318, "skipped": 0 }`
 
 ### GET /knowledge/official
 
@@ -399,6 +399,94 @@ data:{"code":40900,"message":"面试尚未开始"}
 ### GET /report/progress?limit=10
 
 最近 N 次综合评分（进步曲线）。响应 data：`[{ "overallScore": 68.0 }, ...]`
+
+---
+
+## 问题反馈 `/api/feedback`
+
+### POST /feedback
+
+提交一条图文反馈。内容不超过 2000 字；图片最多 3 张，须为 `data:image/` 前缀的 base64 数据且单张不超过 1.5MB 字符（约 1MB）；每账号每日限 20 条（超限返回 42900）。
+
+请求：
+
+```json
+{
+  "type": "BUG",
+  "content": "问题描述……",
+  "images": ["data:image/png;base64,..."]
+}
+```
+
+`type` 枚举：`BUG`（问题缺陷）/ `SUGGESTION`（功能建议）/ `OTHER`（其他），缺省或非法值归为 `OTHER`。
+
+响应 data：`true`
+
+### GET /feedback/mine
+
+本人历史反馈（倒序）。响应 data：
+
+```json
+[
+  { "id": 1, "type": "BUG", "content": "……", "images": ["data:image/..."], "createdAt": "2026-08-22 10:00:00" }
+]
+```
+
+### GET /admin/feedbacks?page=1&size=10
+
+管理台分页查看全部反馈（仅管理员，非管理员返回 40300），按提交时间倒序。响应 data：
+
+```json
+{
+  "items": [
+    { "id": 1, "username": "张三", "email": "...", "type": "BUG", "content": "……", "images": [], "createdAt": "..." }
+  ],
+  "page": 1, "size": 10, "total": 3
+}
+```
+
+---
+
+## 计费 `/api/billing`
+
+> 支付渠道审核中：接口已就绪，前端入口展示但暂不开放充值操作。
+
+### GET /billing/status
+
+当前计费状态。响应 data：`{ "enabled": false, "provider": "mock", "balanceCents": 0 }`
+
+### GET /billing/packages
+
+充值档位。响应 data：`[{ "id": "pkg-10", "name": "10 元档", "amountCents": 1000 }]`
+
+### GET /billing/models
+
+官方模型价目。响应 data：
+
+```json
+[
+  { "id": "qwen-flash", "name": "通义千问 Flash（免费）", "inputPerMillionCents": 0, "outputPerMillionCents": 0, "paidOnly": false },
+  { "id": "deepseek-v4-flash", "name": "DeepSeek-V4-Flash（付费）", "inputPerMillionCents": 20, "outputPerMillionCents": 80, "paidOnly": true }
+]
+```
+
+`deepseek-v4-flash` 走 DeepSeek 官方端点（独立 base-url / api-key 配置）；未配置凭据时回落系统默认端点。
+
+### POST /billing/orders
+
+创建充值订单（`enabled=false` 时返回 50301）。请求：`{ "packageId": "pkg-10" }`；响应 data：`{ "orderNo": "...", "amountCents": 1000, "status": "PENDING" }`。
+
+### GET /billing/orders/{orderNo} 、GET /billing/orders
+
+订单详情 / 本人最近 50 条订单。
+
+### GET /billing/transactions
+
+本人最近 50 条余额流水。
+
+### POST /billing/mock-pay/{orderNo}
+
+Mock 渠道模拟支付回调（仅 `provider=mock` 且 `enabled=true` 时生效）。
 
 ---
 
