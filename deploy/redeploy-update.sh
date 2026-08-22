@@ -18,9 +18,13 @@ grep -E '^OFFERFORGE_AI_PROVIDER=|^OFFERFORGE_SEARCH_EMBEDDING_PROVIDER=' .env
 
 echo "===== [3/5] docker compose build (sequential, low-memory VPS) ====="
 # 小内存 VPS 上 backend(Maven) 与 frontend(npm) 并行构建曾导致整机资源耗尽失联，改串行；
-# 仅后端变更时 export SKIP_FRONTEND_BUILD=1 跳过前端构建
-docker compose -f docker-compose.prod.yml build backend
-echo "build backend exit=$?"
+# 仅后端变更时 export SKIP_FRONTEND_BUILD=1 跳过前端构建；仅前端变更时 export SKIP_BACKEND_BUILD=1
+if [ -z "${SKIP_BACKEND_BUILD:-}" ]; then
+    docker compose -f docker-compose.prod.yml build backend
+    echo "build backend exit=$?"
+else
+    echo "skip backend build (SKIP_BACKEND_BUILD=1)"
+fi
 if [ -z "${SKIP_FRONTEND_BUILD:-}" ]; then
     docker compose -f docker-compose.prod.yml build frontend
     echo "build frontend exit=$?"
