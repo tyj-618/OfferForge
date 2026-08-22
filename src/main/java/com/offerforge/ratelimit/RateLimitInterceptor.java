@@ -34,6 +34,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     private final int interviewAskLimit;
     private final int qaAskLimit;
     private final int reportLimit;
+    private final int sessionLifecycleLimit;
     private final long windowMillis;
 
     public RateLimitInterceptor(RateLimiter rateLimiter,
@@ -41,12 +42,14 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                                 @Value("${offerforge.rate-limit.interview-ask-limit:10}") int interviewAskLimit,
                                 @Value("${offerforge.rate-limit.qa-ask-limit:5}") int qaAskLimit,
                                 @Value("${offerforge.rate-limit.report-limit:60}") int reportLimit,
+                                @Value("${offerforge.rate-limit.session-lifecycle-limit:10}") int sessionLifecycleLimit,
                                 @Value("${offerforge.rate-limit.window-millis:60000}") long windowMillis) {
         this.rateLimiter = rateLimiter;
         this.currentUserService = currentUserService;
         this.interviewAskLimit = interviewAskLimit;
         this.qaAskLimit = qaAskLimit;
         this.reportLimit = reportLimit;
+        this.sessionLifecycleLimit = sessionLifecycleLimit;
         this.windowMillis = windowMillis;
     }
 
@@ -112,6 +115,16 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         // 快捷提问流式端点：同为重 LLM 开销，共用 qa 限额；429 需以 SSE error 帧下发
         if ("POST".equalsIgnoreCase(method) && uri.equals("/api/qa/ask-stream")) {
             return new Route("qa-ask", qaAskLimit, true);
+        }
+        // 场次开局/结束共用限额：防脚本循环「开局即结束短场」套取免费额度退还、无限消耗官方模型凭据（开局即触发 LLM 开场调用）
+        if ("POST".equalsIgnoreCase(method)
+                && (uri.equals("/api/interview/start") || uri.equals("/api/training/start")
+                    || uri.matches("/api/(interview|training)/[^/]+/finish"))) {
+            return new Route("session-lifecycle", sessionLifecycleLimit, false);
+        }
+        // 问题反馈提交：复用 qa 限额，防刷大体积图文反馈（单条可达数 MB）
+        if ("POST".equalsIgnoreCase(method) && uri.equals("/api/feedback")) {
+            return new Route("feedback", qaAskLimit, false);
         }
         // 仅报告详情限流；history/progress 是页面加载必需的纯 DB 分页读，不限流
         if ("GET".equalsIgnoreCase(method) && uri.matches("/api/report/(?!history$|progress$)[^/]+")) {

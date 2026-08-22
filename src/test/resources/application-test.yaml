@@ -39,6 +39,7 @@ offerforge:
     interview-ask-limit: 1000
     qa-ask-limit: 1000
     report-limit: 1000
+    session-lifecycle-limit: 1000
   quota:
     # 存量集成测试不受额度约束；额度行为由 QuotaIntegrationTests 用属性覆盖专项验证；
     # 计次门槛降为 1：测试环境每阶段 1 题无法凑满生产门槛 5，保证有效场次正常归档；

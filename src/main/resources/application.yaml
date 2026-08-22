@@ -102,6 +102,8 @@ offerforge:
     interview-ask-limit: ${OFFERFORGE_RATE_LIMIT_INTERVIEW_ASK:10}
     qa-ask-limit: ${OFFERFORGE_RATE_LIMIT_QA_ASK:5}
     report-limit: ${OFFERFORGE_RATE_LIMIT_REPORT:60}
+    # 场次开局/结束共用限额：防脚本循环「开局即结束短场」套取额度退还、无限消耗官方模型凭据
+    session-lifecycle-limit: ${OFFERFORGE_RATE_LIMIT_SESSION_LIFECYCLE:10}
     window-millis: ${OFFERFORGE_RATE_LIMIT_WINDOW_MILLIS:60000}
   quota:
     # 免费额度：无自带 Key 的用户每日完整面试次数上限

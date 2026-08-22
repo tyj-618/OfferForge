@@ -32,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
         "offerforge.rate-limit.interview-ask-limit=10",
         "offerforge.rate-limit.qa-ask-limit=5",
         "offerforge.rate-limit.report-limit=3",
+        "offerforge.rate-limit.session-lifecycle-limit=4",
         // 独立内存库：本类需要单独上下文收紧限额，避免 create-drop 重置共享库自增 ID 污染其他测试
         "spring.datasource.url=jdbc:h2:mem:offerforge_ratelimit;MODE=MySQL;DATABASE_TO_LOWER=TRUE;NON_KEYWORDS=COMMENT;DB_CLOSE_DELAY=-1"
 })
@@ -108,6 +109,23 @@ class RateLimitIntegrationTests {
         HttpResponse<String> blocked = askResponse(sessionId, token, " ");
         assertThat(blocked.statusCode()).isEqualTo(429);
         assertThat(blocked.body()).contains("event:error").contains("42900").contains("请求过于频繁");
+    }
+
+    @Test
+    void sessionLifecycleExceedsPerMinuteLimitReturns429() throws Exception {
+        String token = newUser();
+        assertCode(post("/api/knowledge/import", token, Map.of()), 0);
+
+        // 开局/结束共用限额，窗口内前 4 次（2 轮开局+结束）放行；限制脚本循环短场套取额度退还/刷官方模型开场调用
+        for (int i = 0; i < 2; i++) {
+            String sessionId = post("/api/interview/start", token, Map.of()).at("/data/sessionId").asText();
+            assertCode(post("/api/interview/" + sessionId + "/finish", token, Map.of()), 0);
+        }
+
+        // 第 5 次开局触发限流：HTTP 429 + 业务码 42900
+        HttpResponse<String> blocked = rawPost("/api/interview/start", token, Map.of());
+        assertThat(blocked.statusCode()).isEqualTo(429);
+        assertThat(objectMapper.readTree(blocked.body()).at("/code").asInt()).isEqualTo(42900);
     }
 
     @Test

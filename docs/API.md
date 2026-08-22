@@ -38,8 +38,12 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
 | 路由 | 限额 |
 | --- | --- |
 | `POST /api/interview/{sessionId}/ask` | 10 次 |
-| `POST /api/qa/ask` | 5 次 |
-| `GET /api/report/**` | 3 次 |
+| `POST /api/training/{sessionId}/answer` | 10 次 |
+| `POST /api/qa/ask` · `/api/qa/ask-stream` | 5 次 |
+| `POST /api/interview/start` · `/api/training/start` · `/{id}/finish` | 10 次（开局/结束共用，防短场循环套取额度退还） |
+| `POST /api/feedback` | 5 次 |
+| `POST /api/billing/orders` · `/api/billing/mock-pay/{id}` | 5 次 |
+| `GET /api/report/{id}`（history/progress 不限） | 60 次 |
 
 超限返回 HTTP 429；SSE 路由以 `event:error` 帧返回 `{"code":42900,...}`。
 
