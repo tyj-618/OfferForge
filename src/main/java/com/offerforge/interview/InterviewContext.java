@@ -32,6 +32,10 @@ public class InterviewContext {
     private String mode;
     /** 开局凭证来源：user=自带 Key 不占免费额度 / system=系统 Key 已扣免费额度（旧会话为 null 不退还） */
     private String keySource;
+    /** 付费计费模式：免费额度耗尽后以充值余额按 token 计费（旧会话缺失默认 false） */
+    private boolean billable;
+    /** 开局所选模型（付费模型选择；空为系统默认模型，旧会话缺失为 null） */
+    private String selectedModel;
     /** 助手语气风格：strict / friendly（旧会话缺失按 friendly） */
     private String style;
     /** 勾选的资料分组（可空）：非空时 BASICS/DEEP 出题仅用这些分组（旧会话为 null 按阶段默认） */
@@ -130,6 +134,22 @@ public class InterviewContext {
 
     public void setKeySource(String keySource) {
         this.keySource = keySource;
+    }
+
+    public boolean isBillable() {
+        return billable;
+    }
+
+    public void setBillable(boolean billable) {
+        this.billable = billable;
+    }
+
+    public String getSelectedModel() {
+        return selectedModel;
+    }
+
+    public void setSelectedModel(String selectedModel) {
+        this.selectedModel = selectedModel;
     }
 
     /** 模式归一化：null/非法值一律按 practice，兼容旧会话 */

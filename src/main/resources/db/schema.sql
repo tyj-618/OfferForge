@@ -134,3 +134,53 @@ CREATE TABLE IF NOT EXISTS knowledge_mastery (
 
 -- 存量库升级（掌握度标记新增 knowledge_mastery 表）：
 -- CREATE TABLE IF NOT EXISTS knowledge_mastery ( ... 同上定义 ... );
+
+-- 付费计费（充值余额 + token 计费）：钱包一用户一条，余额分币保底 0，行锁防并发超扣
+CREATE TABLE IF NOT EXISTS user_wallet (
+    id                    BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id               BIGINT   NOT NULL,
+    balance_cents         BIGINT   NOT NULL DEFAULT 0,
+    total_recharged_cents BIGINT   NOT NULL DEFAULT 0,
+    created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_user_wallet_user_id (user_id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+
+-- 钱包流水：每笔充值/消费/退款一条，记录变动后余额快照，账实可审计（amount_cents 恒正，方向由 type 表达）
+CREATE TABLE IF NOT EXISTS wallet_transaction (
+    id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id             BIGINT       NOT NULL,
+    type                VARCHAR(16)  NOT NULL,
+    amount_cents        BIGINT       NOT NULL,
+    balance_after_cents BIGINT       NOT NULL,
+    ref_no              VARCHAR(64)  NULL,
+    detail              VARCHAR(128) NULL,
+    created_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_wallet_transaction_user_time (user_id, created_at)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+
+-- 充值订单：创建即 PENDING，渠道确认后置 PAID 并入账；order_no 全局唯一（幂等键）
+CREATE TABLE IF NOT EXISTS recharge_order (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    order_no        VARCHAR(32) NOT NULL,
+    user_id         BIGINT      NOT NULL,
+    amount_cents    BIGINT      NOT NULL,
+    status          VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+    provider        VARCHAR(16) NOT NULL,
+    provider_txn_id VARCHAR(64) NULL,
+    created_at      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    paid_at         DATETIME    NULL,
+    UNIQUE KEY uk_recharge_order_order_no (order_no),
+    KEY idx_recharge_order_user_time (user_id, created_at)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+
+-- 存量库升级（付费计费新增 3 张表）：
+-- CREATE TABLE IF NOT EXISTS user_wallet ( ... 同上定义 ... );
+-- CREATE TABLE IF NOT EXISTS wallet_transaction ( ... 同上定义 ... );
+-- CREATE TABLE IF NOT EXISTS recharge_order ( ... 同上定义 ... );

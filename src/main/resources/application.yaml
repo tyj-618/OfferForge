@@ -99,6 +99,42 @@ offerforge:
     # 免费额度：无自带 Key 的用户每日完整面试次数上限
     enabled: ${OFFERFORGE_QUOTA_ENABLED:true}
     daily-limit: ${OFFERFORGE_QUOTA_DAILY_LIMIT:10}
+  billing:
+    # 付费计费总开关：支付渠道审核通过前置 false（接口就绪不开放入口），通过后改环境变量即上线
+    enabled: ${OFFERFORGE_BILLING_ENABLED:false}
+    # 支付渠道：mock=模拟支付（审核期联调），wechat=微信支付（凭据到位后切换）
+    provider: ${OFFERFORGE_BILLING_PROVIDER:mock}
+    # 成本加成率：按模型调用成本的该倍数收费（1.2 = 120%）
+    markup: ${OFFERFORGE_BILLING_MARKUP:1.2}
+    # 充值档位（金额单位：分）
+    packages:
+      - id: pkg-10
+        name: "¥10"
+        amount-cents: 1000
+      - id: pkg-50
+        name: "¥50"
+        amount-cents: 5000
+      - id: pkg-100
+        name: "¥100"
+        amount-cents: 10000
+    # 模型价目目录（百炼公开价，单位：分/百万 token）；paid-only=true 需充值后才可选用；
+    # 计费时价目缺失回退首个免费档，系统默认模型（OFFERFORGE_AI_MODEL）按默认档计价
+    models:
+      - id: qwen-flash
+        name: "通义千问-Flash（默认免费档）"
+        input-per-million-cents: 15
+        output-per-million-cents: 60
+        paid-only: false
+      - id: qwen-plus
+        name: "通义千问-Plus（付费）"
+        input-per-million-cents: 80
+        output-per-million-cents: 200
+        paid-only: true
+      - id: qwen-max
+        name: "通义千问-Max（付费）"
+        input-per-million-cents: 240
+        output-per-million-cents: 960
+        paid-only: true
   encryption:
     # API Key 加密密钥：必须 32 字节 UTF-8（AES-256），生产环境必须替换默认值
     key: ${APIKEY_ENCRYPT_KEY:}

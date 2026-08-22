@@ -18,6 +18,8 @@ const routes = [
   // 训练报告详情：概要 + 逐题明细，支持查看/打印
   { path: '/training-report/:id', name: 'trainingReport', component: () => import('../views/TrainingReportView.vue') },
   { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
+  // 充值中心：余额/充值档位/模型价目/订单与流水；总开关关闭时入口隐藏，直访由后端 50301 拒绝写操作
+  { path: '/billing', name: 'billing', component: () => import('../views/BillingView.vue') },
   // 管理台：仅管理员可见入口（顶栏按 /api/admin/whoami 认定），非管理员直接访问由后端 40300 拒绝
   { path: '/admin', name: 'admin', component: () => import('../views/AdminView.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/' }

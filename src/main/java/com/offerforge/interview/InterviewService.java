@@ -6,10 +6,12 @@ import com.offerforge.ai.AnswerEvaluation;
 import com.offerforge.ai.ChatMessage;
 import com.offerforge.ai.LlmCallContext;
 import com.offerforge.ai.LlmCredentialResolver;
-import com.offerforge.apikey.ApiKeyService;
+import com.offerforge.billing.BillingAccessService;
+import com.offerforge.billing.BillingMeteringService;
+import com.offerforge.billing.WalletService;
 import com.offerforge.common.ErrorCode;
 import com.offerforge.exception.BusinessException;
-import com.offerforge.exception.QuotaExceededException;
+import com.offerforge.exception.InsufficientBalanceException;
 import com.offerforge.knowledge.Difficulty;
 import com.offerforge.knowledge.KnowledgeMasteryService;
 import com.offerforge.quota.QuotaService;
@@ -72,11 +74,13 @@ public class InterviewService {
     private final ResumeService resumeService;
     private final ProjectQuestionGenerator projectQuestionGenerator;
     private final InterviewProperties properties;
-    private final ApiKeyService apiKeyService;
     private final QuotaService quotaService;
     private final LlmCredentialResolver credentialResolver;
     private final TrainingSessionStore trainingSessionStore;
     private final KnowledgeMasteryService masteryService;
+    private final BillingAccessService billingAccessService;
+    private final BillingMeteringService billingMeteringService;
+    private final WalletService walletService;
     /** 会话级互斥锁条目（锁对象 + 最近使用时间），中途放弃的会话靠惰性清理避免无界增长 */
     private final Map<String, LockEntry> sessionLocks = new ConcurrentHashMap<>();
     private final AtomicLong lockAcquisitions = new AtomicLong();
@@ -95,11 +99,13 @@ public class InterviewService {
                             ResumeService resumeService,
                             ProjectQuestionGenerator projectQuestionGenerator,
                             InterviewProperties properties,
-                            ApiKeyService apiKeyService,
                             QuotaService quotaService,
                             LlmCredentialResolver credentialResolver,
                             TrainingSessionStore trainingSessionStore,
-                            KnowledgeMasteryService masteryService) {
+                            KnowledgeMasteryService masteryService,
+                            BillingAccessService billingAccessService,
+                            BillingMeteringService billingMeteringService,
+                            WalletService walletService) {
         this.sessionStore = sessionStore;
         this.messageStore = messageStore;
         this.questionBank = questionBank;
@@ -111,11 +117,13 @@ public class InterviewService {
         this.resumeService = resumeService;
         this.projectQuestionGenerator = projectQuestionGenerator;
         this.properties = properties;
-        this.apiKeyService = apiKeyService;
         this.quotaService = quotaService;
         this.credentialResolver = credentialResolver;
         this.trainingSessionStore = trainingSessionStore;
         this.masteryService = masteryService;
+        this.billingAccessService = billingAccessService;
+        this.billingMeteringService = billingMeteringService;
+        this.walletService = walletService;
     }
 
     public InterviewStartResponse start(Long userId, String position) {
@@ -153,6 +161,16 @@ public class InterviewService {
      */
     public InterviewStartResponse start(Long userId, String position, Long resumeId, String mode,
                                         List<String> categories, Boolean includeAlgorithm, String style) {
+        return start(userId, position, resumeId, mode, categories, includeAlgorithm, style, null);
+    }
+
+    /**
+     * 开始面试（完整参数）：model 为付费模型选择（可空，空为系统默认模型）。
+     * 准入链：自带 Key → 免费额度 → 充值余额计费 → 拒绝（见 BillingAccessService）。
+     */
+    public InterviewStartResponse start(Long userId, String position, Long resumeId, String mode,
+                                        List<String> categories, Boolean includeAlgorithm, String style,
+                                        String model) {
         if (sessionStore.hasActiveSession(userId)) {
             throw new BusinessException(ErrorCode.CONFLICT, "已有一场面试正在进行，请先结束后再开始新面试");
         }
@@ -164,14 +182,8 @@ public class InterviewService {
             // 先校验简历归属（不存在/非本人均 NOT_FOUND），避免非法简历白白消耗免费额度
             resumeService.getOwned(userId, resumeId);
         }
-        String keySource;
-        if (apiKeyService.hasKey(userId)) {
-            keySource = "user";
-        } else if (!quotaService.isEnabled() || quotaService.consumeQuota(userId)) {
-            keySource = "system";
-        } else {
-            throw new QuotaExceededException(quotaService.checkQuota(userId));
-        }
+        BillingAccessService.Decision access = billingAccessService.decide(userId, model);
+        String keySource = access.keySource();
         String sessionId = UUID.randomUUID().toString().replace("-", "");
         InterviewContext context = new InterviewContext();
         context.setSessionId(sessionId);
@@ -180,6 +192,8 @@ public class InterviewService {
         context.setResumeId(resumeId);
         context.setMode(InterviewContext.MODE_TRAINING.equals(mode) ? InterviewContext.MODE_TRAINING : InterviewContext.MODE_PRACTICE);
         context.setKeySource(keySource);
+        context.setBillable(access.billable());
+        context.setSelectedModel(model == null || model.isBlank() ? null : model.trim());
         context.setStyle(style);
         context.setSelectedCategories(normalizeSelectedCategories(categories));
         context.setIncludeAlgorithm(Boolean.TRUE.equals(includeAlgorithm));
@@ -188,8 +202,9 @@ public class InterviewService {
         context.setCreatedAtEpochMillis(System.currentTimeMillis());
         sessionStore.save(context);
         messageStore.append(sessionId, List.of(ChatMessage.assistant(OPENING_TEXT)));
-        log.info("interview started sessionId={} userId={} position={} resumeId={} mode={} keySource={} remainingQuota={}",
-                sessionId, userId, context.getPosition(), resumeId, context.getMode(), keySource, quotaService.checkQuota(userId));
+        log.info("interview started sessionId={} userId={} position={} resumeId={} mode={} keySource={} billable={} model={} remainingQuota={}",
+                sessionId, userId, context.getPosition(), resumeId, context.getMode(), keySource,
+                access.billable(), context.getSelectedModel(), quotaService.checkQuota(userId));
         return new InterviewStartResponse(sessionId, OPENING_TEXT, InterviewStatusResponse.from(context, properties));
     }
 
@@ -199,9 +214,9 @@ public class InterviewService {
         try {
             synchronized (lock) {
                 InterviewContext context = requireOwnedSession(userId, sessionId);
-                // 绑定本场 LLM 凭据（自带 Key 或系统配置）与 token 用量监听；本轮结束清理防线程复用泄漏
-                LlmCallContext.bind(credentialResolver.resolveFor(userId));
-                LlmCallContext.setUsageListener(context::addTokenUsage);
+                // 计费模式每回合先预检余额，再绑定本场凭据与用量监听；本轮结束清理防线程复用泄漏
+                requireBillingBalance(context);
+                bindCallContext(context);
                 try {
                     return answerInternal(context, sessionId, userMessage, false, sink);
                 } finally {
@@ -260,7 +275,8 @@ public class InterviewService {
      * 结束时退还开局扣除的次数（仅 system 凭证场次；自带 Key 与额度关闭场景无操作）。
      */
     private void refundIfShortSession(InterviewContext context) {
-        if (!"system".equals(context.getKeySource()) || context.totalQuestionsAsked() >= MIN_BILLABLE_QUESTIONS) {
+        // 计费场次开局未扣免费额度，无需退还；仅 system 凭证的免费场次走退还
+        if (context.isBillable() || !"system".equals(context.getKeySource()) || context.totalQuestionsAsked() >= MIN_BILLABLE_QUESTIONS) {
             return;
         }
         quotaService.refundQuota(context.getUserId());
@@ -319,8 +335,8 @@ public class InterviewService {
         try {
             synchronized (lock) {
                 InterviewContext context = requireOwnedSession(userId, sessionId);
-                LlmCallContext.bind(credentialResolver.resolveFor(userId));
-                LlmCallContext.setUsageListener(context::addTokenUsage);
+                requireBillingBalance(context);
+                bindCallContext(context);
                 try {
                     requireMarkablePhase(context);
                     InterviewState phase = context.getState();
@@ -376,8 +392,8 @@ public class InterviewService {
                 InterviewState phase = context.getState();
                 String question = context.getCurrentQuestion();
                 log.info("interview sessionId={} phase={} question marked dont-know", sessionId, phase);
-                LlmCallContext.bind(credentialResolver.resolveFor(userId));
-                LlmCallContext.setUsageListener(context::addTokenUsage);
+                requireBillingBalance(context);
+                bindCallContext(context);
                 try {
                     // 复用作答主流程：强制 0 分且跳过评分联动
                     InterviewTurnResult result = answerInternal(context, sessionId, "不知道", true, sink);
@@ -608,8 +624,8 @@ public class InterviewService {
         try {
             synchronized (lock) {
                 InterviewContext context = requireOwnedSession(userId, sessionId);
-                LlmCallContext.bind(credentialResolver.resolveFor(userId));
-                LlmCallContext.setUsageListener(context::addTokenUsage);
+                requireBillingBalance(context);
+                bindCallContext(context);
                 try {
                     if (context.getState().terminal()) {
                         throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，请勿继续作答");
@@ -644,8 +660,8 @@ public class InterviewService {
         try {
             synchronized (lock) {
                 InterviewContext context = requireOwnedSession(userId, sessionId);
-                LlmCallContext.bind(credentialResolver.resolveFor(userId));
-                LlmCallContext.setUsageListener(context::addTokenUsage);
+                requireBillingBalance(context);
+                bindCallContext(context);
                 try {
                     if (context.getState().terminal()) {
                         throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，请勿继续作答");
@@ -789,8 +805,8 @@ public class InterviewService {
         try {
             synchronized (lock) {
                 InterviewContext context = requireOwnedSession(userId, sessionId);
-                LlmCallContext.bind(credentialResolver.resolveFor(userId));
-                LlmCallContext.setUsageListener(context::addTokenUsage);
+                requireBillingBalance(context);
+                bindCallContext(context);
                 try {
                     if (context.getState().terminal()) {
                         throw new BusinessException(ErrorCode.CONFLICT, "面试已结束，请勿继续作答");
@@ -1285,6 +1301,28 @@ public class InterviewService {
             return "";
         }
         return value.length() <= ANSWER_LOG_PREVIEW_LENGTH ? value : value.substring(0, ANSWER_LOG_PREVIEW_LENGTH) + "…";
+    }
+
+    /**
+     * 绑定本场 LLM 凭据（自带 Key / 系统 Key+所选模型）与 token 用量监听：
+     * 计费场次按「模型价目 × markup」实时从钱包扣费，余额不足即中断本轮。
+     */
+    private void bindCallContext(InterviewContext context) {
+        LlmCallContext.bind(credentialResolver.resolveFor(context.getUserId(), context.getSelectedModel()));
+        LlmCallContext.setUsageListener((inputTokens, outputTokens) -> {
+            context.addTokenUsage(inputTokens, outputTokens);
+            if (context.isBillable()) {
+                billingMeteringService.recordUsage(context.getUserId(), context.getSelectedModel(),
+                        inputTokens, outputTokens);
+            }
+        });
+    }
+
+    /** 计费场次回合预检：余额耗尽即中断并引导充值（402），避免白白调用 LLM */
+    private void requireBillingBalance(InterviewContext context) {
+        if (context.isBillable() && walletService.balance(context.getUserId()) <= 0) {
+            throw new InsufficientBalanceException(0);
+        }
     }
 
     private InterviewContext requireOwnedSession(Long userId, String sessionId) {

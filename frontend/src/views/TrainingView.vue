@@ -3,7 +3,10 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { marked } from 'marked'
 import {
+  billingApi,
+  billingState,
   knowledgeApi,
+  refreshBillingState,
   trainingApi,
   quotaApi
 } from '../api'
@@ -57,6 +60,23 @@ const categoryOptions = ref([])
 const records = ref([])
 const quotaInfo = ref(null)
 const localError = ref('')
+
+// 计费模型选择（仅计费开关开启时呈现）：默认系统模型，付费模型需余额支撑；
+// 余额耗尽横幅：计费场次回合预检中断后的充值引导（与开局 402 同一入口）
+const modelOptions = ref([])
+const selectedModel = ref('')
+const insufficientBalanceHint = computed(() => trainingSession.insufficientBalance)
+
+async function loadBillingModels() {
+  if (!billingState.enabled) {
+    return
+  }
+  try {
+    modelOptions.value = (await billingApi.models()) || []
+  } catch {
+    // 模型价目加载失败不阻断开局（后端使用默认模型）
+  }
+}
 
 // 会话状态全部来自全局 store：切标签/流式回合进行中都不丢失
 const status = computed(() => trainingSession.status)
@@ -126,6 +146,8 @@ onMounted(async () => {
   loadCategories()
   loadRecords()
   refreshQuota()
+  // 计费开关与模型价目：导航入口由 App 顶栏同步拉取，此处确保直达页面也有最新状态
+  refreshBillingState().then(loadBillingModels)
   const targetCategory = typeof route.query.category === 'string' ? route.query.category.trim() : ''
   // 恢复会话：切标签回来直接沿用模块级消息；刷新页面按后端历史完整重建对话
   const restored = await restoreTrainingSession()
@@ -233,15 +255,22 @@ async function startTraining(category) {
   localError.value = ''
   starting.value = true
   try {
-    await startTrainingSession(category, fromInterview)
+    await startTrainingSession(category, fromInterview, selectedModel.value || null)
     phase.value = 'active'
     refreshQuota()
     scrollDown()
   } catch (e) {
     if (e.code === 'QUOTA_EXCEEDED') {
-      localError.value = '今日免费额度已用完，可前往「设置」配置自己的 API Key 继续使用'
+      localError.value = billingState.enabled
+        ? '今日免费额度已用完，可充值余额按计费模式继续，或前往「设置」配置自己的 API Key'
+        : '今日免费额度已用完，可前往「设置」配置自己的 API Key 继续使用'
       toast.error(e.message || '今日免费额度已用完')
       refreshQuota()
+      refreshBillingState()
+    } else if (e.code === 'INSUFFICIENT_BALANCE') {
+      localError.value = e.message || '余额不足，请充值后继续'
+      toast.error(e.message || '余额不足，请充值后继续')
+      refreshBillingState()
     } else {
       localError.value = classifyError(e).message
     }
@@ -320,7 +349,10 @@ function scrollDown() {
       </p>
       <div v-if="quotaInfo && !quotaInfo.hasKey" class="quota-hint muted">
         <template v-if="quotaInfo.remaining > 0">今日剩余免费额度：{{ quotaInfo.remaining }} 次（开始训练消耗 1 次）</template>
-        <template v-else>今日免费额度已用完，可前往「设置」配置自己的 API Key 继续使用</template>
+        <template v-else>
+          今日免费额度已用完，可前往「设置」配置自己的 API Key 继续使用<template v-if="billingState.enabled">，或充值余额按计费模式继续</template>
+          <button v-if="billingState.enabled" type="button" class="link-btn" @click="router.push('/billing')">去充值 →</button>
+        </template>
       </div>
       <!-- 一级标签：题库来源（官方题库 / 我的资料） -->
       <div v-if="categoryOptions.length" class="source-tabs">
@@ -362,6 +394,21 @@ function scrollDown() {
           <span class="muted">（{{ sourceTab === 'official' ? '官方题库' : '我的资料' }}）</span>
           的专项训练，开局后由浅入深出题并消耗 1 次额度（自带 API Key 不消耗）。确认开始吗？
         </p>
+        <!-- 计费模型选择（仅计费开关开启）：默认系统模型，付费模型无余额时锁定 -->
+        <div v-if="billingState.enabled && modelOptions.length" class="model-row">
+          <label class="muted" for="training-model-select">模型选择：</label>
+          <select id="training-model-select" v-model="selectedModel" :disabled="sending">
+            <option value="">系统默认模型</option>
+            <option
+              v-for="item in modelOptions"
+              :key="item.id"
+              :value="item.id"
+              :disabled="item.paidOnly && billingState.balanceCents <= 0"
+            >
+              {{ item.name }}{{ item.paidOnly ? (billingState.balanceCents > 0 ? '（付费）' : ' 🔒 付费·余额不足') : '（免费）' }}
+            </option>
+          </select>
+        </div>
         <div class="confirm-actions">
           <button type="button" class="ghost" :disabled="sending" @click="selectedCategory = ''">重新选择</button>
           <button type="button" :disabled="sending" @click="confirmStart">{{ sending ? '正在开启…' : '确认开始' }}</button>
@@ -470,6 +517,11 @@ function scrollDown() {
             {{ sending ? '评估中…' : '提交回答' }}
           </button>
         </div>
+      </div>
+      <!-- 计费场次余额耗尽：回合预检中断后的充值引导横幅 -->
+      <div v-if="insufficientBalanceHint" class="billing-hint-banner">
+        <span>💰 余额不足，本场已暂停，充值后可继续作答。</span>
+        <button type="button" @click="router.push('/billing')">去充值</button>
       </div>
       <p v-if="error" class="error-text">{{ error }}</p>
     </template>
@@ -625,6 +677,36 @@ function scrollDown() {
 
 .quota-hint {
   margin: 10px 0;
+}
+
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.model-row select {
+  padding: 6px 10px;
+  border: 1px solid var(--border, #e3e6ef);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+}
+
+.billing-hint-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #fff7e6;
+  border: 1px solid #ffe3ad;
+  color: var(--text);
 }
 
 .category-grid {

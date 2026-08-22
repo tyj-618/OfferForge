@@ -30,6 +30,9 @@ public class MockAiModelClient implements AiModelClient {
     private static final Pattern PROJECT_NAME_PATTERN = Pattern.compile("项目名称[:：]\\s*(.+)");
     private static final Pattern DEEP_QUESTION_PATTERN = Pattern.compile("问题[:：]\\s*(.+)");
     private static final int STREAM_CHUNK_SIZE = 8;
+    /** 固定模拟用量：计费链路集成测试凭此确定性断言扣费金额（真实客户端上报模型实际 usage） */
+    private static final int MOCK_INPUT_TOKENS = 100;
+    private static final int MOCK_OUTPUT_TOKENS = 50;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -40,7 +43,8 @@ public class MockAiModelClient implements AiModelClient {
         List<ChatMessage> copiedMessages = List.copyOf(messages);
         lastGeneratedMessages.set(copiedMessages);
         String answer = mockAnswer(lastUserContent(copiedMessages));
-        return new AiTextResult(answer, UUID.randomUUID().toString(), 0, 0);
+        LlmCallContext.recordUsage(MOCK_INPUT_TOKENS, MOCK_OUTPUT_TOKENS);
+        return new AiTextResult(answer, UUID.randomUUID().toString(), MOCK_INPUT_TOKENS, MOCK_OUTPUT_TOKENS);
     }
 
     @Override
@@ -51,6 +55,7 @@ public class MockAiModelClient implements AiModelClient {
         for (int start = 0; start < answer.length(); start += STREAM_CHUNK_SIZE) {
             chunkConsumer.accept(answer.substring(start, Math.min(start + STREAM_CHUNK_SIZE, answer.length())));
         }
+        LlmCallContext.recordUsage(MOCK_INPUT_TOKENS, MOCK_OUTPUT_TOKENS);
     }
 
     @Override

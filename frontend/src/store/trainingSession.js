@@ -15,12 +15,14 @@ export const trainingSession = reactive({
   messages: [],
   sending: false,
   thinkingText: '',
-  error: ''
+  error: '',
+  // 计费场次余额耗尽标识：视图据此呈现充值引导横幅（与 error 文案配套）
+  insufficientBalance: false
 })
 
-/** 开始一场训练：成功后会话挂到模块级，后续切标签不影响；fromInterview：面试深入跳转豁免互斥；助手风格固定后端缺省 friendly */
-export async function startTrainingSession(category, fromInterview = false) {
-  const data = await trainingApi.start(category, fromInterview)
+/** 开始一场训练：成功后会话挂到模块级，后续切标签不影响；fromInterview：面试深入跳转豁免互斥；助手风格固定后端缺省 friendly；model：付费模型选择（可空） */
+export async function startTrainingSession(category, fromInterview = false, model = null) {
+  const data = await trainingApi.start(category, fromInterview, model)
   trainingSession.sessionId = data.sessionId
   trainingSession.status = data.status
   trainingSession.messages = [{ role: 'assistant', content: data.openingMessage }]
@@ -65,6 +67,8 @@ export function submitTrainingDontknow() {
 function runTurn(request, userText, initialThinkingText) {
   trainingSession.sending = true
   trainingSession.error = ''
+  // 新回合发起即清除余额不足标识（充值后回来继续作答的场景）
+  trainingSession.insufficientBalance = false
   trainingSession.messages.push({ role: 'user', content: userText })
   const assistantMessage = { role: 'assistant', content: '' }
   trainingSession.messages.push(assistantMessage)
@@ -125,6 +129,10 @@ function attachScore(commentBubble, result) {
 function failStream(assistantMessage, e) {
   trainingSession.sending = false
   trainingSession.thinkingText = ''
+  if (e?.code === 'INSUFFICIENT_BALANCE') {
+    // 计费场次余额耗尽：标记供视图呈现充值引导（非连接异常，不提供重试）
+    trainingSession.insufficientBalance = true
+  }
   const classified = classifyError(e)
   if (assistantMessage.content) {
     assistantMessage.comment = '连接已中断，请刷新页面查看最新进度'
@@ -240,6 +248,7 @@ export function clearTrainingSession() {
   trainingSession.sending = false
   trainingSession.thinkingText = ''
   trainingSession.error = ''
+  trainingSession.insufficientBalance = false
   try {
     sessionStorage.removeItem(TRAINING_SESSION_KEY)
   } catch {

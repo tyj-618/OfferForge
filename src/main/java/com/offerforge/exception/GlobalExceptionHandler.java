@@ -42,6 +42,14 @@ public class GlobalExceptionHandler {
                 .body(QuotaExceededBody.of(exception.remainingQuota(), exception.getMessage()));
     }
 
+    /** 计费模式余额不足：402 + 字符串业务码，前端据此引导充值 */
+    @ExceptionHandler(InsufficientBalanceException.class)
+    public ResponseEntity<InsufficientBalanceBody> handleInsufficientBalanceException(InsufficientBalanceException exception) {
+        log.warn("insufficient balance balanceCents={} message={}", exception.balanceCents(), exception.getMessage());
+        return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
+                .body(InsufficientBalanceBody.of(exception.balanceCents(), exception.getMessage()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ApiResponse<Void> handleValidationException(MethodArgumentNotValidException exception) {
         FieldError fieldError = exception.getBindingResult().getFieldError();

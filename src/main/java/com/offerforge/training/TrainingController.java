@@ -4,6 +4,8 @@ import com.offerforge.auth.CurrentUserService;
 import com.offerforge.common.ApiResponse;
 import com.offerforge.common.ErrorCode;
 import com.offerforge.exception.BusinessException;
+import com.offerforge.exception.InsufficientBalanceBody;
+import com.offerforge.exception.InsufficientBalanceException;
 import com.offerforge.interview.InterviewStreamSink;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,7 +62,8 @@ public class TrainingController {
         String category = request == null ? null : request.category();
         String style = request == null ? null : request.style();
         boolean fromInterview = request != null && Boolean.TRUE.equals(request.fromInterview());
-        return ApiResponse.success(trainingService.start(userId, category, style, fromInterview));
+        String model = request == null ? null : request.model();
+        return ApiResponse.success(trainingService.start(userId, category, style, fromInterview, model));
     }
 
     /**
@@ -168,6 +171,9 @@ public class TrainingController {
             TrainingTurnResult result = trainingService.answer(userId, sessionId, message, sseSink(emitter));
             emitter.send(SseEmitter.event().name("done").data(result));
             emitter.complete();
+        } catch (InsufficientBalanceException exception) {
+            // 计费场次余额耗尽：下发字符串业务码引导充值（与 HTTP 402 契约一致）
+            completeWithReadableError(emitter, InsufficientBalanceBody.CODE, exception.getMessage());
         } catch (BusinessException exception) {
             completeWithReadableError(emitter, exception.errorCode().code(), exception.getMessage());
         } catch (IOException exception) {
@@ -193,6 +199,8 @@ public class TrainingController {
             TrainingTurnResult result = action.execute(userId, sessionId, sseSink(emitter));
             emitter.send(SseEmitter.event().name("done").data(result));
             emitter.complete();
+        } catch (InsufficientBalanceException exception) {
+            completeWithReadableError(emitter, InsufficientBalanceBody.CODE, exception.getMessage());
         } catch (BusinessException exception) {
             completeWithReadableError(emitter, exception.errorCode().code(), exception.getMessage());
         } catch (IOException exception) {
@@ -263,9 +271,17 @@ public class TrainingController {
         }
     }
 
+    private void completeWithReadableError(SseEmitter emitter, String code, String message) {
+        sendErrorAndComplete(emitter, new StreamStringError(code, message));
+    }
+
     private void completeWithReadableError(SseEmitter emitter, int code, String message) {
+        sendErrorAndComplete(emitter, new StreamError(code, message));
+    }
+
+    private void sendErrorAndComplete(SseEmitter emitter, Object errorBody) {
         try {
-            emitter.send(SseEmitter.event().name("error").data(new StreamError(code, message)));
+            emitter.send(SseEmitter.event().name("error").data(errorBody));
         } catch (IOException | IllegalStateException ignored) {
             // 客户端可能已断开或 emitter 已超时结束，下方统一收尾
         }
@@ -273,5 +289,9 @@ public class TrainingController {
     }
 
     private record StreamError(int code, String message) {
+    }
+
+    /** 字符串业务码错误帧：余额不足等与 HTTP 契约一致的引导类错误 */
+    private record StreamStringError(String code, String message) {
     }
 }

@@ -119,6 +119,10 @@ async function unwrap(response, retried) {
   if (body?.remainingQuota != null) {
     businessError.remainingQuota = body.remainingQuota
   }
+  // 余额不足（402）：后端返回字符串业务码 INSUFFICIENT_BALANCE 与当前余额
+  if (body?.balanceCents != null) {
+    businessError.balanceCents = body.balanceCents
+  }
   throw businessError
 }
 
@@ -182,8 +186,9 @@ export const interviewApi = {
   // categories：勾选的资料分组（可空）；非空时出题仅用这些分组
   // includeAlgorithm：开启后 DEEP 阶段掺入算法手写编程题（任务 12）
   // 助手语气风格固定为后端缺省值 friendly（和蔼可亲），不再提供选择
-  start: (position, resumeId = null, mode = null, categories = null, includeAlgorithm = null) =>
-    http.post('/interview/start', { position, resumeId, mode, categories, includeAlgorithm }),
+  // model：付费模型选择（可空，空为系统默认模型；付费模型需充值余额支撑）
+  start: (position, resumeId = null, mode = null, categories = null, includeAlgorithm = null, model = null) =>
+    http.post('/interview/start', { position, resumeId, mode, categories, includeAlgorithm, model }),
   status: (sessionId) => http.get(`/interview/${sessionId}/status`),
   // 暂存续考（任务 4）：取未结束的面试会话，无则返回 null
   activeSession: () => http.get('/interview/active-session'),
@@ -309,6 +314,24 @@ async function sseRequest(url, body, callbacks, retried = false) {
 
 async function classifySseStatus(response) {
   const status = response.status
+  // 402 余额不足：字符串业务码 INSUFFICIENT_BALANCE，前端引导充值（付费计费）
+  if (status === 402) {
+    let message = '余额不足，请充值后继续'
+    let balanceCents = 0
+    try {
+      const body = await response.json()
+      if (body?.code === 'INSUFFICIENT_BALANCE') {
+        message = body.message || message
+        balanceCents = body.balanceCents ?? 0
+      }
+    } catch {
+      // body 非 JSON 时按默认文案处理
+    }
+    const error = new Error(message)
+    error.code = 'INSUFFICIENT_BALANCE'
+    error.balanceCents = balanceCents
+    return error
+  }
   // 429 读取 body 分类：额度超限返回字符串业务码 QUOTA_EXCEEDED，其余按限流提示
   if (status === 429) {
     try {
@@ -343,8 +366,8 @@ export function askStream(sessionId, message, callbacks) {
 
 // ---------- 专项训练（任务 7）：SSE 契约与面试 ask 一致 ----------
 export const trainingApi = {
-  // fromInterview：面试「深入该模块」跳转豁免互斥；助手风格固定后端缺省 friendly
-  start: (category, fromInterview = false) => http.post('/training/start', { category, fromInterview }),
+  // fromInterview：面试「深入该模块」跳转豁免互斥；助手风格固定后端缺省 friendly；model 付费模型选择（可空）
+  start: (category, fromInterview = false, model = null) => http.post('/training/start', { category, fromInterview, model }),
   status: (sessionId) => http.get(`/training/${sessionId}/status`),
   finish: (sessionId) => http.post(`/training/${sessionId}/finish`, null),
   // 训练历史分页（按完成时间倒序）：返回 Page 结构（content/totalElements/totalPages）
@@ -440,6 +463,37 @@ export const apiKeyApi = {
 
 export const quotaApi = {
   get: () => http.get('/quota')
+}
+
+// ---------- 付费计费：充值余额 + token 计费 ----------
+/** 响应式计费状态：导航入口/开局引导据此呈现；登录态变化时经 refreshBillingState 刷新 */
+export const billingState = reactive({ enabled: false, provider: '', balanceCents: 0, loaded: false })
+
+export function refreshBillingState() {
+  return billingApi
+    .status()
+    .then((data) => {
+      billingState.enabled = !!data?.enabled
+      billingState.provider = data?.provider || ''
+      billingState.balanceCents = data?.balanceCents || 0
+      billingState.loaded = true
+      return data
+    })
+    .catch(() => {
+      billingState.loaded = true
+    })
+}
+
+export const billingApi = {
+  status: () => http.get('/billing/status'),
+  packages: () => http.get('/billing/packages'),
+  models: () => http.get('/billing/models'),
+  createOrder: (packageId) => http.post('/billing/orders', { packageId }),
+  order: (orderNo) => http.get(`/billing/orders/${orderNo}`),
+  orders: () => http.get('/billing/orders'),
+  // 模拟支付（仅 mock 渠道装配）：支付渠道审核通过后替换为真实渠道收银台
+  mockPay: (orderNo) => http.post(`/billing/mock-pay/${orderNo}`, null),
+  transactions: () => http.get('/billing/transactions')
 }
 
 // ---------- 报告 ----------

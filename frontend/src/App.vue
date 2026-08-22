@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ToastHub from './components/ToastHub.vue'
-import { adminApi, authApi, authState, clearToken, currentUser, fetchCurrentUser } from './api'
+import { adminApi, authApi, authState, billingState, clearToken, currentUser, fetchCurrentUser, refreshBillingState } from './api'
 // 品牌横版 logo（透明底）：替代旧版 emoji + 文字品牌区，Vite 构建时指纹化到 dist
 import logoUrl from './assets/logo.png'
 
@@ -42,6 +42,20 @@ function refreshAdminFlag() {
 
 watch(() => authState.token, refreshAdminFlag, { immediate: true })
 
+// 充值入口仅总开关开启时可见：登录态变化时重新拉取计费状态；登出即复位隐藏。
+watch(
+  () => authState.token,
+  (token) => {
+    if (token) {
+      refreshBillingState()
+    } else {
+      billingState.enabled = false
+      billingState.balanceCents = 0
+    }
+  },
+  { immediate: true }
+)
+
 // 报告详情需 interviewId 参数，从历史记录列表进入；报告详情路由也高亮历史记录
 const baseNavItems = [
   { to: '/interview', label: '模拟面试', routes: ['interview'] },
@@ -54,10 +68,17 @@ const baseNavItems = [
   { to: '/settings', label: '设置', routes: ['settings'] }
 ]
 
-// 管理台入口动态追加，非管理员不可见
-const navItems = computed(() =>
-  isAdmin.value ? [...baseNavItems, { to: '/admin', label: '管理台', routes: ['admin'] }] : baseNavItems
-)
+// 充值入口按开关动态插入（设置之前）；管理台入口动态追加，非管理员不可见
+const navItems = computed(() => {
+  const items = [...baseNavItems]
+  if (billingState.enabled) {
+    items.splice(items.length - 1, 0, { to: '/billing', label: '充值', routes: ['billing'] })
+  }
+  if (isAdmin.value) {
+    items.push({ to: '/admin', label: '管理台', routes: ['admin'] })
+  }
+  return items
+})
 
 // 按路由名精确匹配高亮，避免 vue-router 对 "/" 的前缀匹配导致快捷提问在所有页面常亮
 function isActive(item) {

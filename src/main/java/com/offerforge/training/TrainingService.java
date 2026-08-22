@@ -8,10 +8,12 @@ import com.offerforge.ai.AnswerEvaluation;
 import com.offerforge.ai.ChatMessage;
 import com.offerforge.ai.LlmCallContext;
 import com.offerforge.ai.LlmCredentialResolver;
-import com.offerforge.apikey.ApiKeyService;
+import com.offerforge.billing.BillingAccessService;
+import com.offerforge.billing.BillingMeteringService;
+import com.offerforge.billing.WalletService;
 import com.offerforge.common.ErrorCode;
 import com.offerforge.exception.BusinessException;
-import com.offerforge.exception.QuotaExceededException;
+import com.offerforge.exception.InsufficientBalanceException;
 import com.offerforge.interview.EvaluationService;
 import com.offerforge.interview.InterviewMessageStore;
 import com.offerforge.interview.InterviewPromptBuilder;
@@ -60,10 +62,12 @@ public class TrainingService {
     private final KnowledgeMasteryService masteryService;
     private final TrainingRecordRepository recordRepository;
     private final TrainingProperties properties;
-    private final ApiKeyService apiKeyService;
     private final QuotaService quotaService;
     private final LlmCredentialResolver credentialResolver;
     private final ObjectMapper objectMapper;
+    private final BillingAccessService billingAccessService;
+    private final BillingMeteringService billingMeteringService;
+    private final WalletService walletService;
     /** 会话级互斥锁：训练会话量小，终态时移除条目即可 */
     private final Map<String, Object> sessionLocks = new ConcurrentHashMap<>();
 
@@ -79,10 +83,12 @@ public class TrainingService {
                            KnowledgeMasteryService masteryService,
                            TrainingRecordRepository recordRepository,
                            TrainingProperties properties,
-                           ApiKeyService apiKeyService,
                            QuotaService quotaService,
                            LlmCredentialResolver credentialResolver,
-                           ObjectMapper objectMapper) {
+                           ObjectMapper objectMapper,
+                           BillingAccessService billingAccessService,
+                           BillingMeteringService billingMeteringService,
+                           WalletService walletService) {
         this.sessionStore = sessionStore;
         this.interviewSessionStore = interviewSessionStore;
         this.messageStore = messageStore;
@@ -95,10 +101,12 @@ public class TrainingService {
         this.masteryService = masteryService;
         this.recordRepository = recordRepository;
         this.properties = properties;
-        this.apiKeyService = apiKeyService;
         this.quotaService = quotaService;
         this.credentialResolver = credentialResolver;
         this.objectMapper = objectMapper;
+        this.billingAccessService = billingAccessService;
+        this.billingMeteringService = billingMeteringService;
+        this.walletService = walletService;
     }
 
     /**
@@ -115,6 +123,15 @@ public class TrainingService {
      * fromInterview=true 表示面试「深入该模块」跳转，豁免与面试会话的跨模块互斥。
      */
     public TrainingStartResponse start(Long userId, String category, String style, boolean fromInterview) {
+        return start(userId, category, style, fromInterview, null);
+    }
+
+    /**
+     * 完整参数版：model 为付费模型选择（可空，空为系统默认模型）。
+     * 准入链与面试一致：自带 Key → 免费额度 → 充值余额计费 → 拒绝（见 BillingAccessService）。
+     */
+    public TrainingStartResponse start(Long userId, String category, String style, boolean fromInterview,
+                                       String model) {
         String normalized = category == null ? null : category.trim();
         if (normalized == null || normalized.isEmpty()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "请选择要训练的资料分组");
@@ -130,27 +147,23 @@ public class TrainingService {
         if (knowledgeRepository.findVisibleByCategories(List.of(normalized), userId).isEmpty()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "该分组下暂无可用题目，请先上传资料或更换分组");
         }
-        String keySource;
-        if (apiKeyService.hasKey(userId)) {
-            keySource = "user";
-        } else if (!quotaService.isEnabled() || quotaService.consumeQuota(userId)) {
-            keySource = "system";
-        } else {
-            throw new QuotaExceededException(quotaService.checkQuota(userId));
-        }
+        BillingAccessService.Decision access = billingAccessService.decide(userId, model);
+        String keySource = access.keySource();
         String sessionId = UUID.randomUUID().toString().replace("-", "");
         TrainingContext context = new TrainingContext();
         context.setSessionId(sessionId);
         context.setUserId(userId);
         context.setCategory(normalized);
         context.setStyle(style);
+        context.setBillable(access.billable());
+        context.setSelectedModel(model == null || model.isBlank() ? null : model.trim());
         context.setCreatedAtEpochMillis(System.currentTimeMillis());
 
         InterviewQuestionBank.InterviewQuestion first = nextQuestion(context).orElseThrow(
                 () -> new BusinessException(ErrorCode.PARAM_ERROR, "该分组下暂无可用题目，请先上传资料或更换分组"));
         applyQuestion(context, first);
         sessionStore.save(context);
-        LlmCallContext.bind(credentialResolver.resolveFor(userId));
+        bindCallContext(context);
         String openingMessage;
         try {
             openingMessage = streamAndRecord(sessionId,
@@ -161,8 +174,9 @@ public class TrainingService {
         } finally {
             LlmCallContext.clear();
         }
-        log.info("training started sessionId={} userId={} category={} keySource={} remainingQuota={}",
-                sessionId, userId, normalized, keySource, quotaService.checkQuota(userId));
+        log.info("training started sessionId={} userId={} category={} keySource={} billable={} model={} remainingQuota={}",
+                sessionId, userId, normalized, keySource, access.billable(), context.getSelectedModel(),
+                quotaService.checkQuota(userId));
         return new TrainingStartResponse(sessionId, openingMessage, statusView(context));
     }
 
@@ -178,7 +192,8 @@ public class TrainingService {
             if (context.isFinished()) {
                 throw new BusinessException(ErrorCode.CONFLICT, "本场专项训练已完成");
             }
-            LlmCallContext.bind(credentialResolver.resolveFor(userId));
+            requireBillingBalance(context);
+            bindCallContext(context);
             try {
                 return answerInternal(context, sessionId, userMessage, false, sink);
             } catch (IOException | RuntimeException exception) {
@@ -211,7 +226,8 @@ public class TrainingService {
             // 同作答回合：标记评估中，正常/异常路径均复位
             context.setEvaluating(true);
             sessionStore.save(context);
-            LlmCallContext.bind(credentialResolver.resolveFor(userId));
+            requireBillingBalance(context);
+            bindCallContext(context);
             try {
                 boolean finished = advanceToNextOrFinish(context, sessionId, sink);
                 // 回合推进成功后才落库绿勾：LLM 中途失败时前端重试重走整回合，
@@ -245,7 +261,8 @@ public class TrainingService {
             }
             String question = context.getCurrentQuestion();
             log.info("training sessionId={} question marked dont-know", sessionId);
-            LlmCallContext.bind(credentialResolver.resolveFor(userId));
+            requireBillingBalance(context);
+            bindCallContext(context);
             try {
                 // 复用作答主流程：强制 0 分且跳过评分联动
                 TrainingTurnResult result = answerInternal(context, sessionId, "不知道", true, sink);
@@ -560,6 +577,27 @@ public class TrainingService {
 
     private TrainingStatusResponse statusView(TrainingContext context) {
         return TrainingStatusResponse.from(context, properties);
+    }
+
+    /**
+     * 绑定本场 LLM 凭据（自带 Key / 系统 Key+所选模型）与 token 用量监听：
+     * 计费场次按「模型价目 × markup」实时从钱包扣费。
+     */
+    private void bindCallContext(TrainingContext context) {
+        LlmCallContext.bind(credentialResolver.resolveFor(context.getUserId(), context.getSelectedModel()));
+        LlmCallContext.setUsageListener((inputTokens, outputTokens) -> {
+            if (context.isBillable()) {
+                billingMeteringService.recordUsage(context.getUserId(), context.getSelectedModel(),
+                        inputTokens, outputTokens);
+            }
+        });
+    }
+
+    /** 计费场次回合预检：余额耗尽即中断并引导充值（402），避免白白调用 LLM */
+    private void requireBillingBalance(TrainingContext context) {
+        if (context.isBillable() && walletService.balance(context.getUserId()) <= 0) {
+            throw new InsufficientBalanceException(0);
+        }
     }
 
     private TrainingContext requireOwnedSession(Long userId, String sessionId) {

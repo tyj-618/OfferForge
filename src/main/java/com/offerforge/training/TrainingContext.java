@@ -25,6 +25,10 @@ public class TrainingContext {
     private String category;
     /** 助手语气风格：strict / friendly（旧会话缺失按 friendly） */
     private String style;
+    /** 付费计费模式：免费额度耗尽后以充值余额按 token 计费（旧会话缺失默认 false） */
+    private boolean billable;
+    /** 开局所选模型（付费模型选择；空为系统默认模型，旧会话缺失为 null） */
+    private String selectedModel;
     private String state = STATE_ACTIVE;
     /** 当前出题难度：EASY 起步，随连续答题表现动态调整 */
     private Difficulty currentDifficulty = Difficulty.EASY;
@@ -77,6 +81,22 @@ public class TrainingContext {
 
     public void setStyle(String style) {
         this.style = style;
+    }
+
+    public boolean isBillable() {
+        return billable;
+    }
+
+    public void setBillable(boolean billable) {
+        this.billable = billable;
+    }
+
+    public String getSelectedModel() {
+        return selectedModel;
+    }
+
+    public void setSelectedModel(String selectedModel) {
+        this.selectedModel = selectedModel;
     }
 
     public String getState() {

@@ -8,7 +8,8 @@ import java.util.List;
  * categories：勾选的资料分组（可空）；非空时出题仅用这些分组。
  * includeAlgorithm：是否包含算法手写编程题（DEEP 阶段按难度掺入，默认否）。
  * style：助手语气风格（strict/friendly，缺省 friendly）。
+ * model：付费模型选择（可空，空为系统默认模型；需充值余额支撑）。
  */
 public record InterviewStartRequest(String position, Long resumeId, String mode, List<String> categories,
-                                    Boolean includeAlgorithm, String style) {
+                                    Boolean includeAlgorithm, String style, String model) {
 }

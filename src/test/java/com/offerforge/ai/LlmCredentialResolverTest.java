@@ -10,12 +10,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * 调用链路分支：有自带 Key 返回用户凭据；未配置回退系统配置（null）。
+ * 调用链路分支：有自带 Key 返回用户凭据；未配置回退系统配置（null）；
+ * 计费模式模型覆写：无自带 Key 且指定模型时返回系统 Key + 所选模型。
  */
 class LlmCredentialResolverTest {
 
     private final ApiKeyService apiKeyService = mock(ApiKeyService.class);
-    private final LlmCredentialResolver resolver = new LlmCredentialResolver(apiKeyService);
+    private final AiProperties aiProperties = new AiProperties();
+    private final LlmCredentialResolver resolver = new LlmCredentialResolver(apiKeyService, aiProperties);
 
     @Test
     void resolvesUserCredentialsWhenKeyConfigured() {
@@ -35,5 +37,31 @@ class LlmCredentialResolverTest {
         when(apiKeyService.getKey(2L)).thenReturn(Optional.empty());
 
         assertThat(resolver.resolveFor(2L)).isNull();
+    }
+
+    @Test
+    void modelOverrideUsesSystemKeyWithSelectedModel() {
+        aiProperties.setBaseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1");
+        aiProperties.setApiKey("sk-system");
+        when(apiKeyService.getKey(3L)).thenReturn(Optional.empty());
+
+        LlmCredentials credentials = resolver.resolveFor(3L, "qwen-max");
+
+        assertThat(credentials).isNotNull();
+        assertThat(credentials.apiKey()).isEqualTo("sk-system");
+        assertThat(credentials.baseUrl()).isEqualTo("https://dashscope.aliyuncs.com/compatible-mode/v1");
+        assertThat(credentials.model()).isEqualTo("qwen-max");
+    }
+
+    @Test
+    void userKeyTakesPrecedenceOverModelOverride() {
+        when(apiKeyService.getKey(4L)).thenReturn(Optional.of(new ApiKeyService.DecryptedApiKey(
+                "QIANWEN", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus", "sk-user")));
+
+        // 自带 Key 用户所选模型忽略：用户 Key 自带模型与额度
+        LlmCredentials credentials = resolver.resolveFor(4L, "qwen-max");
+
+        assertThat(credentials.apiKey()).isEqualTo("sk-user");
+        assertThat(credentials.model()).isEqualTo("qwen-plus");
     }
 }

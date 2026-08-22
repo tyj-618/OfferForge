@@ -4,12 +4,15 @@ import { useRouter } from 'vue-router'
 import { marked } from 'marked'
 import {
   askStream,
+  billingApi,
+  billingState,
   deepTrainingExitStream,
   dontknowStream,
   interviewApi,
   knowledgeApi,
   masteredStream,
   quotaApi,
+  refreshBillingState,
   resumeApi
 } from '../api'
 import { classifyError, notifyError } from '../utils/errors'
@@ -270,8 +273,25 @@ function deleteCustomPosition(name) {
   savePositionSetting()
 }
 
-// 额度横幅三状态：有 Key 无限制 / 无 Key 剩余额度 / 额度用完引导配置
+// 额度横幅三状态：有 Key 无限制 / 无 Key 剩余额度 / 额度用完引导配置（含充值引导）
 const quotaInfo = ref(null)
+
+// 计费模型选择（仅计费开关开启时呈现）：默认系统模型，付费模型需余额支撑；
+// 余额耗尽横幅：计费场次回合预检中断后的充值引导（与开局 402 同一入口）
+const modelOptions = ref([])
+const selectedModel = ref('')
+const insufficientBalanceHint = ref(false)
+
+async function loadBillingModels() {
+  if (!billingState.enabled) {
+    return
+  }
+  try {
+    modelOptions.value = (await billingApi.models()) || []
+  } catch {
+    // 模型价目加载失败不阻断开局（后端使用默认模型）
+  }
+}
 
 const chatBox = ref(null)
 
@@ -387,6 +407,8 @@ onMounted(async () => {
     loadRecommendedCategories()
   }
   refreshQuota()
+  // 计费开关与模型价目：导航入口由 App 顶栏同步拉取，此处确保直达页面也有最新状态
+  refreshBillingState().then(loadBillingModels)
   // 刷新页面后恢复进行中的会话（状态栏与当前题；历史消息不回放）
   const saved = sessionStorage.getItem(SESSION_KEY)
   if (saved) {
@@ -545,7 +567,8 @@ async function startInterview(selectedMode) {
   error.value = ''
   try {
     const data = await interviewApi.start(position.value.trim(), selectedResumeId.value || null, selectedMode,
-      selectedCategories.value.length ? selectedCategories.value : null, includeAlgorithm.value || null)
+      selectedCategories.value.length ? selectedCategories.value : null, includeAlgorithm.value || null,
+      selectedModel.value || null)
     mode.value = selectedMode
     sessionStorage.setItem(MODE_KEY, selectedMode)
     sessionId.value = data.sessionId
@@ -557,9 +580,16 @@ async function startInterview(selectedMode) {
     refreshQuota()
   } catch (e) {
     if (e.code === 'QUOTA_EXCEEDED') {
-      error.value = '今日免费额度已用完，可前往「设置」配置自己的 API Key 继续使用'
+      error.value = billingState.enabled
+        ? '今日免费额度已用完，可充值余额按计费模式继续，或前往「设置」配置自己的 API Key'
+        : '今日免费额度已用完，可前往「设置」配置自己的 API Key 继续使用'
       toast.error(e.message || '今日免费额度已用完')
       refreshQuota()
+      refreshBillingState()
+    } else if (e.code === 'INSUFFICIENT_BALANCE') {
+      error.value = e.message || '余额不足，请充值后继续'
+      toast.error(e.message || '余额不足，请充值后继续')
+      refreshBillingState()
     } else {
       error.value = classifyError(e).message
     }
@@ -628,6 +658,8 @@ let pendingSegments = 0
 async function runStreamingTurn(request, retry) {
   sending.value = true
   thinking.value = true
+  // 新回合发起即清除余额不足横幅（充值后回来继续作答的场景）
+  insufficientBalanceHint.value = false
   // 必须持有 push 后返回的响应式代理：直接改原始对象不会触发重渲染，
   // 打字机过程将全程不可见、回合结束才一次性涌出（「一口气输出」）
   messages.value.push({ role: 'assistant', content: '' })
@@ -749,6 +781,13 @@ function failStream(assistantMessage, e, retry) {
     messages.value.pop()
   }
   endStream()
+  if (e?.code === 'INSUFFICIENT_BALANCE') {
+    // 计费场次余额耗尽：展示充值引导横幅（非连接异常，不提供重试）
+    insufficientBalanceHint.value = true
+    refreshBillingState()
+    toast.error(e.message || '余额不足，请充值后继续')
+    return
+  }
   notifyError(e, retry)
 }
 
@@ -892,10 +931,31 @@ function scrollDown() {
         </template>
         <template v-else>
           <span>⚠️ 今日免费额度已用完</span>
+          <span v-if="billingState.enabled && billingState.balanceCents > 0" class="quota-billing-note">
+            可用余额 ¥{{ (billingState.balanceCents / 100).toFixed(2) }}，开始后自动按 token 用量计费
+          </span>
+          <button v-if="billingState.enabled" type="button" class="ghost quota-config-btn" @click="router.push('/billing')">
+            去充值
+          </button>
           <button type="button" class="ghost quota-config-btn" @click="router.push('/settings')">
             配置 API Key
           </button>
         </template>
+      </div>
+      <!-- 计费模型选择（仅计费开关开启）：默认系统模型，付费模型无余额时锁定 -->
+      <div v-if="billingState.enabled && modelOptions.length" class="model-row">
+        <label class="muted" for="model-select">模型选择：</label>
+        <select id="model-select" v-model="selectedModel" :disabled="sending">
+          <option value="">系统默认模型</option>
+          <option
+            v-for="item in modelOptions"
+            :key="item.id"
+            :value="item.id"
+            :disabled="item.paidOnly && billingState.balanceCents <= 0"
+          >
+            {{ item.name }}{{ item.paidOnly ? (billingState.balanceCents > 0 ? '（付费）' : ' 🔒 付费·余额不足') : '（免费）' }}
+          </option>
+        </select>
       </div>
       <form class="start-row" @submit.prevent="proceedToModeSelect">
         <button type="submit" :disabled="sending">开始面试</button>
@@ -978,6 +1038,11 @@ function scrollDown() {
 
     <!-- 进行中 -->
     <template v-else>
+      <!-- 计费场次余额耗尽：回合预检中断后的充值引导横幅 -->
+      <div v-if="insufficientBalanceHint" class="billing-hint-banner">
+        <span>💰 余额不足，本场已暂停，充值后可继续作答。</span>
+        <button type="button" @click="router.push('/billing')">去充值</button>
+      </div>
       <!-- 顶部进度条：当前阶段 / 总阶段 -->
       <div class="stage-progress-wrap">
         <div class="stage-progress-track">
@@ -1635,6 +1700,40 @@ function scrollDown() {
   font-size: 13px;
   background: #eef3ff;
   border: 1px solid #d5e0ff;
+  color: var(--text);
+}
+
+.quota-billing-note {
+  color: #047857;
+}
+
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.model-row select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+}
+
+.billing-hint-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #fff7e6;
+  border: 1px solid #ffe3ad;
   color: var(--text);
 }
 

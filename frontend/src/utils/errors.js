@@ -6,6 +6,7 @@ import { toast } from '../toast'
  * - 50300：LLM 超时 / AI 服务不可用，可重试
  * - 50301 / 50000：服务端异常，不暴露技术细节，不建议立即重试
  * - 42900：触发限流
+ * - INSUFFICIENT_BALANCE：计费余额不足，引导充值（不可重试）
  * - 其余业务错误（40000/40900 等）：直接展示后端 message
  */
 export function classifyError(error) {
@@ -20,6 +21,8 @@ export function classifyError(error) {
       return { message: '服务暂时不可用，请稍后再试', retryable: false }
     case 42900:
       return { message: '请求过于频繁，请稍后再试', retryable: false }
+    case 'INSUFFICIENT_BALANCE':
+      return { message: error?.message || '余额不足，请充值后继续', retryable: false }
     default:
       return { message: error?.message || '请求失败', retryable: true }
   }

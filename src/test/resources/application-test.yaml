@@ -42,6 +42,30 @@ offerforge:
   quota:
     # 存量集成测试不受额度约束；额度行为由 QuotaIntegrationTests 用属性覆盖专项验证
     enabled: false
+  billing:
+    # 存量集成测试不受付费链影响（开关关）；计费链路行为由 BillingIntegrationTests 用属性覆盖专项验证；
+    # 高价目 + Mock 客户端固定用量（100 输入/50 输出）：每次调用成本 10+10=20 分，×1.2 = 24 分，确定性可断言
+    enabled: false
+    provider: mock
+    markup: 1.2
+    packages:
+      - id: pkg-10
+        name: "¥10"
+        amount-cents: 1000
+      - id: pkg-50
+        name: "¥50"
+        amount-cents: 5000
+    models:
+      - id: test-free
+        name: "测试免费档"
+        input-per-million-cents: 100000
+        output-per-million-cents: 200000
+        paid-only: false
+      - id: test-paid
+        name: "测试付费档"
+        input-per-million-cents: 100000
+        output-per-million-cents: 200000
+        paid-only: true
   encryption:
     # 测试专用固定密钥（32 字节）
     key: offerforge-test-aes256-gcm-key!!
