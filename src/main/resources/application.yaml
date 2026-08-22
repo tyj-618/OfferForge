@@ -54,9 +54,12 @@ offerforge:
     refresh-cookie-secure: ${OFFERFORGE_AUTH_REFRESH_COOKIE_SECURE:false}
     access-token-ttl-seconds: ${OFFERFORGE_AUTH_ACCESS_TOKEN_TTL_SECONDS:7200}
     refresh-token-ttl-seconds: ${OFFERFORGE_AUTH_REFRESH_TOKEN_TTL_SECONDS:604800}
-  # 管理台：逗号分隔的管理员名单（用户名或邮箱均可，邮箱兼容验证码自动注册账号），未配置时无人具备管理员权限
+  # 管理台：逗号分隔的管理员名单（用户名或邮箱均可），未配置时无人具备管理员权限；
+  # bootstrap 开启时启动即确保唯一管理账号（admin / 3520097134@qq.com / 123456）
   admin:
     usernames: ${OFFERFORGE_ADMIN_USERNAMES:}
+    bootstrap:
+      enabled: ${OFFERFORGE_ADMIN_BOOTSTRAP_ENABLED:false}
   ai:
     provider: ${OFFERFORGE_AI_PROVIDER:mock}
     base-url: ${OFFERFORGE_AI_BASE_URL:}

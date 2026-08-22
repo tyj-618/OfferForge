@@ -60,6 +60,7 @@ services:
       TENCENT_SES_FROM_EMAIL: ${TENCENT_SES_FROM_EMAIL:-noreply@easyofferforge.com}
       TENCENT_SES_TEMPLATE_ID: ${TENCENT_SES_TEMPLATE_ID:-}
       OFFERFORGE_ADMIN_USERNAMES: ${OFFERFORGE_ADMIN_USERNAMES:-}
+      OFFERFORGE_ADMIN_BOOTSTRAP_ENABLED: ${OFFERFORGE_ADMIN_BOOTSTRAP_ENABLED:-false}
       TZ: Asia/Shanghai
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health >/dev/null 2>&1 || exit 1"]

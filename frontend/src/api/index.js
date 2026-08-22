@@ -148,11 +148,14 @@ function refreshTokenOnce() {
 
 // ---------- 认证 ----------
 export const authApi = {
-  register: (username, password) => http.post('/auth/register', { username, password }),
+  // 注册：邮箱 + 验证码 + 用户名 + 密码（账号与邮箱一一对应）
+  register: (email, code, username, password) => http.post('/auth/register', { email, code, username, password }),
+  // 登录：账号（用户名或邮箱）+ 密码
   login: (username, password) => http.post('/auth/login', { username, password }),
-  // 邮箱验证码登录：发码（60 秒防刷）→ 验证码登录（邮箱不存在自动注册）
+  // 邮箱验证码：发码（60 秒防刷），注册与忘记密码共用
   sendCode: (email) => http.post('/auth/send-code', { email }),
-  loginByCode: (email, code) => http.post('/auth/login-by-code', { email, code }),
+  // 忘记密码：邮箱 + 验证码 + 新密码，验证通过后直接改密
+  resetPassword: (email, code, newPassword) => http.post('/auth/reset-password', { email, code, newPassword }),
   logout: () => http.post('/auth/logout', null),
   me: () => http.get('/auth/me')
 }

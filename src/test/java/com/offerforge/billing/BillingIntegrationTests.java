@@ -3,6 +3,7 @@ package com.offerforge.billing;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.offerforge.auth.UserRepository;
+import com.offerforge.email.EmailVerificationCodeStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -50,6 +51,9 @@ class BillingIntegrationTests {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private EmailVerificationCodeStore codeStore;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_1_1)
@@ -191,7 +195,10 @@ class BillingIntegrationTests {
     }
 
     private String newUser(String name) throws Exception {
-        assertCode(post("/api/auth/register", null, Map.of("username", name, "password", "123456")), 0);
+        String email = name.toLowerCase() + "@test.local";
+        codeStore.saveCode(email, "135790");
+        assertCode(post("/api/auth/register", null,
+                Map.of("email", email, "code", "135790", "username", name, "password", "123456")), 0);
         JsonNode login = post("/api/auth/login", null, Map.of("username", name, "password", "123456"));
         assertCode(login, 0);
         return login.at("/data/token").asText();
@@ -238,6 +245,9 @@ class BillingDisabledIntegrationTests {
     @LocalServerPort
     private int port;
 
+    @Autowired
+    private EmailVerificationCodeStore codeStore;
+
     private final HttpClient httpClient = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_1_1)
             .build();
@@ -246,8 +256,10 @@ class BillingDisabledIntegrationTests {
     @Test
     void endpointsRejectWhenBillingDisabled() throws Exception {
         String username = "bill_off_" + System.nanoTime();
+        String email = username.toLowerCase() + "@test.local";
+        codeStore.saveCode(email, "135790");
         objectMapper.readTree(send("POST", "/api/auth/register", null,
-                Map.of("username", username, "password", "123456")).body());
+                Map.of("email", email, "code", "135790", "username", username, "password", "123456")).body());
         JsonNode login = objectMapper.readTree(send("POST", "/api/auth/login", null,
                 Map.of("username", username, "password", "123456")).body());
         String token = login.at("/data/token").asText();

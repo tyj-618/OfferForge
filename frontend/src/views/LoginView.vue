@@ -7,13 +7,16 @@ import { toast } from '../toast'
 const route = useRoute()
 const router = useRouter()
 
+// mode：login（账号密码登录）/ register（邮箱验证码注册）/ forgot（忘记密码改密）
 const mode = ref('login')
 const loading = ref(false)
 const error = ref('')
-const form = reactive({ username: '', password: '' })
 
-// 邮箱验证码登录：发码后 60 秒倒计时（与后端防刷窗口一致）
-const emailForm = reactive({ email: '', code: '' })
+const loginForm = reactive({ username: '', password: '' })
+const registerForm = reactive({ email: '', code: '', username: '', password: '' })
+const forgotForm = reactive({ email: '', code: '', newPassword: '' })
+
+// 验证码发送：60 秒倒计时（与后端防刷窗口一致），注册与忘记密码共用一个计时器（单表单可见）
 const sending = ref(false)
 const countdown = ref(0)
 let countdownTimer = null
@@ -26,21 +29,23 @@ function onLoginSuccess(data) {
 }
 
 async function submit() {
-  if (mode.value === 'email') {
-    await submitEmailCode()
+  if (mode.value === 'register') {
+    await submitRegister()
     return
   }
-  if (!form.username.trim() || !form.password) {
-    error.value = '请输入用户名和密码'
+  if (mode.value === 'forgot') {
+    await submitForgot()
+    return
+  }
+  if (!loginForm.username.trim() || !loginForm.password) {
+    error.value = '请输入用户名/邮箱和密码'
     return
   }
   loading.value = true
   error.value = ''
   try {
-    if (mode.value === 'register') {
-      await authApi.register(form.username.trim(), form.password)
-    }
-    const data = await authApi.login(form.username.trim(), form.password)
+    // 后端同时支持用户名或邮箱作为登录账号
+    const data = await authApi.login(loginForm.username.trim(), loginForm.password)
     onLoginSuccess(data)
   } catch (e) {
     error.value = e.message
@@ -49,16 +54,48 @@ async function submit() {
   }
 }
 
-async function submitEmailCode() {
-  if (!emailForm.email.trim() || !emailForm.code.trim()) {
+async function submitRegister() {
+  if (!registerForm.email.trim() || !registerForm.code.trim()) {
     error.value = '请输入邮箱和验证码'
+    return
+  }
+  if (!registerForm.username.trim() || !registerForm.password) {
+    error.value = '请输入用户名和密码'
     return
   }
   loading.value = true
   error.value = ''
   try {
-    const data = await authApi.loginByCode(emailForm.email.trim(), emailForm.code.trim())
+    await authApi.register(
+      registerForm.email.trim(),
+      registerForm.code.trim(),
+      registerForm.username.trim(),
+      registerForm.password
+    )
+    const data = await authApi.login(registerForm.username.trim(), registerForm.password)
     onLoginSuccess(data)
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    loading.value = false
+  }
+}
+
+async function submitForgot() {
+  if (!forgotForm.email.trim() || !forgotForm.code.trim()) {
+    error.value = '请输入邮箱和验证码'
+    return
+  }
+  if (!forgotForm.newPassword || forgotForm.newPassword.length < 6) {
+    error.value = '新密码至少 6 位'
+    return
+  }
+  loading.value = true
+  error.value = ''
+  try {
+    await authApi.resetPassword(forgotForm.email.trim(), forgotForm.code.trim(), forgotForm.newPassword)
+    toast.success('密码修改成功，请使用新密码登录')
+    switchMode('login')
   } catch (e) {
     error.value = e.message
   } finally {
@@ -67,14 +104,16 @@ async function submitEmailCode() {
 }
 
 async function sendCode() {
-  if (!emailForm.email.trim()) {
+  // 当前可见表单的邮箱即为发码目标（注册与忘记密码复用同一接口）
+  const email = mode.value === 'register' ? registerForm.email.trim() : forgotForm.email.trim()
+  if (!email) {
     error.value = '请输入邮箱'
     return
   }
   sending.value = true
   error.value = ''
   try {
-    await authApi.sendCode(emailForm.email.trim())
+    await authApi.sendCode(email)
     toast.success('验证码已发送，请注意查收邮箱')
     startCountdown()
   } catch (e) {
@@ -112,19 +151,41 @@ function switchMode(target) {
       <div class="tabs">
         <button :class="{ active: mode === 'login' }" class="secondary" @click="switchMode('login')">登录</button>
         <button :class="{ active: mode === 'register' }" class="secondary" @click="switchMode('register')">注册</button>
-        <button :class="{ active: mode === 'email' }" class="secondary" @click="switchMode('email')">邮箱登录</button>
       </div>
 
-      <form v-if="mode === 'email'" @submit.prevent="submit">
+      <form v-if="mode === 'login'" @submit.prevent="submit">
+        <label>
+          <span>用户名 / 邮箱</span>
+          <input v-model="loginForm.username" placeholder="请输入用户名或邮箱" autocomplete="username" />
+        </label>
+        <label>
+          <span>密码</span>
+          <input
+            v-model="loginForm.password"
+            type="password"
+            placeholder="请输入密码"
+            autocomplete="current-password"
+          />
+        </label>
+        <p v-if="error" class="error-text">{{ error }}</p>
+        <button type="submit" class="submit" :disabled="loading">
+          {{ loading ? '处理中…' : '登录' }}
+        </button>
+        <p class="forgot-link">
+          <a href="#" @click.prevent="switchMode('forgot')">忘记密码？</a>
+        </p>
+      </form>
+
+      <form v-else-if="mode === 'register'" @submit.prevent="submit">
         <label>
           <span>邮箱</span>
-          <input v-model="emailForm.email" type="email" placeholder="请输入邮箱" autocomplete="email" />
+          <input v-model="registerForm.email" type="email" placeholder="请输入邮箱" autocomplete="email" />
         </label>
         <div class="code-row">
           <label>
             <span>验证码</span>
             <input
-              v-model="emailForm.code"
+              v-model="registerForm.code"
               maxlength="6"
               inputmode="numeric"
               placeholder="6 位数字验证码"
@@ -135,31 +196,62 @@ function switchMode(target) {
             {{ sending ? '发送中…' : countdown > 0 ? `${countdown}s 后重发` : '发送验证码' }}
           </button>
         </div>
-        <p v-if="error" class="error-text">{{ error }}</p>
-        <button type="submit" class="submit" :disabled="loading">
-          {{ loading ? '处理中…' : '登录 / 注册' }}
-        </button>
-        <p class="muted email-tip">未注册的邮箱验证通过后自动创建账号</p>
-      </form>
-
-      <form v-else @submit.prevent="submit">
         <label>
           <span>用户名</span>
-          <input v-model="form.username" placeholder="请输入用户名" autocomplete="username" />
+          <input v-model="registerForm.username" placeholder="3-32 位" autocomplete="username" />
         </label>
         <label>
           <span>密码</span>
           <input
-            v-model="form.password"
+            v-model="registerForm.password"
             type="password"
-            placeholder="请输入密码（至少 6 位）"
-            autocomplete="current-password"
+            placeholder="至少 6 位"
+            autocomplete="new-password"
           />
         </label>
         <p v-if="error" class="error-text">{{ error }}</p>
         <button type="submit" class="submit" :disabled="loading">
-          {{ loading ? '处理中…' : mode === 'login' ? '登录' : '注册并登录' }}
+          {{ loading ? '处理中…' : '注册并登录' }}
         </button>
+        <p class="muted email-tip">每个邮箱仅可注册一个账号</p>
+      </form>
+
+      <form v-else @submit.prevent="submit">
+        <label>
+          <span>邮箱</span>
+          <input v-model="forgotForm.email" type="email" placeholder="请输入注册邮箱" autocomplete="email" />
+        </label>
+        <div class="code-row">
+          <label>
+            <span>验证码</span>
+            <input
+              v-model="forgotForm.code"
+              maxlength="6"
+              inputmode="numeric"
+              placeholder="6 位数字验证码"
+              autocomplete="one-time-code"
+            />
+          </label>
+          <button type="button" class="secondary send-code" :disabled="sending || countdown > 0" @click="sendCode">
+            {{ sending ? '发送中…' : countdown > 0 ? `${countdown}s 后重发` : '发送验证码' }}
+          </button>
+        </div>
+        <label>
+          <span>新密码</span>
+          <input
+            v-model="forgotForm.newPassword"
+            type="password"
+            placeholder="至少 6 位"
+            autocomplete="new-password"
+          />
+        </label>
+        <p v-if="error" class="error-text">{{ error }}</p>
+        <button type="submit" class="submit" :disabled="loading">
+          {{ loading ? '处理中…' : '修改密码' }}
+        </button>
+        <p class="forgot-link">
+          <a href="#" @click.prevent="switchMode('login')">返回登录</a>
+        </p>
       </form>
     </div>
   </div>
@@ -245,5 +337,16 @@ label span {
   text-align: center;
   font-size: 12px;
   margin-top: 10px;
+}
+
+.forgot-link {
+  text-align: center;
+  font-size: 13px;
+  margin-top: 10px;
+}
+
+.forgot-link a {
+  color: var(--primary);
+  text-decoration: none;
 }
 </style>

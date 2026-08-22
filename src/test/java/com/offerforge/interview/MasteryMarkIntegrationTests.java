@@ -2,7 +2,9 @@ package com.offerforge.interview;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.offerforge.email.EmailVerificationCodeStore;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.MediaType;
@@ -29,6 +31,9 @@ class MasteryMarkIntegrationTests {
 
     @LocalServerPort
     private int port;
+
+    @Autowired
+    private EmailVerificationCodeStore codeStore;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_1_1)
@@ -135,7 +140,10 @@ class MasteryMarkIntegrationTests {
 
     private String newUser() throws Exception {
         String username = "mastery_user_" + System.nanoTime();
-        assertCode(post("/api/auth/register", null, Map.of("username", username, "password", "123456")), 0);
+        String email = username.toLowerCase() + "@test.local";
+        codeStore.saveCode(email, "135790");
+        assertCode(post("/api/auth/register", null,
+                Map.of("email", email, "code", "135790", "username", username, "password", "123456")), 0);
         JsonNode login = post("/api/auth/login", null, Map.of("username", username, "password", "123456"));
         assertCode(login, 0);
         return login.at("/data/token").asText();

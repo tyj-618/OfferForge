@@ -47,7 +47,7 @@ public class AuthController {
 
     /**
      * 发送邮箱验证码：格式校验 → 防刷检查（60 秒）→ 腾讯云 SES 发信；
-     * 错误超限锁定的邮箱同样拒绝发信，避免被当作邮件轰炸工具。
+     * 注册与忘记密码共用本端点。错误超限锁定的邮箱同样拒绝发信，避免被当作邮件轰炸工具。
      */
     @PostMapping("/send-code")
     public ApiResponse<Boolean> sendCode(@Valid @RequestBody SendCodeRequest request) {
@@ -56,14 +56,12 @@ public class AuthController {
     }
 
     /**
-     * 邮箱验证码登录：校验验证码 → 邮箱未注册自动创建账号 → 签发会话（与密码登录一致）。
+     * 忘记密码：邮箱 + 验证码校验通过后重置密码（新密码需 6-64 位）。
      */
-    @PostMapping("/login-by-code")
-    public ApiResponse<LoginResponse> loginByCode(@Valid @RequestBody LoginByCodeRequest request,
-                                                  HttpServletResponse response) {
-        LoginResponse loginResponse = authService.loginByCode(request.email(), request.code());
-        writeRefreshCookie(response, loginResponse.refreshToken(), loginResponse.refreshExpiresIn());
-        return ApiResponse.success(loginResponse);
+    @PostMapping("/reset-password")
+    public ApiResponse<Boolean> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request);
+        return ApiResponse.success(true);
     }
 
     @PostMapping("/refresh")

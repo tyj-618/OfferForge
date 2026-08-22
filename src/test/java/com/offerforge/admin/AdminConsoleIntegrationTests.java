@@ -2,7 +2,9 @@ package com.offerforge.admin;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.offerforge.email.EmailVerificationCodeStore;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.MediaType;
@@ -30,6 +32,9 @@ class AdminConsoleIntegrationTests {
 
     @LocalServerPort
     private int port;
+
+    @Autowired
+    private EmailVerificationCodeStore codeStore;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -119,9 +124,11 @@ class AdminConsoleIntegrationTests {
         assertCode(post("/api/admin/users/999999/ban", null, "Bearer " + adminToken), 40400);
     }
 
-    /** 注册（已存在则忽略）并登录，返回 access token */
+    /** 注册（已存在则忽略）并登录，返回 access token；注册走邮箱验证码制（直写码绕过防刷窗口） */
     private String registerAndLogin(String username, String password) throws Exception {
-        post("/api/auth/register", Map.of("username", username, "password", password));
+        String email = username.toLowerCase() + "@test.local";
+        codeStore.saveCode(email, "135790");
+        post("/api/auth/register", Map.of("email", email, "code", "135790", "username", username, "password", password));
         JsonNode login = post("/api/auth/login", Map.of("username", username, "password", password));
         assertCode(login, 0);
         return login.at("/data/token").asText();

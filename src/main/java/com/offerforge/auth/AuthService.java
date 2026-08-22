@@ -7,8 +7,6 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.util.UUID;
-
 @Service
 public class AuthService {
 
@@ -29,45 +27,65 @@ public class AuthService {
         this.passwordTimingHash = passwordEncoder.encode("offerforge-login-timing-only");
     }
 
+    /**
+     * 邮箱注册：邮箱 + 验证码 + 用户名 + 密码，账号与邮箱一一对应。
+     * 先完成邮箱/用户名唯一性校验再消耗验证码，避免非法请求白白作废用户收到的码。
+     */
     public RegisterResponse register(RegisterRequest request) {
+        String email = request.email().trim().toLowerCase();
+        if (userRepository.existsByEmail(email)) {
+            throw new BusinessException(ErrorCode.EMAIL_EXISTS);
+        }
         if (userRepository.existsByUsername(request.username())) {
             throw new BusinessException(ErrorCode.USERNAME_EXISTS);
+        }
+        if (!emailService.verifyCode(email, request.code())) {
+            throw new BusinessException(ErrorCode.EMAIL_CODE_INVALID);
         }
 
         UserEntity user = new UserEntity();
         user.setUsername(request.username());
         user.setPassword(passwordEncoder.encode(request.password()));
         user.setNickname(generateDefaultNickname());
+        user.setEmail(email);
 
         try {
             userRepository.save(user);
-        } catch (DataIntegrityViolationException exception) { // 防止并发注册
-            throw new BusinessException(ErrorCode.USERNAME_EXISTS);
+        } catch (DataIntegrityViolationException exception) { // 并发注册撞用户名/邮箱
+            throw userRepository.existsByEmail(email)
+                    ? new BusinessException(ErrorCode.EMAIL_EXISTS)
+                    : new BusinessException(ErrorCode.USERNAME_EXISTS);
         }
 
         return new RegisterResponse(user.getId(), user.getUsername(), user.getNickname());
     }
 
+    /**
+     * 密码登录：账号字段兼容用户名或邮箱（先按用户名匹配，未命中再按邮箱匹配）。
+     */
     public LoginResponse login(LoginRequest request) {
-        loginRateLimiter.checkAllowed(request.username());
-        UserEntity user = userRepository.findByUsername(request.username()).orElse(null);
+        String identifier = request.username().trim();
+        loginRateLimiter.checkAllowed(identifier);
+        UserEntity user = userRepository.findByUsername(identifier)
+                .or(() -> userRepository.findByEmail(identifier.toLowerCase()))
+                .orElse(null);
         if (user == null) {
-            passwordEncoder.matches(request.password(), passwordTimingHash); // 时序补偿，避免用户名枚举
-            loginRateLimiter.recordFailure(request.username());
+            passwordEncoder.matches(request.password(), passwordTimingHash); // 时序补偿，避免账号枚举
+            loginRateLimiter.recordFailure(identifier);
             throw new BusinessException(ErrorCode.AUTH_FAILED);
         }
 
         if (user.getStatus() != null && user.getStatus() != 0) {
-            loginRateLimiter.recordFailure(request.username());
+            loginRateLimiter.recordFailure(identifier);
             throw new BusinessException(ErrorCode.FORBIDDEN, "用户已被禁用");
         }
 
         if (!passwordEncoder.matches(request.password(), user.getPassword())) {
-            loginRateLimiter.recordFailure(request.username());
+            loginRateLimiter.recordFailure(identifier);
             throw new BusinessException(ErrorCode.AUTH_FAILED);
         }
 
-        loginRateLimiter.clear(request.username());
+        loginRateLimiter.clear(identifier);
 
         TokenSession session = tokenStore.createSession(user.getId());
         UserSummary userSummary = new UserSummary(user.getId(), user.getUsername(), user.getNickname());
@@ -82,48 +100,22 @@ public class AuthService {
     }
 
     /**
-     * 邮箱验证码登录：校验验证码 → 邮箱不存在则自动注册（一邮箱唯一绑定）→ 复用既有会话签发。
-     * 自动注册账号的密码为随机值（仅可验证码登录，不可密码登录）。
+     * 忘记密码：邮箱 + 验证码通过后重置密码。
+     * 先校验邮箱已注册再消耗验证码，避免陌生邮箱白白作废用户的码；
+     * 错误信息不区分「邮箱未注册/验证码错误」之外的细节由错误码承载，枚举风险由验证码防刷锁定兜底。
      */
-    public LoginResponse loginByCode(String email, String code) {
-        if (!EmailService.isValidEmail(email)) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "邮箱格式不正确");
-        }
-        if (!emailService.verifyCode(email, code)) {
+    public void resetPassword(ResetPasswordRequest request) {
+        String email = request.email().trim().toLowerCase();
+        UserEntity user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "该邮箱未注册账号"));
+        if (!emailService.verifyCode(email, request.code())) {
             throw new BusinessException(ErrorCode.EMAIL_CODE_INVALID);
         }
-
-        UserEntity user = userRepository.findByEmail(email).orElseGet(() -> registerByEmail(email));
-
         if (user.getStatus() != null && user.getStatus() != 0) {
             throw new BusinessException(ErrorCode.FORBIDDEN, "用户已被禁用");
         }
-
-        TokenSession session = tokenStore.createSession(user.getId());
-        UserSummary userSummary = new UserSummary(user.getId(), user.getUsername(), user.getNickname());
-
-        return new LoginResponse(
-                session.token(),
-                session.expiresIn(),
-                session.refreshToken(),
-                session.refreshExpiresIn(),
-                userSummary
-        );
-    }
-
-    /** 验证码自动注册：随机用户名 + 随机密码 + 绑定邮箱；并发撞邮箱时回读既有账号 */
-    private UserEntity registerByEmail(String email) {
-        UserEntity user = new UserEntity();
-        user.setUsername(generateEmailUsername());
-        user.setPassword(passwordEncoder.encode(UUID.randomUUID().toString()));
-        user.setNickname(generateDefaultNickname());
-        user.setEmail(email);
-        try {
-            return userRepository.save(user);
-        } catch (DataIntegrityViolationException exception) {
-            return userRepository.findByEmail(email)
-                    .orElseThrow(() -> new BusinessException(ErrorCode.EMAIL_EXISTS));
-        }
+        user.setPassword(passwordEncoder.encode(request.newPassword()));
+        userRepository.save(user);
     }
 
     public void logout(String authorization, String refreshToken) {
@@ -158,10 +150,5 @@ public class AuthService {
 
     private String generateDefaultNickname() {
         return "Candidate_" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 8);
-    }
-
-    /** 邮箱注册用户的系统用户名：u_ + 12 位随机（不可登录，仅作账号标识） */
-    private String generateEmailUsername() {
-        return "u_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
     }
 }

@@ -2,7 +2,9 @@ package com.offerforge.qa;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.offerforge.email.EmailVerificationCodeStore;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.MediaType;
@@ -23,6 +25,9 @@ class QaApiIntegrationTests {
 
     @LocalServerPort
     private int port;
+
+    @Autowired
+    private EmailVerificationCodeStore codeStore;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -113,7 +118,10 @@ class QaApiIntegrationTests {
     }
 
     private void register(String username, String password) throws Exception {
-        JsonNode result = post("/api/auth/register", null, Map.of("username", username, "password", password));
+        String email = username.toLowerCase() + "@test.local";
+        codeStore.saveCode(email, "135790");
+        JsonNode result = post("/api/auth/register", null,
+                Map.of("email", email, "code", "135790", "username", username, "password", password));
         assertCode(result, 0);
     }
 

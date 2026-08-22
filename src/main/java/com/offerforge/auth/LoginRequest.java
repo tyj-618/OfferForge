@@ -5,7 +5,7 @@ import jakarta.validation.constraints.Size;
 
 public record LoginRequest(
         @NotBlank(message = "不能为空")
-        @Size(max = 32, message = "长度不能超过 32")
+        @Size(max = 128, message = "长度不能超过 128") // 账号字段兼容用户名或邮箱，上限对齐邮箱长度
         String username,
 
         @NotBlank(message = "不能为空")

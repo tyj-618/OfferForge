@@ -6,9 +6,9 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
- * 注册请求：仅支持邮箱注册（邮箱 + 验证码 + 用户名 + 密码），账号与邮箱一一对应。
+ * 忘记密码重置请求：邮箱 + 验证码 + 新密码；验证码正确才允许改密。
  */
-public record RegisterRequest(
+public record ResetPasswordRequest(
         @NotBlank(message = "不能为空")
         @Email(message = "邮箱格式不正确")
         @Size(max = 128, message = "长度不能超过 128")
@@ -19,11 +19,7 @@ public record RegisterRequest(
         String code,
 
         @NotBlank(message = "不能为空")
-        @Size(min = 3, max = 32, message = "长度需在 3-32 之间")
-        String username,
-
-        @NotBlank(message = "不能为空")
         @Size(min = 6, max = 64, message = "长度需在 6-64 之间")
-        String password
+        String newPassword
 ) {
 }

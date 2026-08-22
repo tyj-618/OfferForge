@@ -2,7 +2,9 @@ package com.offerforge.auth;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.offerforge.email.EmailVerificationCodeStore;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.MediaType;
@@ -24,22 +26,30 @@ class AuthFlowTests {
     @LocalServerPort
     private int port;
 
+    @Autowired
+    private EmailVerificationCodeStore codeStore;
+
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
     void registerLoginLogoutFlow() throws Exception {
         String username = "auth_user_" + System.nanoTime();
-        JsonNode registerResult = post("/api/auth/register", Map.of("username", username, "password", "123456"));
+        String email = username.toLowerCase() + "@test.local";
+        JsonNode registerResult = post("/api/auth/register", registerBody(email, username, "123456"));
         assertCode(registerResult, 0);
         assertThat(registerResult.at("/data/username").asText()).isEqualTo(username);
         assertThat(registerResult.at("/data/nickname").asText()).startsWith("Candidate_");
 
+        // 用户名登录
         JsonNode loginResult = post("/api/auth/login", Map.of("username", username, "password", "123456"));
         assertCode(loginResult, 0);
         String token = loginResult.at("/data/token").asText();
         assertThat(token).isNotBlank();
         assertThat(loginResult.at("/data/refreshToken").asText()).isNotBlank();
+
+        // 邮箱登录（同一账号双入口）
+        assertCode(post("/api/auth/login", Map.of("username", email, "password", "123456")), 0);
 
         JsonNode logoutResult = post("/api/auth/logout", Map.of(), "Bearer " + token);
         assertCode(logoutResult, 0);
@@ -48,15 +58,18 @@ class AuthFlowTests {
     @Test
     void duplicateUsernameIsRejected() throws Exception {
         String username = "dup_user_" + System.nanoTime();
-        assertCode(post("/api/auth/register", Map.of("username", username, "password", "123456")), 0);
-        JsonNode duplicate = post("/api/auth/register", Map.of("username", username, "password", "654321"));
+        register(username, "123456");
+        String otherEmail = username.toLowerCase() + "_2@test.local";
+        codeStore.saveCode(otherEmail, "135790");
+        JsonNode duplicate = post("/api/auth/register",
+                Map.of("email", otherEmail, "code", "135790", "username", username, "password", "654321"));
         assertCode(duplicate, 40901);
     }
 
     @Test
     void wrongPasswordIsRejected() throws Exception {
         String username = "pwd_user_" + System.nanoTime();
-        assertCode(post("/api/auth/register", Map.of("username", username, "password", "123456")), 0);
+        register(username, "123456");
         JsonNode loginResult = post("/api/auth/login", Map.of("username", username, "password", "wrong-pass"));
         assertCode(loginResult, 40001);
     }
@@ -69,6 +82,7 @@ class AuthFlowTests {
 
     @Test
     void invalidRegisterPayloadReturnsParamError() throws Exception {
+        // 缺少邮箱与验证码字段直接参数校验失败（不消耗任何验证码）
         JsonNode result = post("/api/auth/register", Map.of("username", "ab", "password", "123"));
         assertCode(result, 40000);
     }
@@ -76,7 +90,7 @@ class AuthFlowTests {
     @Test
     void meReturnsCurrentUserSummary() throws Exception {
         String username = "me_user_" + System.nanoTime();
-        assertCode(post("/api/auth/register", Map.of("username", username, "password", "123456")), 0);
+        register(username, "123456");
         JsonNode login = post("/api/auth/login", Map.of("username", username, "password", "123456"));
         assertCode(login, 0);
         String token = login.at("/data/token").asText();
@@ -91,6 +105,18 @@ class AuthFlowTests {
 
         // 未登录访问 → 40100
         assertCode(get("/api/auth/me", null), 40100);
+    }
+
+    private String register(String username, String password) throws Exception {
+        String email = username.toLowerCase() + "@test.local";
+        JsonNode result = post("/api/auth/register", registerBody(email, username, password));
+        assertCode(result, 0);
+        return email;
+    }
+
+    private Map<String, Object> registerBody(String email, String username, String password) {
+        codeStore.saveCode(email, "135790");
+        return Map.of("email", email, "code", "135790", "username", username, "password", password);
     }
 
     private JsonNode post(String path, Map<String, Object> body) throws Exception {

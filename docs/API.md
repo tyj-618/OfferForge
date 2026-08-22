@@ -6,7 +6,7 @@ Base URL：`/api`（开发环境 `http://localhost:8081`，Docker 部署经 ngin
 
 ### 鉴权
 
-除 `/api/auth/register`、`/api/auth/login`、`/api/health` 外，所有接口需携带：
+除 `/api/auth/register`、`/api/auth/login`、`/api/auth/send-code`、`/api/auth/reset-password`、`/api/health` 外，所有接口需携带：
 
 ```
 Authorization: Bearer <token>
@@ -49,21 +49,37 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
 
 ### POST /auth/register
 
-注册账号（不直接下发 token，需随后调用 login）。
+邮箱验证码注册：账号与邮箱一一对应（不直接下发 token，需随后调用 login）。
 
-请求：`{ "username": "alice", "password": "123456" }`（密码至少 6 位）
+请求：`{ "email": "alice@example.com", "code": "123456", "username": "alice", "password": "123456" }`
 
-响应 data：`{ "id": 1, "username": "alice", "nickname": "alice" }`
+校验：验证码为 6 位数字；用户名 3-32 位；密码至少 6 位。唯一性冲突：40901 用户名已存在、40902 邮箱已绑定；验证码错误/过期 40002；发码频繁 42900。
+
+响应 data：`{ "id": 1, "username": "alice", "nickname": "Candidate_1" }`
+
+### POST /auth/send-code
+
+向邮箱发送 6 位数字验证码（注册与忘记密码共用）。60 秒防刷（42900）；同一邮箱错误 5 次后锁定 15 分钟（42900）。
+
+请求：`{ "email": "alice@example.com" }`
 
 ### POST /auth/login
 
-请求：同 register。响应 data：
+请求：`{ "username": "alice", "password": "123456" }`；`username` 字段兼容用户名或邮箱两种登录入口。响应 data：
 
 ```json
 { "token": "eyJ...", "expiresIn": 7200, "refreshToken": "...", "refreshExpiresIn": 604800, "user": { "id": 1, "username": "alice", "nickname": "Candidate_1" } }
 ```
 
 同时下发 httpOnly refresh cookie（路径 `/api/auth`）。
+
+### POST /auth/reset-password
+
+忘记密码：邮箱验证码通过后直接修改密码。
+
+请求：`{ "email": "alice@example.com", "code": "123456", "newPassword": "new-pass" }`
+
+邮箱未注册 40400；验证码错误/过期 40002；新密码至少 6 位（40000）。
 
 ### POST /auth/refresh
 
