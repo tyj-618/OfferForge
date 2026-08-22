@@ -33,16 +33,26 @@ import java.util.stream.Collectors;
 public class KnowledgeService {
 
     private static final Logger log = LoggerFactory.getLogger(KnowledgeService.class);
-    private static final String BUILTIN_RESOURCE = "knowledge/java-backend-questions.json";
+    /** 内置官方题库资源（按岗位方向拆分，导入时合并加载） */
+    private static final List<String> BUILTIN_RESOURCES = List.of(
+            "knowledge/java-backend-questions.json",
+            "knowledge/frontend-questions.json",
+            "knowledge/go-testing-devops-questions.json",
+            "knowledge/ai-questions.json");
     private static final int FALLBACK_TOKEN_LIMIT = 12;
     private static final int FALLBACK_CANDIDATES_PER_TOKEN = 20;
     /** 用户上传未指定分组时的默认分组 */
     public static final String DEFAULT_CUSTOM_CATEGORY = "自定义";
     private static final int MAX_CATEGORY_LENGTH = 64;
 
-    /** 官方分组有序列表：前端展示顺序与推荐打分遍历顺序 */
+    /** 官方分组有序列表：前端展示顺序与推荐打分遍历顺序（按岗位方向分区：Java 后端 → 前端 → Go → 测试 → 运维 → AI） */
     private static final List<String> OFFICIAL_CATEGORIES = List.of(
-            "Java基础", "Java集合", "Java并发", "JVM", "MySQL", "Redis", "计算机网络", "Spring", "设计模式", "Spring Boot", "算法");
+            "Java基础", "Java集合", "Java并发", "JVM", "MySQL", "Redis", "计算机网络", "Spring", "设计模式", "Spring Boot", "算法",
+            "JavaScript基础", "CSS与布局", "Vue", "React", "浏览器与网络", "前端工程化",
+            "Go语言基础", "Go并发编程",
+            "软件测试基础", "自动化与接口测试", "性能测试",
+            "Linux与Shell", "Docker与Kubernetes",
+            "大模型基础", "Prompt工程", "RAG应用", "Agent开发", "AI应用工程");
 
     /** 简历关键词→官方分组映射：分组推荐按命中次数打分 */
     private static final Map<String, List<String>> CATEGORY_KEYWORDS = Map.ofEntries(
@@ -56,7 +66,25 @@ public class KnowledgeService {
             Map.entry("Spring", List.of("spring", "ioc", "aop", "springmvc")),
             Map.entry("设计模式", List.of("设计模式", "单例", "工厂")),
             Map.entry("Spring Boot", List.of("spring boot", "springboot", "springcloud", "微服务")),
-            Map.entry("算法", List.of("算法", "数据结构", "leetcode", "力扣", "动态规划", "手写编程")));
+            Map.entry("算法", List.of("算法", "数据结构", "leetcode", "力扣", "动态规划", "手写编程")),
+            Map.entry("JavaScript基础", List.of("javascript", "js", "es6", "闭包", "typescript", "ts")),
+            Map.entry("CSS与布局", List.of("css", "html", "布局", "页面", "样式")),
+            Map.entry("Vue", List.of("vue", "vuex", "pinia", "element", "uniapp")),
+            Map.entry("React", List.of("react", "hooks", "redux", "next.js", "nextjs")),
+            Map.entry("浏览器与网络", List.of("浏览器", "跨域", "渲染", "前端性能")),
+            Map.entry("前端工程化", List.of("webpack", "vite", "前端工程", "组件库", "monorepo")),
+            Map.entry("Go语言基础", List.of("golang", "go语言", "go 语言", "go开发")),
+            Map.entry("Go并发编程", List.of("goroutine", "channel", "gmp")),
+            Map.entry("软件测试基础", List.of("测试", "测试用例", "qa", "质量保障")),
+            Map.entry("自动化与接口测试", List.of("自动化", "selenium", "pytest", "接口测试", "postman")),
+            Map.entry("性能测试", List.of("性能测试", "jmeter", "压测", "负载测试")),
+            Map.entry("Linux与Shell", List.of("linux", "shell", "运维", "脚本")),
+            Map.entry("Docker与Kubernetes", List.of("docker", "kubernetes", "k8s", "容器", "云原生", "sre")),
+            Map.entry("大模型基础", List.of("大模型", "llm", "transformer", "nlp", "深度学习", "机器学习", "aigc")),
+            Map.entry("Prompt工程", List.of("prompt", "提示词", "提示工程")),
+            Map.entry("RAG应用", List.of("rag", "检索增强", "向量", "embedding", "知识库")),
+            Map.entry("Agent开发", List.of("agent", "智能体", "mcp", "工具调用", "function calling")),
+            Map.entry("AI应用工程", List.of("langchain", "llamaindex", "ai应用", "模型部署", "推理优化")));
 
     private final KnowledgeRepository repository;
     private final KnowledgeMasteryService masteryService;
@@ -193,13 +221,17 @@ public class KnowledgeService {
     }
 
     private List<BuiltinEntry> loadBuiltinEntries() {
-        ClassPathResource resource = new ClassPathResource(BUILTIN_RESOURCE);
-        try (InputStream input = resource.getInputStream()) {
-            return objectMapper.readValue(input, new TypeReference<>() {
-            });
-        } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "内置知识库数据加载失败");
+        List<BuiltinEntry> all = new ArrayList<>();
+        for (String resource : BUILTIN_RESOURCES) {
+            ClassPathResource classPathResource = new ClassPathResource(resource);
+            try (InputStream input = classPathResource.getInputStream()) {
+                all.addAll(objectMapper.readValue(input, new TypeReference<>() {
+                }));
+            } catch (IOException exception) {
+                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "内置知识库数据加载失败");
+            }
         }
+        return all;
     }
 
     /**

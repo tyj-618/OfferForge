@@ -85,9 +85,9 @@ token 失效（code=40100）时，前端可凭 httpOnly refresh cookie 调用 `/
 
 ### POST /knowledge/import
 
-将内置 Java 后端题库导入当前用户知识库（幂等，已存在条目跳过）。
+将内置官方题库导入知识库（幂等，已存在条目跳过）。题库按岗位方向拆分为 4 个资源文件：Java 后端（64）、前端（52）、Go/测试/运维（56）、AI（46），共 29 个官方分组 218 题。
 
-响应 data：`{ "total": 60, "inserted": 60, "skipped": 0 }`
+响应 data：`{ "total": 218, "inserted": 218, "skipped": 0 }`
 
 ### GET /knowledge/official
 

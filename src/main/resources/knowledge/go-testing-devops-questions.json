@@ -1,0 +1,394 @@
+[
+  {
+    "question": "Go 中 slice 和 array 有什么区别？slice 的扩容机制是怎样的？",
+    "category": "Go语言基础",
+    "difficulty": "MEDIUM",
+    "tags": ["slice", "array", "扩容"],
+    "answer": "array 是定长值类型，赋值与传参都是整体拷贝；slice 是对底层数组的引用视图，包含指向底层数组的指针、长度 len 和容量 cap，赋值传参只拷贝这个三元组，修改元素会影响原数据。append 超过 cap 时触发扩容：Go 1.18 起小于 256 时翻倍，之后按 1.25 倍加若干偏移量平滑过渡，扩容后分配新底层数组并拷贝。注意：多个 slice 可能共享底层数组，截切与 append 时留意数据覆盖；预知规模应 make 指定 cap 减少扩容拷贝。"
+  },
+  {
+    "question": "Go 的 map 底层实现是什么？为什么不是并发安全的？",
+    "category": "Go语言基础",
+    "difficulty": "MEDIUM",
+    "tags": ["map", "哈希表", "并发安全"],
+    "answer": "Go map 是哈希表：桶数组 + 链地址法，每个桶存 8 个键值对，哈希高位定位桶、低位存桶内 tophash 加速比较；负载因子超过 6.5 或溢出桶过多时触发渐进式扩容（翻倍扩容或等量整理）。map 不是并发安全的：并发读写会触发运行时 fatal（concurrent map read and map write），因为扩容/写入时结构在变化。并发场景用 sync.Mutex/RWMutex 保护，或 sync.Map（适合读多写少、键集合稳定的场景）；高并发计数推荐分片锁或第三方并发 map。"
+  },
+  {
+    "question": "谈谈对 Go 接口与鸭子类型的理解。",
+    "category": "Go语言基础",
+    "difficulty": "MEDIUM",
+    "tags": ["接口", "鸭子类型", "组合"],
+    "answer": "Go 接口是隐式实现的：类型只要实现了接口声明的全部方法就自动满足该接口，无需 implements 声明，这就是鸭子类型（走起来像鸭子就是鸭子）。好处是解耦：依赖方只定义自己需要的小接口，无需依赖具体实现包，便于 mock 测试。接口值由（类型指针, 数据指针）组成，注意 nil 接口与「含 nil 具体值的接口」不相等这一经典陷阱。工程实践：接口应由使用方定义而非实现方、保持小接口（io.Reader）、组合接口构建抽象。"
+  },
+  {
+    "question": "defer 的执行顺序是怎样的？有哪些常见坑？",
+    "category": "Go语言基础",
+    "difficulty": "MEDIUM",
+    "tags": ["defer", "栈", "资源释放"],
+    "answer": "defer 把调用压入当前 goroutine 的延迟栈，函数返回前按后进先出（LIFO）顺序执行，常用于成对操作收尾：关闭文件/连接、解锁、recover。参数在 defer 语句执行时即求值拷贝（闭包引用变量则延迟读取）。常见坑：1) defer 在循环体内累积到函数结束才执行，大量打开句柄应在循环内用匿名函数包裹；2) 命名返回值配合 defer 修改返回值可实现统一错误包装；3) defer 在 os.Exit 时不执行；4) 锁场景必须加锁成功后立即 defer 解锁，避免提前解锁。"
+  },
+  {
+    "question": "Go 的错误处理设计是怎样的？panic 与 recover 什么时候用？",
+    "category": "Go语言基础",
+    "difficulty": "EASY",
+    "tags": ["error", "panic", "recover"],
+    "answer": "Go 把错误当普通值：函数返回 error，调用方显式判断处理（if err != nil），哲学是「错误是预期内的值，不是异常」。推荐用 errors.Is/As 做错误判断与解包（%w 包装链），哨兵错误与自定义错误类型结合。panic 用于不可恢复的程序错误（数组越界、断言失败），会沿调用栈展开并打印堆栈；recover 只能在 defer 中生效，用于框架层兜底（如 HTTP 中间件防止单个请求崩溃整个服务）。业务逻辑不应依赖 panic/recover 做流程控制。"
+  },
+  {
+    "question": "Go 结构体传值与传指针有什么区别？方法接收者怎么选？",
+    "category": "Go语言基础",
+    "difficulty": "EASY",
+    "tags": ["结构体", "值接收者", "指针接收者"],
+    "answer": "结构体作为参数默认值拷贝（含所有字段），大结构体拷贝开销高且方法内修改不影响原对象；传指针则共享底层数据。方法接收者选择：需要修改接收者状态、结构体较大（拷贝成本高）、或类型本身含锁/资源时用指针接收者；小且不可变的值类型可用值接收者。一致性原则：同一类型不要混用两种接收者（尤其实现了接口时，值类型无法调用指针接收者方法的集合问题）。注意：值接收者方法可被指针变量调用，反之不然。"
+  },
+  {
+    "question": "Go 的 string 有什么特点？与 []byte 互转的开销在哪？",
+    "category": "Go语言基础",
+    "difficulty": "EASY",
+    "tags": ["string", "不可变", "零拷贝"],
+    "answer": "string 是不可变的字节序列（UTF-8 编码存储），内部是 {指针, 长度} 结构；不可变使其可安全共享、适合做 map key。string([]byte) 与 []byte(s) 默认都会发生内存拷贝（保证不可变语义），高频转换场景（如序列化热路径）是性能热点。优化：Go 1.20 提供 unsafe.String/unsafe.SliceData 做零拷贝转换（自担风险）；拼接大量字符串用 strings.Builder（内部 []byte 增长，避免二次拷贝）。遍历 string 时 range 按 rune 解码，len(s) 是字节数而非字符数。"
+  },
+  {
+    "question": "init 函数的执行时机和顺序是怎样的？",
+    "category": "Go语言基础",
+    "difficulty": "HARD",
+    "tags": ["init", "包初始化"],
+    "answer": "init 在 main 之前、程序初始化阶段执行，不能被显式调用也不能被引用。执行顺序：先按依赖图初始化被导入的包（深度优先），同一包内多个文件按编译器给定的文件顺序（通常文件名字典序）依次执行各文件的包级变量声明与 init；一个文件可有多个 init。包级变量初始化与 init 交错按声明顺序进行。工程实践：init 只做无副作用的轻量初始化（注册驱动如 database/sql），避免在 init 中做网络调用/复杂依赖，否则影响可测试性与启动可控性；显式的 New/Init 函数更可控。"
+  },
+  {
+    "question": "简述 Go 的垃圾回收机制与三色标记法。",
+    "category": "Go语言基础",
+    "difficulty": "HARD",
+    "tags": ["GC", "三色标记", "STW"],
+    "answer": "Go 采用并发三色标记 + 混合写屏障的 GC：白色（未访问，回收对象）、灰色（自身可达但子引用未扫描）、黑色（自身与子引用均扫描完）。从根出发标记，标记结束后清理白对象。为与用户代码并发执行，写屏障保证并发修改不丢失对象（Go 1.8 混合写屏障：栈上对象全部置黑 + 堆指针修改记录，消除了栈重扫的长 STW）。GC 在堆增长到上次存活量 GOGC%（默认 100）时触发，目标是低延迟（STW 通常亚毫秒）。调优：GOGC 调大减少 GC 频率、减少临时对象与指针、对象复用（sync.Pool）。"
+  },
+  {
+    "question": "i iota 是什么？枚举的惯用写法是怎样的？",
+    "category": "Go语言基础",
+    "difficulty": "EASY",
+    "tags": ["iota", "常量", "枚举"],
+    "answer": "Go 没有 enum 关键字，用 const + iota 模拟：iota 是常量计数器，在每个 const 块内从 0 开始、每新增一行常量自增 1。常见模式：1) 顺序枚举（Pending, Running, Done）；2) 位掩码（1 << iota 表示可组合的权限/标志位，配合按位或）；3) 单位换算（KB = 1 << (10 * iota)）。注意 iota 只在当前 const 块有效，跨块或中间插入空行/表达式都会改变计数，易出隐蔽 bug；对外稳定的枚举值（如协议字段）建议显式赋值而非依赖隐式计数。"
+  },
+  {
+    "question": "goroutine 和操作系统线程有什么区别？",
+    "category": "Go并发编程",
+    "difficulty": "MEDIUM",
+    "tags": ["goroutine", "线程", "协程"],
+    "answer": "goroutine 是 Go 运行时管理的用户态轻量协程：初始栈仅几 KB 且可动态增长（线程通常固定 1~8MB），创建切换成本极低（切换在用户态，无需陷入内核），单机可轻松跑百万级。由 GMP 调度器把大量 G 复用到少量内核线程（默认 GOMAXPROCS=CPU 核数）上执行。与线程的关键差异：调度粒度（抢占点：1.14 后基于信号的异步抢占解决长循环不让出）、同步原语用 channel/WaitGroup/Mutex。注意 goroutine 泄漏：阻塞在 channel 或忘记 cancel context 会导致 G 与内存持续累积。"
+  },
+  {
+    "question": "解释一下 Go 的 GMP 调度模型。",
+    "category": "Go并发编程",
+    "difficulty": "HARD",
+    "tags": ["GMP", "调度器", "工作窃取"],
+    "answer": "G（goroutine）：执行单元，含栈与状态；M（machine）：内核线程，真正执行代码；P（processor）：逻辑处理器，持有本地可运行 G 队列（默认 256 容量）与资源，M 必须绑定 P 才能执行。流程：新建 G 优先放当前 P 本地队列，满了放全局队列；M 从绑定的 P 取 G 执行，P 队列空时依次尝试全局队列、网络轮询器、从其它 P 偷取一半（工作窃取）。系统调用阻塞时 M 与 P 分离，P 可找新 M（或唤醒空闲 M）继续执行（hand off）。这套模型实现了 M:N 调度与负载均衡。"
+  },
+  {
+    "question": "channel 有哪些使用场景？什么情况会发生死锁？",
+    "category": "Go并发编程",
+    "difficulty": "MEDIUM",
+    "tags": ["channel", "死锁", "CSP"],
+    "answer": "channel 是类型安全的通信原语，体现 CSP 思想「不要通过共享内存通信，而要通过通信共享内存」。场景：任务分发/结果收集（worker 池）、信号通知（close 广播）、限流（带缓冲的令牌桶）、pipeline。死锁场景：1) 无缓冲 channel 发送方与接收方都未就绪（主 goroutine 发完等接收但无人接收）；2) 所有 goroutine 都阻塞在读写上形成环。运行时检测到全部 G 阻塞会 fatal（all goroutines are asleep）。避免：明确关闭责任（谁生产谁 close）、用 select+default/超时、context 控制生命周期。向已关闭的 channel 发送会 panic，重复关闭也 panic。"
+  },
+  {
+    "question": "select 语句的作用是什么？如何利用 default 实现非阻塞？",
+    "category": "Go并发编程",
+    "difficulty": "EASY",
+    "tags": ["select", "多路复用", "超时控制"],
+    "answer": "select 用于同时监听多个 channel 操作：多个 case 同时就绪时随机选一个执行，都不就绪则阻塞，类似网络 IO 多路复用。带 default 分支时所有 case 未就绪立即走 default，实现非阻塞尝试（如尝试发送失败则丢弃/降级）。经典用法：1) case <-time.After(d) 实现超时控制（现代写法用 context.WithTimeout）；2) 配合 ctx.Done() 实现优雅退出；3) 限流器定时重置令牌。注意 select 空语句（select {}）会永久阻塞当前 goroutine，常用于阻止 main 退出。"
+  },
+  {
+    "question": "sync.WaitGroup 怎么用？有哪些注意事项？",
+    "category": "Go并发编程",
+    "difficulty": "EASY",
+    "tags": ["WaitGroup", "并发等待"],
+    "answer": "WaitGroup 用于等待一组 goroutine 全部完成：启动前 wg.Add(n)（或在循环内每次 Add(1)），每个 goroutine 结束时 defer wg.Done()，主流程 wg.Wait() 阻塞直到计数归零。注意事项：1) Add 必须在 goroutine 启动前调用（在 goroutine 内 Add 可能晚于 Wait 造成提前返回）；2) 传参给函数要用指针（值拷贝会导致计数不同步，且 vet 会报错）；3) 计数不能为负（Done 多于 Add 会 panic）；4) 需要收集结果/错误时配合 channel 或 errgroup 使用。"
+  },
+  {
+    "question": "Mutex 和 RWMutex 有什么区别？适用什么场景？",
+    "category": "Go并发编程",
+    "difficulty": "EASY",
+    "tags": ["Mutex", "RWMutex", "锁"],
+    "answer": "Mutex 是互斥锁，同一时刻只允许一个 goroutine 持有；RWMutex 是读写锁：允许多个读者并发（RLock），写者独占（Lock，写锁会等待所有读者释放）。适用：读多写少的共享数据（缓存、配置）用 RWMutex 提升并发度；读写均衡或临界区极小时 Mutex 反而更优（RWMutex 内部计数有额外开销且写锁饥饿保护机制更复杂）。注意事项：锁不可拷贝（值传递会失效，vet 检查）、锁粒度尽量小、加锁后立即 defer 解锁、避免持锁调用外部函数导致死锁；也可考虑分片锁降低竞争。"
+  },
+  {
+    "question": "context 包解决什么问题？常见用法有哪些？",
+    "category": "Go并发编程",
+    "difficulty": "MEDIUM",
+    "tags": ["context", "超时控制", "取消传播"],
+    "answer": "context 用于在 API 边界与 goroutine 间传递截止时间、取消信号与请求级元数据，解决「如何优雅取消下游级联任务」的问题。常用构造函数：WithCancel（手动取消）、WithTimeout/WithDeadline（超时自动取消）、WithValue（请求域数据，如 traceId，勿滥用传业务参数）。模式：ctx 作为函数第一个参数一路传递；下游 goroutine 监听 ctx.Done() 及时退出；HTTP 请求取消、数据库查询超时都基于 ctx。规范：不存可变状态、value 仅放请求级标识、超时时间从入口层设定逐层收紧。"
+  },
+  {
+    "question": "如何用 Go 实现并发模式？说说 worker pool 与 errgroup。",
+    "category": "Go并发编程",
+    "difficulty": "HARD",
+    "tags": ["worker pool", "errgroup", "并发模式"],
+    "answer": "worker pool：固定数量的 worker goroutine 从任务 channel 消费，避免为海量任务各开一个 G 导致内存与调度开销；结果写入结果 channel 或用 WaitGroup 等待，结束时关闭任务 channel 让 worker 自然退出。errgroup（golang.org/x/sync/errgroup）：Group.Go 提交任务并自动收集第一个非 nil 错误，配合其内部 context 实现「一个失败全部取消」，Wait 返回该错误，是并发聚合请求的标准写法。还可提 fan-in/fan-out、pipeline、semaphore（带缓冲 channel 当信号量限并发）、singleflight 防缓存击穿。"
+  },
+  {
+    "question": "常见的测试用例设计方法有哪些？等价类与边界值怎么用？",
+    "category": "软件测试基础",
+    "difficulty": "EASY",
+    "tags": ["测试用例", "等价类", "边界值"],
+    "answer": "等价类划分：把输入域划分为若干等价类（有效/无效），每类取一个代表值测试，减少冗余用例。如年龄输入 1~150 有效，划分无效类：<1、>150、非数字、空。边界值分析：错误往往聚集在边界，取边界及相邻值（如 0、1、2 和 149、150、151）。其它方法：判定表（多条件组合）、状态迁移（订单状态流转）、场景法（端到端业务流）、错误推测（经验驱动的异常场景：并发、超时、脏数据）。实践中用例要覆盖正常路径、异常路径与边界，并写明前置条件、步骤与预期结果。"
+  },
+  {
+    "question": "什么是测试金字塔？各层测试如何配比？",
+    "category": "软件测试基础",
+    "difficulty": "MEDIUM",
+    "tags": ["测试金字塔", "分层测试"],
+    "answer": "测试金字塔：底层单元测试数量最多（快、便宜、定位精准），中层接口/集成测试居中（验证模块协作与契约），顶层 UI/E2E 测试最少（慢、脆弱、维护成本高）。理想形态是正金字塔；反模式「冰淇淋甜筒」（大量 UI 测试、少量单测）导致反馈慢、用例脆弱。落地建议：核心业务逻辑单测覆盖率高（分支/边界），服务间交互用契约测试与集成测试兜底，E2E 只覆盖关键用户旅程（下单、支付主链路）。单元测试应遵循 AAA（Arrange-Act-Assert）并保持独立可重复。"
+  },
+  {
+    "question": "黑盒测试和白盒测试的区别是什么？",
+    "category": "软件测试基础",
+    "difficulty": "EASY",
+    "tags": ["黑盒", "白盒"],
+    "answer": "黑盒测试不关心内部实现，把系统当不透明盒子，按需求规格验证输入输出是否正确（功能测试、等价类、边界值都属于黑盒），优点是贴近用户视角、不依赖实现细节；白盒测试基于代码结构设计用例，关注逻辑覆盖（语句覆盖、分支覆盖、条件覆盖、路径覆盖），优点是能发现隐藏的逻辑死角，通常由开发借助单测框架完成。实践中二者互补：开发写白盒单测保证代码正确性，测试人员以黑盒保证需求符合性；灰盒（了解接口结构与数据模型做接口测试）也很常见。"
+  },
+  {
+    "question": "一个高质量的缺陷报告应包含哪些要素？缺陷生命周期是怎样的？",
+    "category": "软件测试基础",
+    "difficulty": "EASY",
+    "tags": ["缺陷管理", "Bug生命周期"],
+    "answer": "高质量缺陷报告要素：清晰的标题（模块+现象）、环境信息（版本/设备/数据）、可复现的步骤（编号列出）、实际结果与预期结果、复现概率、附件（截图/日志/录屏）、优先级与严重级分离（严重但不紧急的场景要区分）。生命周期：新建 → 确认/指派 → 修复中 → 已修复 → 回归验证 → 关闭；中间可能出现打回（拒绝/无法复现/重复）、延期。好的缺陷报告能显著降低沟通成本：复现步骤精确到数据构造，必要时附最小复现用例。"
+  },
+  {
+    "question": "什么是回归测试？如何确定回归范围？",
+    "category": "软件测试基础",
+    "difficulty": "MEDIUM",
+    "tags": ["回归测试", "回归范围"],
+    "answer": "回归测试是在代码变更后验证既有功能未被破坏。确定范围的依据：1) 变更影响面分析（改动的模块、接口、公共组件的上下游依赖）；2) 历史缺陷高发区；3) 核心业务主链路（必测项）；4) 与本次需求耦合的功能点。全量回归成本高，通常分层执行：自动化单测/接口测试全量跑（快），手工测试按影响面抽测 + 主链路冒烟。实践要点：维护稳定的回归用例集并持续纳入 CI；修复的缺陷要转化为回归用例防止复发；高风险发布（重构、框架升级）扩大回归范围并增加探索性测试。"
+  },
+  {
+    "question": "冒烟测试和探索性测试分别是什么？",
+    "category": "软件测试基础",
+    "difficulty": "EASY",
+    "tags": ["冒烟测试", "探索性测试"],
+    "answer": "冒烟测试：提测或部署后的快速验证，只测核心主流程能否走通（如登录、下单），用于判断版本是否具备进入完整测试的条件，类似电路板通电先冒烟检查。应自动化并接入流水线，构建失败自动阻断。探索性测试：测试者边学习系统边设计边执行，不依赖预先编写的用例，强调测试者的经验与直觉，善于发现规格之外的异常（交互怪癖、边界组合、异常操作序列）。常用 Charter（测试章程）约束探索范围与时间盒，发现的线索再沉淀为正式用例。二者互补：冒烟保基线，探索挖深坑。"
+  },
+  {
+    "question": "什么是测试左移？",
+    "category": "软件测试基础",
+    "difficulty": "HARD",
+    "tags": ["测试左移", "质量内建"],
+    "answer": "测试左移指把质量活动从「编码后的验证」提前到需求与设计阶段：需求评审时提出可测性与边界遗漏（验收标准前置）、设计评审关注异常路径与兼容性、开发阶段单测与静态检查（lint、SAST）、CI 流水线自动化门禁（构建即测试）。对应的还有测试右移：上线后通过监控、日志告警、灰度、混沌工程在生产环境持续验证。价值：缺陷发现越早修复成本越低（需求阶段修复成本远低于生产事故）。落地形态：BDD/ATDD 用验收标准驱动开发、TDD、契约测试、代码评审关注测试覆盖。"
+  },
+  {
+    "question": "如何判断测试已经足够了（测试出口标准）？",
+    "category": "软件测试基础",
+    "difficulty": "MEDIUM",
+    "tags": ["测试出口", "质量门禁"],
+    "answer": "测试无法证明零缺陷，出口标准用多维指标综合判断：1) 用例执行率与通过率（如计划用例 100% 执行，通过率 ≥98%）；2) 缺陷收敛趋势：新增缺陷数下降、严重/致命缺陷清零、遗留缺陷均有评估与规避方案；3) 覆盖率指标：核心模块代码覆盖率达标（行/分支），且覆盖的是有效断言而非凑数；4) 风险维度：高风险功能已充分探索性测试。注意避免唯覆盖率论（高覆盖率 ≠ 高质量用例）。最终由测试负责人出具测试报告，明确遗留风险与上线建议，风险由项目干系人共同决策。"
+  },
+  {
+    "question": "UI 自动化测试中元素定位有哪些方式？如何保证稳定性？",
+    "category": "自动化与接口测试",
+    "difficulty": "MEDIUM",
+    "tags": ["元素定位", "Selenium", "定位策略"],
+    "answer": "常见定位方式（优先级从高到低）：data-testid 等专用测试属性（最稳定，不受样式重构影响）、id、name、稳定文案（按钮文字，注意国际化）、CSS 选择器、XPath（可基于文本与层级，但最脆弱）。稳定性实践：1) 与前端约定为关键交互元素加 data-testid；2) 避免依赖动态 class、随机生成的 id 与深层层级路径；3) 封装定位器到 Page Object 集中维护；4) 用显式等待（等元素可点击）代替固定 sleep；5) 优先用语义化查询（Testing Library 的 getByRole/getByText）贴近用户视角。"
+  },
+  {
+    "question": "什么是 Page Object 模式？它解决了什么问题？",
+    "category": "自动化与接口测试",
+    "difficulty": "EASY",
+    "tags": ["Page Object", "UI自动化架构"],
+    "answer": "Page Object（PO）把每个页面封装为一个类：定位器与页面操作（点击、输入、断言辅助）收敛在类内部，测试用例只调用语义化方法（如 loginPage.login(user, pwd)）。解决的问题：1) 页面结构变化时只改 PO 不改大量用例，维护成本集中；2) 用例可读性高，读起来像业务描述；3) 复用页面操作，减少重复代码。进阶实践：PO 只做操作与状态查询，断言留在用例层（或提供 isXxx 查询方法）；组件级复用（导航栏、弹窗）抽成 Component Object；配合工厂/依赖注入管理页面对象。"
+  },
+  {
+    "question": "接口测试主要测什么？有哪些要点？",
+    "category": "自动化与接口测试",
+    "difficulty": "EASY",
+    "tags": ["接口测试", "API测试"],
+    "answer": "接口测试验证服务契约与业务逻辑，要点：1) 功能正确性：正常参数返回符合契约（状态码、响应结构、字段值）；2) 参数校验：缺失、类型错误、边界值、超长、注入字符的容错；3) 业务规则：状态流转合法性、权限校验（越权访问他人资源）、幂等性（重复提交）；4) 异常与稳定性：依赖超时/故障时的降级表现、并发下的数据一致性；5) 性能基线：响应时间与吞吐。工具链：Postman 手工调试，pytest+requests 或 RestAssured 做自动化并纳入 CI；配合 Mock 隔离下游依赖，契约测试（Pact）保障服务间接口兼容。"
+  },
+  {
+    "question": "接口测试中如何处理接口之间的依赖关系？",
+    "category": "自动化与接口测试",
+    "difficulty": "MEDIUM",
+    "tags": ["依赖管理", "数据构造", "测试编排"],
+    "answer": "典型依赖链：登录拿 Token → 创建资源拿 id → 后续接口使用。处理方式：1) 提取器模式：用例间通过上下文变量传递（提取响应字段存入环境变量/上下文，后续引用）；2) 测试前置数据构造：用 setup/fixture 直接构造所需数据（直接写库或调准备接口），降低用例间耦合，单个用例可独立运行；3) 分层：数据准备走专用造数接口或 SQL 直连（测试环境），避免业务链路串联过长；4) 清理策略：用例结束后清理测试数据（或每套用例用独立数据空间），保证可重复执行。原则：用例尽量独立、失败可定位。"
+  },
+  {
+    "question": "Mock 服务在测试中的作用和实现方式？",
+    "category": "自动化与接口测试",
+    "difficulty": "MEDIUM",
+    "tags": ["Mock", "桩服务", "依赖隔离"],
+    "answer": "Mock 用于替换不可控或不稳定的依赖（第三方支付、未开发的下游、慢速外部服务），使测试快速、确定、可重复，并能模拟异常场景（超时、500、脏数据）。层次：1) 代码级：Mockito/Jest mock 函数与对象，验证调用行为；2) 服务级：Mock Server（WireMock、Moco）按请求匹配返回预设响应，支持录制回放；3) 前端：MSW 在请求层拦截，不侵入业务代码。注意事项：Mock 与真实实现会漂移，需配合契约测试或在集成环境定期跑真实联调；只 Mock 边界依赖，不 Mock 被测对象本身的核心逻辑。"
+  },
+  {
+    "question": "什么是数据驱动测试？",
+    "category": "自动化与接口测试",
+    "difficulty": "EASY",
+    "tags": ["数据驱动", "参数化"],
+    "answer": "数据驱动把测试逻辑与测试数据分离：同一套测试步骤用多组数据反复执行。实现：框架参数化（pytest.mark.parametrize、JUnit @ParameterizedTest）、外部数据源（CSV/Excel/JSON/YAML 或数据库表）。好处：新增用例只需加数据不改代码，覆盖等价类/边界值组合方便，非编码人员也能维护数据。注意点：1) 数据要能解释——每组数据附用例意图描述；2) 避免数据间依赖与执行顺序耦合；3) 大量组合时用成对组合（pairwise）算法控制规模；4) 敏感数据脱敏，测试数据与生产隔离。"
+  },
+  {
+    "question": "自动化测试如何接入 CI 流水线？",
+    "category": "自动化与接口测试",
+    "difficulty": "HARD",
+    "tags": ["CI", "流水线", "持续测试"],
+    "answer": "典型流水线：提交触发 → 构建 → 单测（秒级）→ 接口自动化（部署到测试环境或容器化起依赖）→ 冒烟/关键 E2E → 报告归档与通知。关键实践：1) 测试环境容器化（docker compose 起被测服务与依赖），保证环境一致可重建；2) 分层门禁：单测失败直接阻断，E2E 失败阻断发布分支；3) 稳定性治理：失败自动重试 + 失败归因（环境问题/真实缺陷），定期清理 flaky 用例，否则团队会忽略红灯；4) 并行执行与分片缩短时长；5) 测试报告（Allure）与覆盖率趋势可视化，质量指标可追溯。"
+  },
+  {
+    "question": "UI 自动化和接口自动化如何取舍？",
+    "category": "自动化与接口测试",
+    "difficulty": "MEDIUM",
+    "tags": ["UI自动化", "接口自动化", "选型"],
+    "answer": "接口自动化优势：执行快、稳定、维护成本低、能覆盖异常路径与数据边界，是自动化主力（覆盖业务逻辑与契约）。UI 自动化优势：验证真实用户交互与页面集成（样式、跳转、前端逻辑），但慢、脆弱、维护贵。取舍策略：金字塔配比——接口自动化覆盖绝大多数业务场景，UI 自动化只覆盖高价值核心链路（登录、下单、支付等端到端主流程）与前端特有逻辑（表单联动、展示正确性）。决策依据：页面变动频率（频繁重构的页面少做 UI 自动化）、缺陷分布（哪层发现的问题多）、投入产出比。"
+  },
+  {
+    "question": "性能测试的核心指标有哪些？分别代表什么？",
+    "category": "性能测试",
+    "difficulty": "EASY",
+    "tags": ["TPS", "响应时间", "并发"],
+    "answer": "1) TPS/QPS：每秒处理的事务/请求数，衡量吞吐能力；2) 响应时间（RT）：请求从发出到收到响应的时间，关注均值、P95/P99 分位（均值会掩盖长尾）；3) 并发用户数：同时活跃的用户/连接数（注意与在线用户数区分）；4) 错误率：压力下的失败比例（超时、5xx）；5) 资源利用率：CPU、内存、IO、连接池、GC 频率，定位瓶颈的关键依据。指标间存在权衡：并发上升吞吐先升后平，响应时间拐点后陡增（拐点即系统容量上限）。性能目标要量化：如「200 并发下 P99 < 500ms 且错误率 < 0.1%」。"
+  },
+  {
+    "question": "负载测试、压力测试、稳定性测试有什么区别？",
+    "category": "性能测试",
+    "difficulty": "EASY",
+    "tags": ["负载测试", "压力测试", "稳定性测试"],
+    "answer": "负载测试：逐步加压找到系统性能拐点与最大处理能力，回答「系统能扛多少量」；压力测试：在极限或超负荷条件下运行，观察系统崩溃表现与恢复能力（限流降级是否生效、是否雪崩、重启后能否自愈），回答「压垮了会怎样」；稳定性测试（浸泡测试）：中等负载长时间运行（如 24~72 小时），暴露内存泄漏、连接泄漏、句柄耗尽、缓存膨胀等慢性问题。此外还有峰值/脉冲测试（秒杀场景瞬时流量）、容量测试（规划支撑业务增长所需资源）。三者目标不同，报告结论不可混用。"
+  },
+  {
+    "question": "性能瓶颈如何定位？说说你的排查思路。",
+    "category": "性能测试",
+    "difficulty": "MEDIUM",
+    "tags": ["瓶颈定位", "性能分析"],
+    "answer": "自顶向下分层排查：1) 压测端排除：施压机本身是否瓶颈（带宽、连接数上限）；2) 链路分层：网关（连接数、限流配置）→ 应用（CPU 打满看火焰图/线程堆栈找热点代码与锁竞争；CPU 不高但响应慢看线程阻塞、连接池等待、GC 停顿）→ 中间件（Redis 热 key、慢查询）→ 数据库（慢查询日志、执行计划、锁等待、连接池）；3) 工具：top/arthas（线程、火焰图、GC 分析）、APM（Skywalking/Pinpoint 链路追踪）、数据库 explain。常见瓶颈：慢 SQL、连接池过小、锁竞争、GC 频繁、第三方依赖慢、线程池队列积压。"
+  },
+  {
+    "question": "JMeter 的核心概念和使用流程是怎样的？",
+    "category": "性能测试",
+    "difficulty": "MEDIUM",
+    "tags": ["JMeter", "压测工具"],
+    "answer": "核心概念：测试计划 → 线程组（虚拟用户数、ramp-up 加压时间、循环次数）→ 取样器（HTTP 请求等）→ 配置元件（请求头、参数化 CSV、定时器思考时间）→ 断言（响应校验）→ 监听器（聚合报告，压测时禁用图形监听器减少开销）。流程：1) 录制/编写关键场景脚本并参数化（不同用户数据）；2) 少量用户 调试脚本与断言；3) 命令行模式（-n -t 脚本 -l 结果）正式施压，避免 GUI 耗资源；4) 聚合报告看 TPS/RT 分位/错误率。进阶：分布式压测、JSR223 脚本处理复杂逻辑、后端监控联动。"
+  },
+  {
+    "question": "如何做容量规划？",
+    "category": "性能测试",
+    "difficulty": "HARD",
+    "tags": ["容量规划", "容量评估"],
+    "answer": "容量规划回答「支撑目标业务量需要多少资源」。步骤：1) 确定业务目标：峰值流量模型（如大促预估下单峰值 5000 TPS，注意流量时间分布不均，按二八原则或历史峰值放大）；2) 单机压测得基准：单实例在资源水位安全线（CPU 60~70%）内的处理能力；3) 推算集群规模：目标量/单机能力，再叠加冗余系数（N+1 容灾、突发余量，通常 1.5~2 倍）；4) 依赖容量：数据库连接数、缓存内存、带宽同步核算（短板决定整体）；5) 动态校正：上线后用真实监控数据修正模型，大促前做全链路压测验证。"
+  },
+  {
+    "question": "什么是全链路压测？生产压测要注意什么？",
+    "category": "性能测试",
+    "difficulty": "HARD",
+    "tags": ["全链路压测", "生产压测", "流量隔离"],
+    "answer": "全链路压测在生产环境对整条业务链路（接入层→各微服务→缓存→数据库）施加模拟峰值流量，验证真实拓扑下的容量与瓶颈（单接口压测无法暴露链路级问题：容量不匹配、队列积压、雪崩传播）。生产压测的关键保障：1) 压测流量标记（请求头/影子标记）全链路透传；2) 数据隔离：影子库/影子表/影子队列承接压测写流量，避免污染真实数据；3) 第三方隔离：支付、短信等外部依赖 Mock 化；4) 熔断保护：实时监控业务指标，异常自动停止压测；5) 低峰期执行、小流量递增，先灰度验证标记透传完整。"
+  },
+  {
+    "question": "线上服务出现 CPU 飙高/内存告警，常用的排查命令有哪些？",
+    "category": "Linux与Shell",
+    "difficulty": "EASY",
+    "tags": ["top", "排查命令", "运维"],
+    "answer": "CPU：top/htop 看整体负载与进程占用，按 1 看各核；定位到进程后用 top -Hp pid 找高耗线程，printf '%x' 转十六进制后用 jstack（Java）/ pstack 对照堆栈；perf top 看热点函数。内存：free -h 看总量与缓存（buffer/cache 可回收不算泄漏），ps aux --sort=-%mem 排序进程，pidstat -r 观察增长趋势，Java 用 jmap -histo 看对象分布。磁盘：df -h 看水位，du -sh --max-depth=1 定位大目录。网络：ss -s 看连接统计。原则：先看全局（load、饱和度）再逐层下钻到进程与线程。"
+  },
+  {
+    "question": "如何用 grep、awk、sed 分析日志？",
+    "category": "Linux与Shell",
+    "difficulty": "MEDIUM",
+    "tags": ["grep", "awk", "sed", "日志分析"],
+    "answer": "grep：按关键词/正则过滤（-i 忽略大小写、-C 3 带上下文、-o 只输出匹配、-E 扩展正则），如 grep -E 'ERROR|WARN' app.log | grep 'userId=123'。awk：按列处理，如统计各状态码数量 awk '{print $9}' access.log | sort | uniq -c | sort -rn；按条件聚合求和/平均（-F 指定分隔符）。sed：流编辑，提取时间段日志可用 sed -n '/10:00/,/10:30/p'，替换脱敏 sed 's/token=.*/token=***/'。组合套路：先 grep 缩小范围，再 awk 分列统计，配合 sort/uniq 聚合；大文件先 zgrep 处理 gz 归档、tail -f 实时跟踪。"
+  },
+  {
+    "question": "Linux 文件权限怎么理解？chmod 的用法？",
+    "category": "Linux与Shell",
+    "difficulty": "EASY",
+    "tags": ["权限", "chmod", "chown"],
+    "answer": "ls -l 显示如 -rwxr-xr--：第一位是类型（- 文件、d 目录、l 软链），后九位分三组：所有者（u）、所属组（g）、其他人（o），每组读 r=4、写 w=2、执行 x=1。目录的权限含义不同：x 才能进入（cd），w 才能在其中创建/删除文件。chmod 修改权限：数字法 chmod 755（rwxr-xr-x）、chmod 600（仅所有者读写，密钥文件必须）；符号法 chmod u+x。chown 修改属主：chown user:group file。注意点：脚本不可执行先查 x 位；sudo 提权走 /etc/sudoers；敏感文件避免 777。"
+  },
+  {
+    "question": "进程管理常用命令有哪些？kill 的信号机制？",
+    "category": "Linux与Shell",
+    "difficulty": "MEDIUM",
+    "tags": ["进程", "kill", "信号"],
+    "answer": "查看：ps aux（BSD 风格全量）、ps -ef（System V 带父子关系）、top/htop 实时、pgrep -af 关键词找进程。控制：kill 发信号而非强杀——SIGTERM(15) 默认，进程可捕获并做清理（刷盘、注销）后优雅退出；SIGKILL(9) 内核直接终止，不可捕获，只在进程无响应时使用（可能导致数据未落盘）；SIGHUP(1) 终端挂断，常被守护进程用来重载配置。查看信号处理：trap。其它：nohup 使进程忽略 SIGHUP 后台运行，& 放后台、jobs/fg/bg 管理，systemd 的 systemctl restart 是服务管理的现代方式（自动拉起、日志收集）。"
+  },
+  {
+    "question": "线上服务突然变慢，你的排查思路是什么？",
+    "category": "Linux与Shell",
+    "difficulty": "MEDIUM",
+    "tags": ["故障排查", "性能问题"],
+    "answer": "按时间线与分层排查：1) 确认范围：监控看是全局变慢还是部分接口/部分实例（是否刚发布、配置变更、活动流量突增）；2) 资源四件套：CPU（是否打满/频繁 GC）、内存（是否 swap、OOM）、磁盘 IO（iostat 看 util 与 await）、网络（连接数、带宽、重传）；3) 应用层：线程堆栈找阻塞点（锁等待、外部调用超时）、慢日志与错误日志时间点关联；4) 依赖层：数据库慢查询、缓存命中率骤降、下游服务响应；5) 复盘定位根因后先止血（回滚/扩容/限流）再根治。要点：先看变更、看监控趋势，避免盲目重启丢失现场。"
+  },
+  {
+    "question": "如何查看端口占用和网络连接状态？",
+    "category": "Linux与Shell",
+    "difficulty": "EASY",
+    "tags": ["ss", "netstat", "lsof"],
+    "answer": "查端口监听：ss -lntp（-l 监听、-n 数字显示、-t TCP、-p 进程），替代较慢的 netstat -lntp；查具体端口被谁占用：lsof -i:8080 或 ss -lntp | grep 8080。查连接状态：ss -s 看各状态连接统计；ss -ant | awk '{print $1}' | sort | uniq -c 统计状态分布，TIME_WAIT/CLOSE_WAIT 过多常见于短连接风暴或未正确关闭连接。抓包分析：tcpdump -i any port 8080 -w out.pcap 后用 Wireshark 分析。域名与路由：dig/nslookup 验证 DNS，traceroute/mtr 看链路。现代环境推荐 ss + tcpdump 组合。"
+  },
+  {
+    "question": "crontab 定时任务怎么用？有哪些注意事项？",
+    "category": "Linux与Shell",
+    "difficulty": "EASY",
+    "tags": ["crontab", "定时任务"],
+    "answer": "格式：分 时 日 月 周 + 命令，如 0 2 * * * /opt/scripts/backup.sh（每天 2 点）。管理：crontab -e 编辑当前用户任务、-l 列出、-r 删除。注意事项：1) 环境变量：cron 的 PATH 极简，脚本内命令用绝对路径，必要的环境变量显式声明；2) 输出重定向：默认无终端，日志要重定向到文件（>> /var/log/x.log 2>&1），否则错误无处可查；3) 并发重叠：长任务用锁防重入（flock）；4) 权限：以任务属主身份执行，注意文件读写权限；5) 生产环境优先用带调度中心的方案（分布式任务框架），支持失败重试、日志追踪与可视化管理。"
+  },
+  {
+    "question": "什么是 IO 多路复用？select、poll、epoll 有什么区别？",
+    "category": "Linux与Shell",
+    "difficulty": "HARD",
+    "tags": ["IO多路复用", "epoll", "高并发"],
+    "answer": "IO 多路复用让一个线程同时监听多个 fd 的就绪事件，是高并发网络服务（Nginx、Redis、Netty）的基础。select：fd_set 位图，上限 1024，每次调用需把 fd 集合从用户态拷贝到内核，返回后还得轮询所有 fd；poll：链表无数量上限，但拷贝与轮询开销依旧；epoll：内核维护监听集合（epoll_ctl 增删一次拷贝），就绪事件通过回调加入就绪链表，epoll_wait 只返回就绪的 fd，O(1) 获取，支持边缘触发（ET，需循环读完）与水平触发（LT，默认，编程简单）。万级连接仅少量活跃时优势显著。"
+  },
+  {
+    "question": "容器和虚拟机有什么区别？",
+    "category": "Docker与Kubernetes",
+    "difficulty": "EASY",
+    "tags": ["容器", "虚拟机", "隔离"],
+    "answer": "虚拟机通过 Hypervisor 模拟完整硬件，每个 VM 含独立 Guest OS，隔离强但启动慢（分钟级）、资源开销大（GB 级）。容器基于 Linux 内核特性：namespace 实现视图隔离（进程、网络、文件系统、用户等），cgroup 实现资源限额（CPU、内存），共享宿主机内核，无需独立 OS，启动秒级、镜像轻量（MB 级），适合微服务快速交付与弹性伸缩。代价：隔离边界弱于 VM（内核漏洞影响面大），因此敏感多租户场景可用 gVisor/Kata 等加强隔离，或 VM 内跑容器组合使用。"
+  },
+  {
+    "question": "Docker 镜像的分层原理是什么？Dockerfile 有哪些最佳实践？",
+    "category": "Docker与Kubernetes",
+    "difficulty": "MEDIUM",
+    "tags": ["镜像分层", "Dockerfile", "构建优化"],
+    "answer": "镜像由多层只读文件系统叠加（UnionFS）构成，每条 Dockerfile 指令产生一层，层可跨镜像共享，拉取与构建时按层缓存；容器运行时在顶部加一层可写层。最佳实践：1) 分层顺序按变更频率排列——不常变的依赖安装放前面，频繁变的代码拷贝放后面，最大化缓存命中；2) 多阶段构建：编译阶段用完整工具链，运行阶段只拷贝产物到精简基础镜像（如 alpine/distroless），减小体积与攻击面；3) 合并命令减少层数、清理缓存（如 apt 源缓存）；4) 非 root 用户运行；5) 固定基础镜像版本标签，避免 latest。"
+  },
+  {
+    "question": "Dockerfile 中 CMD 与 ENTRYPOINT 的区别？",
+    "category": "Docker与Kubernetes",
+    "difficulty": "EASY",
+    "tags": ["CMD", "ENTRYPOINT"],
+    "answer": "二者都指定容器启动命令。CMD 提供默认命令/参数，可被 docker run 后面的参数整体覆盖；ENTRYPOINT 定义固定入口，run 的参数会作为其追加参数，不易被覆盖。组合惯用法：ENTRYPOINT [\"app\"] + CMD [\"--port\",\"8080\"]，运行时既可传默认参数也可追加覆盖。格式区别：exec 形式（JSON 数组 [\"cmd\",\"arg\"]）直接作为 PID 1 执行，推荐；shell 形式（cmd arg）经 /bin/sh -c 包裹，导致信号转发问题（docker stop 的 SIGTERM 到不了应用，优雅退出失效）。注意 PID 1 不回收僵尸进程，可用 tini 或 --init。"
+  },
+  {
+    "question": "docker-compose 适合什么场景？核心概念有哪些？",
+    "category": "Docker与Kubernetes",
+    "difficulty": "EASY",
+    "tags": ["docker-compose", "编排"],
+    "answer": "docker-compose 用单个 YAML 定义并编排多容器应用，适合单机环境：本地开发（一键起应用+数据库+缓存）、单机生产/测试环境部署。核心概念：services（每个容器一个服务，含 image/build、ports 端口映射、volumes 挂载、environment 环境变量、depends_on 启动顺序、restart 策略、healthcheck）、networks（自定义网络使服务间用服务名互访）、volumes（命名卷持久化）。常用命令：docker compose up -d 启动、logs -f 跟踪日志、ps 查看、down 停止清理。注意 depends_on 只保证启动顺序不保证就绪，就绪判断用 healthcheck。"
+  },
+  {
+    "question": "Kubernetes 中 Pod 是什么？为什么容器要组织成 Pod？",
+    "category": "Docker与Kubernetes",
+    "difficulty": "MEDIUM",
+    "tags": ["Pod", "Kubernetes"],
+    "answer": "Pod 是 K8s 最小的调度与部署单元，包含一个或多个容器，同 Pod 内容器共享网络命名空间（同一 IP、可用 localhost 互访）、存储卷，生命周期一致。设计动机：有些应用天然需要「主容器 + 辅助容器」紧密协作——如日志收集边车（sidecar）、代理（Service Mesh 的 Envoy）、初始化容器（initContainers 做前置准备），它们需要共享网络/存储且同生共死，Pod 就是这个「逻辑主机」的抽象。实践原则：一个 Pod 通常跑一个主应用实例，需要独立扩缩容的服务应拆成不同 Pod/Deployment。"
+  },
+  {
+    "question": "Deployment 和 Service 分别解决什么问题？",
+    "category": "Docker与Kubernetes",
+    "difficulty": "MEDIUM",
+    "tags": ["Deployment", "Service", "工作负载"],
+    "answer": "Deployment 管理无状态应用的副本：声明期望状态（镜像版本、副本数），控制器持续维持实际与期望一致；支持滚动更新（逐步替换旧 Pod）、回滚（保留历史版本）、扩缩容。Service 解决服务发现与负载均衡：Pod 是易逝的（IP 随时变化），Service 用固定的虚拟 IP（ClusterIP）+ 标签选择器动态关联一组 Pod，流量在其间负载均衡；对外暴露用 NodePort/LoadBalancer，域名路由用 Ingress。关系：Deployment 管「跑什么、跑几个、怎么升级」，Service 管「怎么稳定地访问到它们」。"
+  },
+  {
+    "question": "Kubernetes 的滚动更新是如何工作的？如何回滚？",
+    "category": "Docker与Kubernetes",
+    "difficulty": "MEDIUM",
+    "tags": ["滚动更新", "回滚", "发布策略"],
+    "answer": "滚动更新：Deployment 更新镜像版本后，控制器创建新 ReplicaSet，按 maxSurge（最多超出期望副本数）与 maxUnavailable（最多不可用数）控制节奏，逐步用新 Pod 替换旧 Pod，全程保持服务可用；新 Pod 通过就绪探针后才接入流量。质量保障：配合 minReadySeconds 观察期、健康探针防止坏版本放量。回滚：kubectl rollout undo 回到上一版本（--to-revision 指定版本），本质是切换 ReplicaSet。进阶策略：金丝雀发布（按比例分流）、蓝绿部署（双环境切流），可借助 Argo Rollouts/Istio 实现。"
+  },
+  {
+    "question": "Kubernetes 探针有哪些？资源 limits 设置有什么讲究？",
+    "category": "Docker与Kubernetes",
+    "difficulty": "HARD",
+    "tags": ["探针", "资源限制", "健康检查"],
+    "answer": "三种探针：liveness（存活）——失败则重启容器，用于检测死锁/卡死，检查要宽松避免误杀；readiness（就绪）——失败则从 Service 摘除流量但不重启，用于启动慢、依赖未就绪；startup（启动）——启动期保护，慢启动应用避免被 liveness 提前杀掉。均支持 HTTP/TCP/命令检测，注意 initialDelay、period、失败阈值调参。资源：requests 是调度依据（节点剩余容量），limits 是硬上限——CPU 超限被限流（throttling），内存超限被 OOMKilled。实践：requests 按常态水位、limits 留突发余量，基于监控数据迭代，勿盲目设大导致资源碎片。"
+  }
+]

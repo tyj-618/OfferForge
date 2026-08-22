@@ -146,7 +146,7 @@ async function loadRecommendedCategories() {
 const officialOptions = computed(() => categoryOptions.value.filter((opt) => opt.official))
 const customOptions = computed(() => categoryOptions.value.filter((opt) => !opt.official))
 
-// 预设岗位：每个岗位预先绑定官方题库技术栈标签（选择后自动勾选，非关键词匹配）
+// 预设岗位：每个岗位预先绑定官方题库技术栈标签（选择后自动勾选，非关键词匹配），覆盖主流技术岗与 AI 新兴岗
 const PRESET_POSITIONS = [
   {
     name: 'Java 后端工程师',
@@ -159,6 +159,38 @@ const PRESET_POSITIONS = [
   {
     name: 'Java 高级工程师',
     tags: ['Java并发', 'JVM', 'Spring', 'Spring Boot', 'MySQL', 'Redis', '设计模式', '计算机网络']
+  },
+  {
+    name: 'Go 后端工程师',
+    tags: ['Go语言基础', 'Go并发编程', 'MySQL', 'Redis', '计算机网络', '算法']
+  },
+  {
+    name: 'Web 前端工程师',
+    tags: ['JavaScript基础', 'CSS与布局', 'Vue', '浏览器与网络', '前端工程化', '算法']
+  },
+  {
+    name: '前端高级工程师',
+    tags: ['JavaScript基础', 'Vue', 'React', '浏览器与网络', '前端工程化', '算法']
+  },
+  {
+    name: '测试开发工程师',
+    tags: ['软件测试基础', '自动化与接口测试', '性能测试', '计算机网络', 'MySQL']
+  },
+  {
+    name: '运维开发工程师（SRE）',
+    tags: ['Linux与Shell', 'Docker与Kubernetes', '计算机网络', 'MySQL']
+  },
+  {
+    name: 'AI 应用开发工程师',
+    tags: ['大模型基础', 'Prompt工程', 'RAG应用', 'AI应用工程', '算法']
+  },
+  {
+    name: 'Agent 开发工程师',
+    tags: ['Agent开发', '大模型基础', 'Prompt工程', 'AI应用工程', 'RAG应用']
+  },
+  {
+    name: '大模型算法工程师',
+    tags: ['大模型基础', 'RAG应用', 'AI应用工程', '算法']
   }
 ]
 

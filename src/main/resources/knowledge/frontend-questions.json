@@ -1,0 +1,366 @@
+[
+  {
+    "question": "什么是闭包？它有哪些常见应用场景和注意事项？",
+    "category": "JavaScript基础",
+    "difficulty": "MEDIUM",
+    "tags": ["闭包", "作用域链", "内存泄漏"],
+    "answer": "闭包是指有权访问另一个函数作用域中变量的函数，本质是函数与其词法作用域的组合：内部函数引用了外部函数的变量后，即使外部函数已返回，这些变量也不会被垃圾回收。常见应用：数据私有化（模块模式）、函数柯里化、防抖节流、回调中保存状态。注意事项：闭包会让被引用的变量常驻内存，滥用可能造成内存泄漏；在循环中用 var 声明计数器配合闭包会共享同一变量，应改用 let 或传参冻结。"
+  },
+  {
+    "question": "说说原型和原型链，JS 是如何实现继承的？",
+    "category": "JavaScript基础",
+    "difficulty": "MEDIUM",
+    "tags": ["原型链", "继承", "__proto__"],
+    "answer": "每个对象都有 __proto__ 指向其构造函数的 prototype，访问属性时先查自身，再沿原型链逐级向上直到 null，这就是原型链。ES5 继承常用组合继承/寄生组合继承：用 Object.create(Parent.prototype) 创建子类原型并指定 constructor，子类构造函数内调用 Parent.call(this) 继承实例属性。ES6 的 class + extends 是语法糖，底层仍是原型链，且要求先 super() 才能使用 this。instanceof 的原理就是沿原型链查找是否存在构造函数的 prototype。"
+  },
+  {
+    "question": "解释一下 JavaScript 的事件循环（Event Loop）与宏任务/微任务。",
+    "category": "JavaScript基础",
+    "difficulty": "HARD",
+    "tags": ["事件循环", "宏任务", "微任务", "Promise"],
+    "answer": "JS 单线程，异步任务由事件循环调度：执行同步代码（首个宏任务）后，清空全部微任务队列（Promise.then、MutationObserver、queueMicrotask），然后渲染（如需），再取一个宏任务（setTimeout、setInterval、I/O、MessageChannel）执行，如此循环。关键点：每轮宏任务结束都会清空微任务，微任务中产生的新微任务也在本轮清空；微任务优先级高于宏任务。经典输出顺序题即基于此规则推演。"
+  },
+  {
+    "question": "this 的指向规则是什么？call、apply、bind 有什么区别？",
+    "category": "JavaScript基础",
+    "difficulty": "MEDIUM",
+    "tags": ["this", "call", "apply", "bind"],
+    "answer": "this 在运行时确定，优先级：new 绑定 > 显式绑定（call/apply/bind）> 隐式绑定（对象方法调用指向调用对象）> 默认绑定（严格模式 undefined，否则全局对象）；箭头函数没有自己的 this，捕获定义时外层作用域的 this。call 立即调用并逐个传参，apply 立即调用并以数组传参，bind 返回一个绑定后的新函数不立即执行。常见陷阱：把对象方法赋值给变量后调用会丢失隐式绑定。"
+  },
+  {
+    "question": "Promise 有哪几种状态？谈谈 async/await 的理解。",
+    "category": "JavaScript基础",
+    "difficulty": "MEDIUM",
+    "tags": ["Promise", "async", "await"],
+    "answer": "Promise 有三种状态：pending、fulfilled、rejected，状态一旦变更不可逆。then 注册回调并返回新 Promise 支持链式调用；catch 捕获链上任意位置的拒绝；finally 无论成败都执行。async 函数返回 Promise，await 会暂停函数执行等待 Promise 决议，其后的代码相当于注册为微任务。错误处理推荐 try/catch 包裹 await；并发无依赖请求应使用 Promise.all 而非串行 await，避免不必要的等待。"
+  },
+  {
+    "question": "深拷贝和浅拷贝的区别？如何实现一个深拷贝？",
+    "category": "JavaScript基础",
+    "difficulty": "EASY",
+    "tags": ["深拷贝", "浅拷贝", "structuredClone"],
+    "answer": "浅拷贝只复制第一层属性，嵌套对象仍共享引用（Object.assign、展开运算符、Array.prototype.slice）；深拷贝递归复制所有层级，新旧对象完全独立。实现方式：1) structuredClone（现代浏览器/Node 原生支持，可处理循环引用、Map、Date 等，但不能拷贝函数和 DOM）；2) JSON.parse(JSON.stringify(obj))，简单但丢失 undefined、函数、循环引用会报错；3) 手写递归并用 WeakMap 记录已拷贝对象解决循环引用。"
+  },
+  {
+    "question": "防抖和节流的区别是什么？分别用在什么场景？",
+    "category": "JavaScript基础",
+    "difficulty": "EASY",
+    "tags": ["防抖", "节流", "性能优化"],
+    "answer": "防抖（debounce）：事件触发后等待 n 秒才执行，若期间再次触发则重新计时，适合搜索框输入联想、窗口 resize 结束时处理——只要持续触发就一直不执行。节流（throttle）：保证 n 秒内最多执行一次，适合滚动事件监听、高频点击上报——持续触发也会按固定频率执行。实现都基于闭包保存定时器/上次执行时间；注意是否需要首次立即执行、取消方法（如组件卸载时清理）等细节。"
+  },
+  {
+    "question": "var、let、const 有什么区别？什么是暂时性死区？",
+    "category": "JavaScript基础",
+    "difficulty": "EASY",
+    "tags": ["let", "const", "块级作用域", "暂时性死区"],
+    "answer": "var 是函数作用域且存在变量提升（声明提前，值为 undefined），可重复声明；let/const 是块级作用域，不提升且同一块内不可重复声明。暂时性死区（TDZ）：let/const 声明的变量在声明语句之前的代码段内不可访问，访问直接抛 ReferenceError，这是为了避免提升带来的歧义。const 声明时必须初始化且绑定不可变（引用地址不变，对象内部属性仍可修改）。工程实践：默认 const，需要重新赋值才用 let，禁用 var。"
+  },
+  {
+    "question": "== 和 === 的区别？== 的隐式类型转换规则是怎样的？",
+    "category": "JavaScript基础",
+    "difficulty": "EASY",
+    "tags": ["相等比较", "类型转换"],
+    "answer": "=== 严格相等：类型不同直接 false，类型相同再比值（NaN 不等于自身，+0 与 -0 相等）。== 抽象相等会先做隐式转换再比较：null 与 undefined 相等且不与其它值相等；字符串与数字比较时字符串转数字；布尔值先转数字；对象与原始值比较时对象先调用 ToPrimitive（valueOf/toString）。因此 [] == '' 为 true、[] == false 为 true 但 [] == [] 为 false（引用不同）。工程上一律使用 ===，需要空值判断可用 ?? 或可选链。"
+  },
+  {
+    "question": "ES Module 和 CommonJS 有什么区别？",
+    "category": "JavaScript基础",
+    "difficulty": "HARD",
+    "tags": ["ESM", "CommonJS", "模块化"],
+    "answer": "CommonJS（require/module.exports）运行时加载：导出的是值的拷贝，加载后模块内部变化不影响已导入值，支持条件 require，同步加载适合服务端。ES Module（import/export）编译期静态分析：导出的是值的只读引用（绑定），模块内部变化外部可见；静态结构使 Tree Shaking、循环依赖优化成为可能；顶层 await 仅 ESM 支持。打包工具依赖 ESM 的静态结构做摇树；浏览器通过 <script type=\"module\"> 原生支持，Node 中 .mjs 或 package.json type=module 启用。"
+  },
+  {
+    "question": "谈谈 CSS 盒模型，box-sizing 的作用是什么？",
+    "category": "CSS与布局",
+    "difficulty": "EASY",
+    "tags": ["盒模型", "box-sizing"],
+    "answer": "每个元素都是一个盒子，由 content、padding、border、margin 组成。标准盒模型（box-sizing: content-box）下 width 只指 content 宽度，padding/border 额外增加占位；IE 盒模型（box-sizing: border-box）下 width 包含 content+padding+border，设置宽度即所见即所得。现代项目通常全局重置 * { box-sizing: border-box }，布局计算更直观。margin 不计入盒子尺寸，但垂直方向相邻的 margin 会发生合并（取较大值）。"
+  },
+  {
+    "question": "什么是 BFC？有哪些触发条件和应用场景？",
+    "category": "CSS与布局",
+    "difficulty": "MEDIUM",
+    "tags": ["BFC", "格式化上下文", "清除浮动"],
+    "answer": "BFC（块级格式化上下文）是一块独立的渲染区域，内部布局不影响外部。触发条件：overflow 非 visible、display: flow-root（推荐）、浮动元素、绝对/固定定位、inline-block、flex/grid 子项等。布局规则：内部盒子垂直排列、同一 BFC 内垂直 margin 合并、BFC 区域不与浮动元素重叠、计算高度时包含浮动子元素。应用：清除浮动解决父元素高度塌陷、阻止 margin 合并、实现两栏布局（右侧自适应不被左侧浮动覆盖）。"
+  },
+  {
+    "question": "如何实现元素的水平垂直居中？列举几种方式。",
+    "category": "CSS与布局",
+    "difficulty": "EASY",
+    "tags": ["居中", "flex", "定位"],
+    "answer": "常用方案：1) flex：父级 display: flex; justify-content: center; align-items: center（最常用）；2) grid：display: grid; place-items: center；3) 绝对定位 + transform：top/left: 50% + translate(-50%, -50%)，无需知道尺寸；4) 绝对定位 + margin: auto（需 top/right/bottom/left 全为 0 且元素有固定宽高）；5) 行内元素用 text-align: center + line-height 等于高度。选型：现代项目优先 flex/grid；弹窗等场景定位 + transform 也很常见。"
+  },
+  {
+    "question": "谈谈对 Flex 布局的理解，常用属性有哪些？",
+    "category": "CSS与布局",
+    "difficulty": "MEDIUM",
+    "tags": ["flex", "弹性布局"],
+    "answer": "Flex 是一维布局模型，容器设 display: flex 后子项成为弹性项目。容器属性：flex-direction 主轴方向、justify-content 主轴对齐、align-items 交叉轴对齐、flex-wrap 换行、gap 间距。项目属性：flex: 1 是 flex-grow: 1, flex-shrink: 1, flex-basis: 0% 的简写，表示平分剩余空间；align-self 单独对齐。注意 flex 项目默认 min-width: auto 可能导致内容撑破容器，可设 min-width: 0 解决；等分布局注意内容过长项的收缩行为。"
+  },
+  {
+    "question": "CSS 选择器的优先级是如何计算的？",
+    "category": "CSS与布局",
+    "difficulty": "EASY",
+    "tags": ["选择器", "优先级", "权重"],
+    "answer": "优先级从高到低：!important（慎用）> 内联样式(1,0,0,0) > ID 选择器(0,1,0,0) > 类/伪类/属性选择器(0,0,1,0) > 标签/伪元素(0,0,0,1) > 通配符与组合符(0)。同权重时后定义的覆盖先定义的；继承来的样式优先级最低。权重按位比较不进位，一个 ID 胜过任意数量的类选择器。工程实践：避免滥用 !important 和过深嵌套（BEM 命名保持扁平），样式覆盖困难时优先检查权重而不是堆叠选择器。"
+  },
+  {
+    "question": "什么是重排（回流）和重绘？如何优化？",
+    "category": "CSS与布局",
+    "difficulty": "MEDIUM",
+    "tags": ["重排", "重绘", "渲染性能"],
+    "answer": "重排（reflow）：元素尺寸/位置/文档流变化导致布局重新计算，开销大；重绘（repaint）：仅外观变化（颜色等）不影响布局。重排必引发重绘，重绘不一定重排。读取 offsetWidth、scrollTop 等布局属性会强制同步布局（刷新渲染队列）。优化：批量修改样式（class 或 cssText 一次到位）、使用 transform/opacity 做动画（走合成层不触发重排）、脱离文档流（absolute/fixed）后再动画、虚拟列表处理长列表、避免频繁读取布局属性。"
+  },
+  {
+    "question": "响应式布局有哪些实现方案？rem、vw 有什么区别？",
+    "category": "CSS与布局",
+    "difficulty": "MEDIUM",
+    "tags": ["响应式", "rem", "vw", "媒体查询"],
+    "answer": "方案：1) 媒体查询 @media 按断点切换布局，适合 PC/平板/手机差异大的页面；2) 相对单位：rem 相对根元素 font-size（配合根字号缩放实现移动端等比适配），vw 相对视口宽度（1vw = 视口宽 1%），现代移动端常用 vw 或 clamp() 做流式排版；3) flex/grid 自适应 + 百分比；4) 移动端还需设置 viewport（width=device-width, initial-scale=1）。实践：后台系统以媒体查询+flex 为主，C 端活动页以 vw 等比缩放为主，注意超大屏/超小屏的上下限（min/max）。"
+  },
+  {
+    "question": "position 的几个取值分别是什么行为？",
+    "category": "CSS与布局",
+    "difficulty": "EASY",
+    "tags": ["position", "定位"],
+    "answer": "static：默认，正常文档流，top/left 无效。relative：相对自身原位置偏移，原占位保留，可作为子元素绝对定位的参照（包含块）。absolute：相对最近的非 static 祖先定位，脱离文档流不占位。fixed：相对视口定位，滚动不动（注意祖先有 transform 时参照会变为该祖先）。sticky：滚动到阈值前表现为 relative，越过阈值后表现为 fixed，常用于吸顶导航。z-index 只对定位元素生效且受层叠上下文约束。"
+  },
+  {
+    "question": "说说 Vue 的生命周期及各阶段适合做什么。",
+    "category": "Vue",
+    "difficulty": "MEDIUM",
+    "tags": ["生命周期", "钩子函数"],
+    "answer": "Vue3 组合式：setup()（初始化响应式数据与计算属性，替代 beforeCreate/created）→ onBeforeMount → onMounted（DOM 已挂载，可访问 $refs、发起请求、初始化第三方库）→ onBeforeUpdate/onUpdated（DOM 更新后操作）→ onBeforeUnmount/onUnmounted（清理定时器、解绑事件、取消请求）。特殊：onActivated/onDeactivated 配合 keep-alive。注意请求一般放 onMounted；SSR 场景 mounted 仅客户端执行，数据预取需服务端兼容。"
+  },
+  {
+    "question": "Vue3 响应式原理是什么？相比 Vue2 有哪些改进？",
+    "category": "Vue",
+    "difficulty": "HARD",
+    "tags": ["响应式", "Proxy", "依赖收集"],
+    "answer": "Vue3 用 Proxy 代理整个对象，拦截 get 时通过 effect/track 收集依赖，拦截 set 时 trigger 触发更新；配合 Reflect 保证 this 指向正确。相比 Vue2 的 Object.defineProperty：1) 无需递归遍历所有属性，性能更好且惰性代理（访问到才代理深层）；2) 可监听属性新增/删除、数组下标与 length 变化；3) 支持 Map/Set 等集合。ref 用于基本类型（.value 包装），reactive 用于对象；组合式 API 让逻辑按功能聚合，配合 tree-shaking 体积更小。"
+  },
+  {
+    "question": "computed 和 watch 的区别与使用场景？",
+    "category": "Vue",
+    "difficulty": "EASY",
+    "tags": ["computed", "watch"],
+    "answer": "computed 是派生状态：基于响应式依赖缓存计算结果，依赖不变则直接返回缓存，适合同步的声明式计算（如过滤列表、格式化），不要在其中做异步或副作用。watch 是侦听器：观察数据变化执行副作用（请求、操作 DOM、写日志），支持 deep、immediate、once；侦听多个源用数组。衍生需求用 computed，副作用用 watch；watchEffect 自动收集依赖立即执行，适合依赖明确的副作用，但无法拿到旧值（watch 回调有 oldVal/newVal）。"
+  },
+  {
+    "question": "v-for 为什么需要 key？说说 Vue 的 diff 算法。",
+    "category": "Vue",
+    "difficulty": "HARD",
+    "tags": ["diff", "key", "虚拟DOM"],
+    "answer": "diff 比较新旧虚拟节点树以最小化真实 DOM 操作。无 key 时只能按位置逐个比较，列表头部插入会导致后续节点全部被误判更新（状态错位、性能差）；唯一稳定的 key 让算法能识别「同一节点」，复用并移动 DOM。Vue3 diff：先头尾预处理相同前缀/后缀，再对中间乱序部分建立 key→索引 映射，用最长递增子序列求最少移动次数。注意：不要用数组下标作 key（列表会增删排序时）；key 必须唯一稳定，通常用业务 id。"
+  },
+  {
+    "question": "v-if 和 v-show 有什么区别？",
+    "category": "Vue",
+    "difficulty": "EASY",
+    "tags": ["v-if", "v-show", "条件渲染"],
+    "answer": "v-if 是真正的条件渲染：切换时销毁/重建元素及其子组件（生命周期会重跑），惰性——初始为 false 则什么都不渲染；v-show 只是切换 CSS display，元素始终保留在 DOM 中。频繁切换用 v-show（避免重复创建开销），条件很少变化或初始不渲染成本高的用 v-if。注意 v-if 优先级高于 v-for，二者不建议同元素使用；对包含表单状态的组件用 v-if 切换会丢失输入状态，需要权衡。"
+  },
+  {
+    "question": "nextTick 是什么？什么时候需要用？",
+    "category": "Vue",
+    "difficulty": "MEDIUM",
+    "tags": ["nextTick", "异步更新"],
+    "answer": "Vue 的 DOM 更新是异步批量的：多次数据变更会合并为一次更新，放入微任务队列。nextTick 返回一个在下次 DOM 更新完成后决议的 Promise，用于在修改数据后立刻读取更新后的 DOM（如聚焦新出现的输入框、获取渲染后的尺寸、滚动到底部）。原理上它挂载在更新任务之后的微任务（Promise.then）。组合式写法：await nextTick() 后再操作；若不等待直接读 DOM，拿到的是更新前的状态。"
+  },
+  {
+    "question": "Vue 组件之间有哪些通信方式？",
+    "category": "Vue",
+    "difficulty": "EASY",
+    "tags": ["组件通信", "props", "emit", "provide"],
+    "answer": "1) 父子：props 向下传递 + emit 向上通知；2) 跨层级：provide/inject（祖先注入，深层后代直接获取，可传响应式数据）；3) 全局状态：Pinia（推荐，支持组合式用法、持久化插件）；4) 事件总线：Vue3 移除原生 $on，可用 mitt 等轻量库，但复杂场景建议用 Pinia；5) ref/$parent 直接访问实例（耦合高，慎用）；6) 路由参数、localStorage 用于页面级数据。选型：父子用 props/emit，兄弟/跨层用 Pinia，依赖注入场景用 provide。"
+  },
+  {
+    "question": "keep-alive 的作用和原理是什么？",
+    "category": "Vue",
+    "difficulty": "MEDIUM",
+    "tags": ["keep-alive", "缓存", "LRU"],
+    "answer": "keep-alive 是内置组件，包裹动态组件（常配合 <router-view>）缓存不活动组件的实例，而不是销毁重建：切换回来时保留状态（表单输入、滚动位置），并触发 activated 而非 mounted。属性：include（按组件 name 白名单）、exclude、max（缓存上限，超出按 LRU 淘汰）。原理：命中缓存直接从缓存取 vnode 实例，否则创建后存入缓存（存的是组件实例与 vnode）。适合列表→详情返回列表场景；注意缓存组件内定时器、全局事件需在 deactivated 暂停。"
+  },
+  {
+    "question": "什么场景需要引入状态管理库？Pinia 的核心概念是什么？",
+    "category": "Vue",
+    "difficulty": "MEDIUM",
+    "tags": ["Pinia", "状态管理"],
+    "answer": "当多个不相关组件共享同一状态（登录信息、主题、购物车）、或状态变更需要集中追踪时，引入状态管理避免 props 层层透传与事件层层上抛。Pinia 核心：state（响应式状态，函数返回对象）、getters（相当于 computed 的派生）、actions（修改状态的方法，支持同步/异步）；通过 defineStore 定义，useStore() 在组件中使用，天然支持 TS 推导与模块化（每个 store 独立）。相比 Vuex4：去掉了 mutations，组合式风格更简洁，体积更小。"
+  },
+  {
+    "question": "谈谈对 Composition API 和 setup 语法糖的理解。",
+    "category": "Vue",
+    "difficulty": "MEDIUM",
+    "tags": ["Composition API", "setup", "script setup"],
+    "answer": "选项式 API 按选项类型（data/methods/computed）组织，组件变大后同一功能的代码分散各处；组合式 API 允许按功能聚合逻辑并可抽成可复用的组合函数（useXxx），解决 mixins 的命名冲突与来源不清问题。<script setup> 是编译时语法糖：顶层变量/函数自动暴露给模板，无需 return；defineProps/defineEmits/defineExpose 等编译器宏简化声明；配合自动导入进一步减少样板。代价是心智模型从「组件实例」转向「响应式变量与函数」，团队需统一风格。"
+  },
+  {
+    "question": "React Hooks 的使用规则有哪些？为什么这样设计？",
+    "category": "React",
+    "difficulty": "MEDIUM",
+    "tags": ["Hooks", "使用规则"],
+    "answer": "两条铁律：1) 只能在函数组件或自定义 Hook 顶层调用，不能放在条件/循环/嵌套函数里；2) 只能在 React 函数组件或自定义 Hook 中调用。原因：React 依赖 Hook 的调用顺序来匹配各次渲染间的状态（内部按顺序维护 Hook 链表），若调用顺序不稳定会导致状态错位。自定义 Hook 以 use 开头，用于抽取带状态的复用逻辑。配套工具：eslint-plugin-react-hooks 自动检查规则；注意闭包陷阱——事件回调里读到的是旧 state，需用函数式更新或 ref。"
+  },
+  {
+    "question": "useEffect 的依赖数组怎么理解？有哪些常见坑？",
+    "category": "React",
+    "difficulty": "MEDIUM",
+    "tags": ["useEffect", "依赖数组", "副作用"],
+    "answer": "useEffect 用于处理副作用（请求、订阅、操作 DOM）。依赖数组语义：不传——每次渲染后都执行；[]——仅挂载后执行一次；[a, b]——a 或 b 变化后执行。返回的清理函数在下次执行前与卸载时调用，用于取消订阅/请求。常见坑：1) 漏依赖导致闭包读取旧值；2) 依赖是每次渲染新建的对象/数组/函数导致无限循环，用 useMemo 或把逻辑移入 effect 内；3) 请求竞态需在清理函数中忽略过期响应；4) 不要把所有逻辑都塞进 effect，派生数据应在渲染期间计算。"
+  },
+  {
+    "question": "useMemo 和 useCallback 的区别是什么？",
+    "category": "React",
+    "difficulty": "EASY",
+    "tags": ["useMemo", "useCallback", "性能优化"],
+    "answer": "useMemo(fn, deps) 缓存 fn 的计算结果，依赖不变返回缓存值，用于昂贵的派生计算；useCallback(fn, deps) 缓存函数引用本身，依赖不变返回同一函数实例，主要用于把回调传给用 memo 包裹的子组件时避免因引用变化导致子组件不必要的重渲染，或作为其它 Hook 的稳定依赖。关系上 useCallback(fn, deps) 等价于 useMemo(() => fn, deps)。注意不要滥用：缓存本身有比较成本，只在确有性能问题（大列表、重计算、memo 子组件）时使用。"
+  },
+  {
+    "question": "谈谈对虚拟 DOM 与 React Diff 的理解。",
+    "category": "React",
+    "difficulty": "HARD",
+    "tags": ["虚拟DOM", "diff", "reconciliation"],
+    "answer": "虚拟 DOM 是用 JS 对象描述 UI 结构，状态变化时先生成新虚拟树，与旧树 diff 后把最小变更批量应用到真实 DOM，好处是跨平台能力与批量更新，代价是额外内存与 diff 开销（对简单更新不一定更快，价值在大型应用的可维护性与稳定性能下限）。React Diff 做了三个假设优化：1) 不同类型元素产生不同树，直接整体替换；2) 同层比较，不跨层级移动；3) 通过 key 标识哪些子元素可在不同渲染间保持稳定。列表渲染因此必须提供稳定唯一的 key。"
+  },
+  {
+    "question": "setState 是同步还是异步的？",
+    "category": "React",
+    "difficulty": "MEDIUM",
+    "tags": ["setState", "批量更新", "并发渲染"],
+    "answer": "React 18 起（createRoot），所有场景（事件处理、setTimeout、Promise 回调、原生事件）的 setState 都会自动批处理：多次调用合并为一次重渲染，在回调里立即读 state 仍是旧值，表现为「异步」。需要基于前值计算时用函数式更新 setState(prev => prev + 1)，避免依赖中间值的问题；需要在更新后执行副作用用 useEffect 监听该状态。React 18 之前的同步/异步区分（合成事件内异步、原生事件内同步）已不存在；flushSync 可强制同步刷新但会破坏批处理优化。"
+  },
+  {
+    "question": "React 有哪些状态管理方案？如何选择？",
+    "category": "React",
+    "difficulty": "MEDIUM",
+    "tags": ["状态管理", "Redux", "Zustand", "Context"],
+    "answer": "1) Context + useReducer：原生方案，适合低频变更（主题、用户信息），高频更新会导致消费组件大面积重渲染；2) Redux（+ Toolkit）：单一 store、action/reducer 严格可预测，配套时间旅行调试，适合大型复杂应用，样板较多（RTK 已大幅简化）；3) Zustand：轻量、无 Provider 包裹、按需订阅，社区主流选择；4) Jotai/Recoil：原子化状态，自底向上；5) 服务端状态用 TanStack Query 管理（缓存/重试/失效），与客户端状态分离。选型：中小项目 Zustand + Query，大型企业项目 Redux Toolkit。"
+  },
+  {
+    "question": "什么是 React Fiber？它解决了什么问题？",
+    "category": "React",
+    "difficulty": "HARD",
+    "tags": ["Fiber", "并发渲染", "时间切片"],
+    "answer": "React 15 的递归调和（Stack Reconciler）一旦开始无法中断，大组件树更新会长时间阻塞主线程造成卡顿。Fiber 把渲染工作拆成一个个小单元（每个 Fiber 节点是一个工作单元，通过 child/sibling/return 指针构成可中断的链表），调度器按优先级利用空闲时间分片执行，高优先级任务（用户输入）可打断低优先级渲染。由此衍生出并发特性：startTransition 标记非紧急更新、Suspense、useDeferredValue。Fiber 是架构升级，让 React 渲染可中断、可恢复、可排优先级。"
+  },
+  {
+    "question": "React 组件性能优化有哪些常见手段？",
+    "category": "React",
+    "difficulty": "EASY",
+    "tags": ["性能优化", "memo", "懒加载"],
+    "answer": "1) React.memo 缓存组件，props 浅比较不变则跳过重渲染（配合 useCallback/useMemo 稳定依赖）；2) 列表用稳定 key、避免内联对象/函数作为 props；3) 代码分割：React.lazy + Suspense 路由级懒加载；4) 长列表虚拟滚动（react-window）；5) 状态下沉与组件拆分：把频繁变化的状态隔离到局部组件，缩小重渲染范围；6) 避免在渲染期间做昂贵计算，用 useMemo；7) 用 React DevTools Profiler 定位再优化，不盲目加缓存。核心原则：减少不必要的渲染 + 缩小每次渲染的范围。"
+  },
+  {
+    "question": "从输入 URL 到页面显示经历了哪些过程？",
+    "category": "浏览器与网络",
+    "difficulty": "MEDIUM",
+    "tags": ["渲染流程", "DNS", "HTTP"],
+    "answer": "1) DNS 解析（浏览器缓存→系统缓存→递归查询）得到 IP；2) 与服务器 TCP 三次握手（HTTPS 还有 TLS 握手）；3) 发送 HTTP 请求；4) 服务器响应（状态码、可能命中协商缓存 304）；5) 浏览器解析 HTML 构建 DOM 树，解析 CSS 构建 CSSOM，合并为渲染树；6) 布局（Layout）计算几何信息；7) 绘制（Paint）生成绘制指令；8) 合成（Composite）分块栅格化后上屏。期间遇到 script 阻塞解析（除非 async/defer），图片等子资源并发请求（受同域连接数限制）。"
+  },
+  {
+    "question": "浏览器缓存机制：强缓存与协商缓存的区别？",
+    "category": "浏览器与网络",
+    "difficulty": "MEDIUM",
+    "tags": ["强缓存", "协商缓存", "Cache-Control"],
+    "answer": "强缓存：不发请求直接用本地副本，由 Cache-Control: max-age（优先于 Expires）控制，命中返回 200 (from disk/memory cache)。协商缓存：强缓存过期后发请求验证资源是否变化——Last-Modified/If-Modified-Since（秒级、内容没变但修改时间变会误判）与 ETag/If-None-Match（内容指纹，优先），未变化返回 304 复用本地。工程实践：带内容哈希指纹的静态资源设 max-age=31536000 长期强缓存；index.html 设 no-cache（每次协商），保证入口文件及时更新。"
+  },
+  {
+    "question": "跨域问题是如何产生的？CORS 的原理是什么？",
+    "category": "浏览器与网络",
+    "difficulty": "MEDIUM",
+    "tags": ["跨域", "CORS", "同源策略"],
+    "answer": "浏览器同源策略（协议+域名+端口相同）限制跨源的 DOM 访问与 AJAX 读取响应，是安全机制。CORS 由服务端声明允许跨源：简单请求（GET/HEAD/POST 且头部受限）直接带上 Origin，服务端返回 Access-Control-Allow-Origin 即放行；非简单请求（PUT/DELETE、自定义头、JSON POST）先发 OPTIONS 预检，服务端返回允许的方法/头/源后（可配 Access-Control-Max-Age 缓存预检）才发真实请求。携带 Cookie 需 Access-Control-Allow-Credentials: true 且前端 withCredentials，此时 Allow-Origin 不能为 *。开发期常用代理或 JSONP（仅 GET，已过时）。"
+  },
+  {
+    "question": "前端如何保存登录态（Token）？各方案有什么利弊？",
+    "category": "浏览器与网络",
+    "difficulty": "MEDIUM",
+    "tags": ["Token", "登录态", "存储安全"],
+    "answer": "三种主流方案：1) 内存保存（Vue/React 状态）：最安全（XSS 也难以持久窃取），但刷新即丢，需配合静默刷新（用 refresh token 重建）；2) HttpOnly Cookie：浏览器自动携带且 JS 不可读，防 XSS 窃取，需配合 SameSite 与 CSRF 防护（Token/同源校验），跨域场景需 withCredentials；3) localStorage：实现简单且持久，但任何注入的脚本都能读取，XSS 风险下等于裸奔，不推荐存敏感 Token。实践推荐：短期 accessToken 放内存 + HttpOnly Cookie 存 refreshToken；避免在 URL 中携带 Token（会被日志与 Referer 泄露）。请求携带用 Authorization: Bearer 头，避免 Cookie 跨域困扰。"
+  },
+  {
+    "question": "HTTP/2 相比 HTTP/1.1 有哪些改进？",
+    "category": "浏览器与网络",
+    "difficulty": "HARD",
+    "tags": ["HTTP/2", "多路复用", "头部压缩"],
+    "answer": "1) 二进制分帧：报文拆为 HEADERS/DATA 帧，传输层二进制化；2) 多路复用：同一 TCP 连接并发收发多个请求，解决 1.1 队头阻塞（应用层）与连接数限制，不再需要域名分片/雪碧图等 hack；3) 头部压缩 HPACK：客户端服务端维护索引表，只传差异；4) 服务器推送：可主动推送关联资源（实际应用少）；5) 流优先级。但 TCP 层丢包仍会阻塞所有流（TCP 层队头阻塞），HTTP/3 改用基于 UDP 的 QUIC 解决，并实现连接迁移（切网不断连）。"
+  },
+  {
+    "question": "GET 和 POST 请求有哪些区别？",
+    "category": "浏览器与网络",
+    "difficulty": "EASY",
+    "tags": ["GET", "POST", "HTTP方法"],
+    "answer": "语义：GET 用于获取资源，应幂等且无副作用；POST 用于提交/创建数据。参数位置：GET 参数在 URL 查询串（有长度限制且会被日志/浏览器历史/缓存记录，敏感数据禁用），POST 参数在请求体无长度限制。缓存：GET 可被浏览器与 CDN 缓存，POST 默认不缓存。幂等性：GET/PUT/DELETE 幂等（重复执行结果一致），POST 不幂等（重复提交可能重复创建）。实现层面二者都是 TCP 请求，所谓「GET 一个包、POST 两个包」只是浏览器行为而非协议规定。RESTful 风格下创建用 POST、全量更新 PUT、部分更新 PATCH。"
+  },
+  {
+    "question": "前端存储方案有哪些？各有什么特点？",
+    "category": "浏览器与网络",
+    "difficulty": "EASY",
+    "tags": ["localStorage", "sessionStorage", "IndexedDB"],
+    "answer": "localStorage：约 5MB，持久化（除非手动清除），同源共享，只存字符串，同步 API 存大数据会阻塞；适合主题、偏好等小配置。sessionStorage：同容量但仅当前标签页会话有效，关闭即清。Cookie：4KB，随请求携带，可设 HttpOnly/Secure，主要用于会话标识。IndexedDB：浏览器端数据库，支持大容量（数百 MB）、索引与事务，异步/可存结构化对象，适合离线缓存、大量业务数据（如草稿）。注意：敏感信息不要放 localStorage（XSS 可读），Token 建议内存 + HttpOnly Cookie。"
+  },
+  {
+    "question": "XSS 和 CSRF 攻击的原理与防御手段？",
+    "category": "浏览器与网络",
+    "difficulty": "HARD",
+    "tags": ["XSS", "CSRF", "Web安全"],
+    "answer": "XSS（跨站脚本）：攻击者注入恶意脚本到页面执行，窃取 Cookie/Token、劫持操作。分存储型、反射型、DOM 型。防御：输出编码（HTML/属性/JS 上下文分别转义）、CSP 内容安全策略、Cookie 设 HttpOnly、富文本用白名单过滤（DOMPurify）、框架默认转义（避免 v-html/dangerouslySetInnerHTML 渲染用户内容）。CSRF（跨站请求伪造）：利用用户已登录身份在第三方站点发起伪造请求。防御：SameSite Cookie、校验 CSRF Token、关键操作校验验证码/来源头（Origin/Referer）。"
+  },
+  {
+    "question": "Webpack 和 Vite 有什么区别？",
+    "category": "前端工程化",
+    "difficulty": "MEDIUM",
+    "tags": ["Webpack", "Vite", "构建工具"],
+    "answer": "Webpack 是打包器：开发时把全部模块打包成 bundle 再启动 dev server，项目大时冷启动与热更新慢。Vite 开发期基于浏览器原生 ESM：按需编译，启动近乎零打包，改动只编译当前模块，热更新极快；依赖预构建用 esbuild（Go 编写，极快）。生产构建 Vite 用 Rollup 打包（也可切 esbuild）。差异代价：Vite 对 CommonJS 老依赖、某些 require 动态写法兼容性稍弱，需要插件/预构建处理。选型：新项目优先 Vite；存量大型 Webpack 项目可渐进迁移或留在 Webpack 5（已支持持久缓存与模块联邦）。"
+  },
+  {
+    "question": "什么是 Tree Shaking？它依赖什么条件？",
+    "category": "前端工程化",
+    "difficulty": "MEDIUM",
+    "tags": ["Tree Shaking", "ESM", "体积优化"],
+    "answer": "Tree Shaking 指打包时移除未被引用的导出代码（死代码消除），减小产物体积。它依赖 ES Module 的静态结构：import/export 在编译期可确定依赖关系，打包器标记未使用导出（如 webpack 的 sideEffects 分析），再由压缩工具（Terser）删除。失效常见原因：1) 库使用 CommonJS（运行时加载无法静态分析）；2) 模块有副作用（全局注册、polyfill），package.json 应正确声明 \"sideEffects\": false 或白名单；3) babel 把 ESM 转成 CJS（应设 modules: false）。实践：按需引入组件库、检查产物分析报告（webpack-bundle-analyzer）。"
+  },
+  {
+    "question": "前端如何做代码分割与按需加载？",
+    "category": "前端工程化",
+    "difficulty": "MEDIUM",
+    "tags": ["代码分割", "懒加载", "首屏优化"],
+    "answer": "1) 路由级分割：React.lazy + Suspense / Vue 的 defineAsyncComponent 或路由懒加载（() => import()），每个路由一个 chunk，首屏只加载当前路由；2) 组件级：重交互组件（图表、富文本编辑器、弹窗）按需异步加载；3) 第三方库拆分：splitChunks 把大的公共依赖（echarts、moment）拆成独立 chunk 利用缓存；4) 预加载提示：prefetch/preload 提前拉取大概率用到的资源。配合 webpack 魔法注释命名 chunk 便于分析。收益：首屏 JS 体积下降、TTI 提升、长缓存命中率提高。"
+  },
+  {
+    "question": "Babel 的作用是什么？它和 TS 编译、Polyfill 有什么区别？",
+    "category": "前端工程化",
+    "difficulty": "EASY",
+    "tags": ["Babel", "转译", "Polyfill"],
+    "answer": "Babel 是 JS 编译器，核心职责：1) 语法转换：把新语法（箭头函数、可选链、class）转为低版本语法，@babel/preset-env 按 browserslist 目标自动决定转什么；2) Polyfill 注入：语法转换不覆盖新 API（Promise、Array.includes），需要 core-js 补齐，useBuiltIns: usage 按需引入；3) 插件机制：JSX、TS 语法剥离、宏等。区别：Babel 只转语法不做类型检查（TS 类型由 tsc 或构建工具剥离）；esbuild/swc 用 Go/Rust 重写编译器提速，现代工具链常以 swc/esbuild 做转译、Babel 仅保留特殊插件场景。"
+  },
+  {
+    "question": "如何优化前端构建速度？",
+    "category": "前端工程化",
+    "difficulty": "HARD",
+    "tags": ["构建优化", "缓存", "并行"],
+    "answer": "1) 开启持久缓存：Webpack5 filesystem cache，二次构建大幅提速；2) 缩小处理范围：babel 只处理 src 排除 node_modules，loader 配 include；3) 并行与提速工具：thread-loader、swc-loader/esbuild-loader 替代 babel；4) 依赖预编译：把不常变的大型依赖提前打包（webpack DllPlugin 或 Vite 依赖预构建思路）；5) 合理 splitChunks 避免重复打包；6) 模块联邦拆仓库独立构建；7) 度量先行：--profile 与 speed-measure-plugin 定位瓶颈，CI 上监控构建时长回归。开发体验另可评估迁移 Vite。"
+  },
+  {
+    "question": "什么是 Monorepo？它的优缺点和常见工具？",
+    "category": "前端工程化",
+    "difficulty": "EASY",
+    "tags": ["Monorepo", "pnpm workspace", "turborepo"],
+    "answer": "Monorepo 把多个项目/包放在同一仓库统一管理（如 apps/ + packages/）。优点：跨包改动原子提交、统一工具链与规范、依赖版本一致易重构、代码复用直接引用。缺点：仓库体积大影响 clone/CI、权限管理复杂、构建需增量否则全量很慢。常见工具：pnpm workspace（硬链接节省磁盘 + 严格依赖隔离）、Yarn workspace、构建编排用 Turborepo/Nx（任务缓存、依赖图增量构建）、版本发布用 Changesets。适合多端/多包产品团队；小项目单一应用用 Monorepo 收益不大。"
+  },
+  {
+    "question": "前端项目从源码到线上经历了哪些环节？",
+    "category": "前端工程化",
+    "difficulty": "MEDIUM",
+    "tags": ["CI/CD", "部署", "CDN"],
+    "answer": "1) 代码提交触发 CI：安装依赖 → lint/单测 → 构建产物（dist，含内容哈希指纹）；2) 产物发布：静态资源上传 CDN（长缓存），index.html 部署到服务器/对象存储（不缓存或协商缓存）；3) 灰度/回滚：多版本目录保留可快速切回，或按流量灰度；4) 运行时：Nginx 托管静态文件并反代后端 API，SPA 配置 history 路由回退（所有路径回退 index.html），开启 gzip/br、SSE 接口关闭缓冲；5) 监控：前端错误上报（window.onerror/未捕获 Promise）、性能指标（LCP/FCP）、构建产物体积监控。"
+  },
+  {
+    "question": "前端为什么需要 ESLint、Prettier 与提交规范？",
+    "category": "前端工程化",
+    "difficulty": "EASY",
+    "tags": ["ESLint", "Prettier", "提交规范"],
+    "answer": "ESLint 检查代码质量与风格问题（未使用变量、隐式转换、Hook 规则），Prettier 统一格式化（缩进、引号、换行），二者配合：ESLint 只管质量、格式化交给 Prettier，避免规则冲突。工程化落地：husky + lint-staged 在提交前只对本次改动文件执行检查，commitlint 校验 Conventional Commits（feat/fix/chore 前缀）便于自动生成 changelog 与语义化版本。价值：把规范从「人盯」变为「工具强制」，减少评审噪音，保证团队代码一致性。"
+  }
+]
