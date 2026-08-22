@@ -1,5 +1,7 @@
 package com.offerforge.email;
 
+import com.offerforge.common.ErrorCode;
+import com.offerforge.exception.BusinessException;
 import com.tencentcloudapi.common.Credential;
 import com.tencentcloudapi.common.exception.TencentCloudSDKException;
 import com.tencentcloudapi.common.profile.ClientProfile;
@@ -68,7 +70,8 @@ public class TencentSesMailSender implements VerificationMailSender {
         } catch (TencentCloudSDKException exception) {
             log.error("verification code email send failed to={} errorCode={} requestId={}",
                     toEmail, exception.getErrorCode(), exception.getRequestId(), exception);
-            throw new IllegalStateException("邮件发送失败：" + exception.getErrorCode(), exception);
+            // 发信异常降级为业务错误（避免 500），用户可稍后重试；发信失败不落库，防刷窗口也未推进
+            throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE, "验证码邮件发送失败，请稍后重试");
         }
     }
 }
