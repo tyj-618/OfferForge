@@ -3,6 +3,7 @@ import { onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authApi, setCurrentUser, setToken } from '../api'
 import { toast } from '../toast'
+import logoUrl from '../assets/logo.png'
 
 const route = useRoute()
 const router = useRouter()
@@ -145,7 +146,9 @@ function switchMode(target) {
 <template>
   <div class="login-page">
     <div class="login-card card">
-      <div class="brand-title">🎯 Easy Offer Forge</div>
+      <div class="brand-title">
+        <img :src="logoUrl" alt="Easy Offer Forge" class="brand-logo" />
+      </div>
       <p class="muted subtitle">AI 面试教练 · 让每次面试都有备而来</p>
 
       <div class="tabs">
@@ -272,9 +275,15 @@ function switchMode(target) {
 }
 
 .brand-title {
-  font-size: 24px;
-  font-weight: 700;
   text-align: center;
+  margin-bottom: 8px;
+}
+
+.brand-logo {
+  display: block;
+  height: 48px;
+  width: auto;
+  margin: 0 auto;
 }
 
 .subtitle {
