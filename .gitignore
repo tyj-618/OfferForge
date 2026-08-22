@@ -10,12 +10,14 @@ frontend/dist/
 data/
 *.log
 
-# ²¿Êð´ò°ü²úÎï£¨ÅÅ³ýÈÕÖ¾ÎÄ¼þ£¬±ÜÃâ¸²¸Ç·þÎñÆ÷ÔËÐÐÈÕÖ¾£©
-full-bundle.tar
-update-bundle.tar
-deploy-bundle.tar
-deploy-update.log
-deploy.log
+# éƒ¨ç½²ä¸ŽéªŒæ”¶è¿‡ç¨‹äº§ç‰©ï¼ˆæ‰“åŒ…ä»¶ã€æ—¥å¿—ã€æˆªå›¾ã€ä¸€æ¬¡æ€§è„šæœ¬ï¼‰
+*.tar
+*.txt
+verify-*.log
+survey-*.sh
+cleanup-*.sh
+check-*.sh
+verify-*.sh
 *.png
 !frontend/public/favicon.png
 !frontend/src/assets/logo.png

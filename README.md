@@ -1,32 +1,90 @@
 # 🎯 Easy Offer Forge — AI 面试教练 Agent
 
-> 一句话定位：基于 LLM 的模拟面试教练，围绕你的个人知识库出题、实时追问、多维评分，并生成可追踪的进步报告。
+> 基于 LLM 的模拟面试教练：围绕**你的个人知识库与简历**出题、实时追问、多维评分，并生成可追踪的进步报告。
+> 把「刷题 → 模拟面试 → 复盘改进」的闭环产品化，练到拿到 Offer 为止。
 
-## 核心功能（v1.0）
+🌐 **在线体验**：[https://easyofferforge.com](https://easyofferforge.com)（邮箱验证码注册即可使用）
 
-- **模拟面试**：训练/实战双模式，四环节状态机（基础考察 → 项目经历 → 深度追问 → 收尾总结），自适应出题、主动追问、断点恢复，深度训练子流程专项突破
-- **专项训练**：按知识分组强化，即时评分与导师反馈，训练报告与打印
+---
+
+## ✨ 项目亮点
+
+| 亮点 | 说明 |
+| --- | --- |
+| 🧠 个性化出题 | 题目来自你的知识库与简历项目经历，而不是千篇一律的题库轮询 |
+| 🎚️ 由浅入深自适应 | 连续高分自动升难度、答得吃力自动放缓，贴近真实面试官节奏 |
+| 🗣️ 主动追问 | 基于回答内容的针对性追问，而非机械下一题 |
+| 📊 可量化的进步 | 四维评分 + 雷达图 + 趋势曲线，每场报告可回溯 |
+| 🔌 模型自由 | 官方模型（通义千问 / DeepSeek 免费档）开箱即用，也支持自带任意 OpenAI 兼容 Key |
+| 🔒 隐私优先 | 密码哈希、Key 加密存储、个人数据严格隔离、全站 HTTPS |
+
+## 🧩 核心功能（v1.0）
+
+- **模拟面试**：训练 / 实战双模式，四环节状态机（基础考察 → 项目经历 → 深度追问 → 收尾总结），自适应出题、主动追问、断点恢复，训练模式支持「🎯 深入该模块」跳转专项突破
+- **专项训练**：按知识分组强化，即时评分与导师反馈，刷新/暂离可恢复，训练报告支持打印
 - **快捷提问**：基于个人知识库检索的结构化问答（先结论后展开，带引用）
-- **资源库**：官方题库 300+（30 分组，含 LeetCode Hot 100 算法题），支持个人面经笔记上传与分组管理
-- **简历驱动的项目题**：多份简历维护，LLM 解析，围绕真实项目经历出题
-- **多维评估报告**：维度评分、逐题明细、综合评价、评分趋势曲线
-- **邮箱验证码注册 / 忘记密码**：邮箱 + 验证码体系，登录限流与会话管理；唯一管理账号与管理台（用户管理 + 问题反馈）
-- **问题反馈**：图文提交（最多 3 张截图），管理台分页查看处理
-- **模型与计费**：官方模型通义千问系列 + DeepSeek（deepseek-v4-flash），支持用户自带任意 OpenAI 兼容 Key；免费额度 + 余额计费（支付渠道审核中，充值页可查看余额与价目，充值操作待开放）
-- **隐私保护**：密码 BCrypt 加盐哈希、API Key AES-256-GCM 加密存储、全站 HTTPS、个人数据严格隔离，详见「文档 → 隐私与安全」
-- **贴近真实面试的交互控制**：跳过此题（计 0 分推进）、提前结束（按已作答题目出报告）；问答不足 5 题的短场不消耗免费次数且不记录历史
+- **资源库**：官方题库 **318 题**（五大方向 29 分组 + LeetCode Hot 100 算法题，附解题思路与复杂度），支持上传个人面经笔记（仅本人可见）、掌握度标记（绿勾/红叉影响出题权重）
+- **简历驱动的项目题**：多份简历维护、LLM 解析、预览/编辑分离，面试围绕真实项目经历提问
+- **多维评估报告**：维度评分、逐题明细、综合评价、评分趋势曲线，历史按训练/实战分页
+- **短场保护**：作答不足 5 题的短场不消耗免费额度、不记录历史，误开零成本
+- **账号体系**：邮箱验证码注册、忘记密码找回、登录限流与会话管理；唯一管理账号 + 管理台（用户统计/封禁、问题反馈处理）
+- **问题反馈**：图文提交（最多 3 张截图），管理台分页查看，每日限 20 条防滥用
+- **模型与计费**：设置页可选官方模型（系统默认 / 通义千问-Flash 免费档 / DeepSeek-V4-Flash 官方免费档），支持自带任意 OpenAI 兼容 Key；免费额度 + 余额计费已就绪（支付渠道审核中，充值页可查看余额与价目，充值操作待开放）
 
-## 技术栈
+## 🛠 技术栈
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | Spring Boot 4.0.6 · Java 17 · Spring Data JPA · SSE |
-| 前端 | Vue 3 · Vite 6 · ECharts · 原生 SSE 解析（无 UI 库） |
-| 存储 | MySQL 8.0（持久化）· Redis 7（会话/限流，可降级内存）· Elasticsearch 8.x（向量检索，可降级 SQL） |
-| AI | OpenAI 兼容接口（阿里云百炼通义千问 + DeepSeek 官方端点）· 内置 mock provider 可离线开发 |
-| 部署 | Docker Compose 五服务一键启动（多阶段构建） |
+| 后端 | Spring Boot 4 · Java 17 · Spring Data JPA · SSE 流式 |
+| 前端 | Vue 3 · Vite 6 · ECharts · 原生 SSE 解析（零 UI 库依赖） |
+| 存储 | MySQL 8.0（持久化）· Redis 7（会话/额度/限流，可降级内存）· Elasticsearch 8.x（向量检索，可降级 SQL） |
+| AI | OpenAI 兼容协议（阿里云百炼通义千问 + DeepSeek 独立端点凭据路由）· 内置 mock provider 可离线开发 |
+| 部署 | Docker Compose 五服务一键启动（多阶段构建，前端 nginx 托管） |
 
-## 快速开始（本地开发，10 分钟）
+## 🏗 项目架构
+
+```
+┌────────────┐        ┌─────────────────────────────────────────┐
+│  Vue3 SPA  │ ─HTTP─▶│  nginx / vite proxy                     │
+│ (ECharts)  │ ◀─SSE──│                                         │
+└────────────┘        └────────────────┬────────────────────────┘
+                                       │ /api
+                    ┌──────────────────▼──────────────────┐
+                    │            Spring Boot              │
+                    │  Auth / Interview / Training / QA   │
+                    │  Resume / Report / Billing / Admin  │
+                    ├─────────────────────────────────────┤
+                    │ InterviewService（状态机编排）       │
+                    │  ├─ InterviewQuestionBank（出题）    │
+                    │  ├─ ProjectQuestionGenerator（简历题）│
+                    │  ├─ FollowUpStrategy（追问决策）      │
+                    │  ├─ EvaluationService（LLM 评分）     │
+                    │  └─ StateTransitionStrategy（转移）   │
+                    ├─────────────────────────────────────┤
+                    │ AiModelClient（多端点凭据路由）       │
+                    │ LlmCredentialResolver（用户Key优先）  │
+                    │ RateLimitInterceptor（滑动窗口限流）  │
+                    └───┬──────────────┬────────────┬─────┘
+                        │              │            │
+                    ┌───▼───┐     ┌────▼────┐  ┌────▼─────────┐
+                    │ MySQL │     │  Redis  │  │Elasticsearch │
+                    │ 持久化 │     │会话/限流 │  │向量检索(可选) │
+                    └───────┘     └─────────┘  └──────────────┘
+```
+
+### 核心模块说明
+
+**1. 面试状态机（`interview` 包）**：五环节 `OPENING → BASICS → PROJECT → DEEP → CLOSING → FINISHED`，每轮固定「评分 → 追问决策 → 难度调整 → 状态转移」四步编排，LLM 只负责单步评分与话术，转移条件全部是代码硬规则，面试不跑偏；难度采用迟滞控制（连续 N 次高分才升档）避免抖动震荡。
+
+**2. 三层 Memory 设计**：工作记忆（12 条滑动窗口对话原文）支撑追问引用；会话记忆（状态机快照 + TTL）承载环节/难度/连续分；长期记忆（MySQL）沉淀知识库/简历/报告。每题作答后即被结构化评分记录替代原文，上下文长度恒定，20 轮面试不超窗。
+
+**3. 评估系统**：提示词锚点式约束四维（准确/完整/清晰/深度）JSON 输出，解析失败自动重试、仍失败降级保守评分保证流程不中断；报告层按环节聚合生成雷达图、亮点/薄弱点与复习建议。
+
+**4. 多端点凭据路由（`ai` 包）**：官方模型按价目目录的 `provider` 字段路由到各自端点（通义千问 / DeepSeek 独立 base-url + api-key），用户自带 Key 优先于官方凭据，未配置时安全降级。
+
+**5. 健壮性与防滥用**：全局异常处理（500 不暴露细节）；按用户滑动窗口限流覆盖作答、开局/结束、问答、下单、反馈、报告等全部重开销与资金路径；单用户仅允许一场进行中面试/训练；短场额度退还防白嫖环路。
+
+## 🚀 快速开始（本地开发）
 
 ### 前置条件
 
@@ -39,7 +97,7 @@
 docker compose up -d mysql redis
 ```
 
-首次启动会自动执行建表脚本（`src/main/resources/db/schema.sql`）。
+首次启动自动执行建表脚本（`src/main/resources/db/schema.sql`）。
 
 ### 2. 配置环境变量（可选）
 
@@ -47,8 +105,7 @@ docker compose up -d mysql redis
 cp .env.example .env   # Windows: copy .env.example .env
 ```
 
-不配置也能跑：AI 默认 `mock` provider（离线可完整走通全流程）。
-接入真实 LLM 时编辑 `.env`：
+不配置也能跑：AI 默认 `mock` provider，离线可完整走通全流程。接入真实 LLM 时编辑 `.env`：
 
 ```properties
 OFFERFORGE_AI_PROVIDER=openai-compatible
@@ -57,146 +114,60 @@ OFFERFORGE_AI_API_KEY=sk-xxxx
 OFFERFORGE_AI_MODEL=qwen-plus
 ```
 
-本地启动后端会读取系统环境变量；也可直接在 IDE 的运行配置中设置。
-
-### 3. 启动后端（默认 8081）
+### 3. 启动后端（默认 8081）与前端（默认 5173）
 
 ```bash
 ./mvnw spring-boot:run       # Windows: mvnw.cmd spring-boot:run
 ```
 
-### 4. 启动前端（默认 5173，已配置 /api 代理）
+```bash
+cd frontend && npm install && npm run dev
+```
+
+打开 `http://localhost:5173`，注册账号 → 资源库导入官方题库 → 开始一场模拟面试。
+
+### 4. 运行测试
 
 ```bash
-cd frontend
-npm install
-npm run dev
+./mvnw clean test            # 全量单元 + 集成测试（330+ 用例，含限流/额度/计费/题库导入）
 ```
 
-打开 `http://localhost:5173`，注册账号 → 快捷提问页点击「导入内置知识库」→ 开始模拟面试。
-
-### 5. 运行测试
+## 📦 部署（Docker Compose 一键启动）
 
 ```bash
-./mvnw clean test            # 全量单元 + 集成测试（含反馈/计费/题库导入）
+cp .env.example .env     # 按需填写 LLM API Key 等配置
+docker compose up -d --build
 ```
 
-## 项目架构
+五服务：`backend`（多阶段构建 JDK17 编译 → JRE17 运行）、`frontend`（Vite 构建 → nginx 静态 + API 反代 + SSE 透传）、`mysql:8.0`、`redis:7`、`elasticsearch:8.x`。全部数据卷持久化，敏感配置经 `.env` 注入（不入 git）。
 
-```
-┌────────────┐        ┌─────────────────────────────────────────┐
-│  Vue3 SPA  │ ─HTTP─▶│  nginx / vite proxy                     │
-│ (ECharts)  │ ◀─SSE──│                                         │
-└────────────┘        └────────────────┬────────────────────────┘
-                                       │ /api
-                    ┌──────────────────▼──────────────────┐
-                    │            Spring Boot              │
-                    │  AuthController  InterviewController│
-                    │  QaController    ReportController   │
-                    │  ResumeController HealthController  │
-                    ├─────────────────────────────────────┤
-                    │ InterviewService（状态机编排）       │
-                    │  ├─ InterviewQuestionBank（出题）    │
-                    │  ├─ ProjectQuestionGenerator（简历题）│
-                    │  ├─ FollowUpStrategy（追问决策）      │
-                    │  ├─ EvaluationService（LLM 评分）     │
-                    │  └─ StateTransitionStrategy（转移）   │
-                    ├─────────────────────────────────────┤
-                    │ AiModelClient（mock / OpenAI 兼容）   │
-                    │ ToolRegistry（Agent 工具注册）        │
-                    │ RateLimitInterceptor（滑动窗口限流）  │
-                    └───┬──────────────┬────────────┬─────┘
-                        │              │            │
-                    ┌───▼───┐     ┌────▼────┐  ┌────▼─────────┐
-                    │ MySQL │     │  Redis  │  │Elasticsearch │
-                    │ 持久化 │     │会话/限流 │  │向量检索(可选) │
-                    └───────┘     └─────────┘  └──────────────┘
+```bash
+curl http://localhost:8080/api/health      # {"status":"UP",...}
 ```
 
-## 核心模块说明
-
-### 1. 面试状态机（`interview` 包）
-
-五环节状态机：`OPENING → BASICS → PROJECT → DEEP → CLOSING → FINISHED`。
-每轮对话由 `InterviewService` 编排：**评分 → 追问决策 → 难度调整 → 状态转移**：
-
-- 回答由 `EvaluationService` 调用 LLM 输出结构化评分（四维 + 总分 + 点评）
-- `FollowUpStrategy` 根据分数与已追问次数决定是否追问（上限可配，默认 2 次）
-- 连续高分升难度、连续低分降难度（`consecutiveHighScores/LowScores`）
-- `StateTransitionStrategy` 在题量用尽或环节结束时推进状态
-- 支持「跳过此题」（计 0 分推进）与提前结束（按已作答题目出报告）
-
-### 2. 三层 Memory 设计
-
-| 层 | 载体 | 职责 |
-| --- | --- | --- |
-| 工作记忆 | `InterviewMessageStore` 滑动窗口（默认 12 条） | 最近对话原文，组装进 LLM 上下文 |
-| 会话记忆 | `InterviewSessionStore`（`InterviewContext`） | 状态机快照、当前题、难度、连续分数，TTL 过期 |
-| 长期记忆 | MySQL（知识库/简历/报告归档） | 跨面试沉淀，驱动项目题与进步曲线 |
-
-**上下文压缩策略**：每题作答后，评分与点评以结构化字段存入 `QuestionRecord`，不再占用对话窗口；窗口外的历史以「环节小结 + 分数」的形式体现在报告与提示词中，保证 LLM 上下文长度恒定。
-
-### 3. 评估系统
-
-- 提示词强约束 JSON 输出（accuracy/completeness/clarity/depth 各 0-10 分 + 点评）
-- JSON 解析失败自动重试一次，仍失败则降级为保守评分，保证面试不中断
-- 报告层对各题分数按环节聚合，生成雷达图、亮点/薄弱点、改进建议与复习材料
-
-### 4. 工具调用（`tool` 包）
-
-`AgentTool` + `ToolRegistry` 提供统一的工具注册与上下文注入（`ToolContext`），
-知识库检索、简历读取等能力以工具形式暴露给 Agent 编排层。
-
-### 5. 健壮性设计
-
-- 全局异常处理：LLM 超时 503、参数校验 400、未知异常 500 不暴露细节
-- 限流：Redis（或内存）滑动窗口，`/api/interview/ask` 10 次/分、`/api/qa/ask` 5 次/分、`/api/report` 3 次/分；单用户仅允许一场进行中面试
-- 降级：Redis 不可用降级内存存储；ES 不可用降级 SQL 模糊检索
-- 健康检查 `GET /api/health`：四组件探测 + UP/DEGRADED/DOWN 聚合
-
-## API 文档
+## 📚 API 文档
 
 完整接口文档见 [docs/API.md](docs/API.md)。主要接口：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/auth/register` · `/login` · `/logout` · `/refresh` | 认证（JWT + refresh cookie） |
-| POST | `/api/knowledge/import` | 导入内置知识库 |
-| POST | `/api/qa/ask` | 知识问答 |
-| POST | `/api/interview/start` | 开始面试（岗位方向 + 可选简历） |
-| POST | `/api/interview/{sessionId}/ask` | 提交回答（SSE 流式） |
-| POST | `/api/interview/{sessionId}/skip` | 跳过当前题（SSE，计 0 分） |
-| POST | `/api/interview/{sessionId}/finish` | 结束面试并归档报告 |
-| GET | `/api/interview/{sessionId}/status` | 查询面试状态 |
+| POST | `/api/auth/register` · `/login` · `/logout` · `/refresh` | 认证（令牌 + refresh cookie） |
+| GET | `/api/knowledge/categories` · POST `/api/knowledge/import` | 题库分组 / 导入官方题库 |
+| POST | `/api/qa/ask-stream` | 知识问答（SSE 流式） |
+| POST | `/api/interview/start` | 开始面试（岗位方向 + 可选简历 + 可选模型） |
+| POST | `/api/interview/{id}/ask` | 提交回答（SSE 流式评分 + 追问） |
+| POST | `/api/interview/{id}/finish` | 结束面试并归档报告（短场不归档） |
+| POST | `/api/training/start` · `/{id}/answer` · `/{id}/finish` | 专项训练开局 / 作答 / 结束 |
 | POST | `/api/resume` · `/api/resume/parse` | 保存简历 / LLM 解析预览 |
-| GET | `/api/resume/list` · `/detail/{id}` | 简历列表 / 详情 |
-| GET | `/api/report/{interviewId}` · `/history` · `/progress` | 报告 / 历史 / 进步曲线 |
+| GET | `/api/report/{id}` · `/history` · `/progress` | 报告 / 历史 / 进步曲线 |
 | POST | `/api/feedback` · GET `/api/feedback/mine` | 提交图文反馈 / 本人历史 |
-| GET | `/api/admin/feedbacks` | 管理台分页查看反馈（仅管理员） |
-| GET | `/api/billing/status` · `/packages` · `/models` | 计费状态 / 充值档位 / 模型价目（含 DeepSeek） |
+| GET | `/api/billing/status` · `/packages` · `/models` | 计费状态 / 充值档位 / 模型价目 |
+| GET | `/api/admin/users` · `/admin/feedbacks` | 管理台（仅管理员） |
 | GET | `/api/health` | 健康检查（免鉴权） |
 
-统一响应体 `{ code, message, data }`，`code=0` 为成功；`42900` 限流、`50300` AI 不可用、`50301` 服务不可用。
+统一响应体 `{ code, message, data }`，`code=0` 成功；`42900` 限流、`50300` AI 不可用。
 
-## 部署（Docker Compose 一键启动）
-
-```bash
-cp .env.example .env     # 按需填写 LLM API Key
-docker compose up -d --build
-```
-
-五服务：`backend`（多阶段构建 JDK17 编译 → JRE17 运行，8080）、`frontend`（node 编译 → nginx 静态 + API 反代 + SSE，80）、`mysql:8.0`、`redis:7`、`elasticsearch:8.x`（单节点、关安全认证）。全部数据卷持久化，配置经 `.env` 注入（不入 git）。
-
-验证：
-
-```bash
-curl http://localhost:8080/api/health      # {"status":"UP",...}
-# 浏览器访问 http://localhost 使用前端
-```
-
-常用运维命令：`docker compose logs -f backend`、`docker compose down`（加 `-v` 清除数据卷）。
-
-## 面试话术要点
+## 💬 面试话术要点
 
 > 这个项目解决了什么问题：把「刷题 + 模拟面试 + 复盘」闭环产品化——基于候选人自己的知识库和简历出题，面试过程实时追问与动态调难，结束后给出可量化、可追踪的改进报告。
 
@@ -224,6 +195,13 @@ LLM 上下文有限，不能把整场面试原文塞进去。我分了三层：
 ① 锚点式评分标准压缩模型自由发挥空间；② JSON 解析失败自动重试，仍失败降级保守评分，
 保证流程可用；③ 报告层按环节聚合看趋势而非纠结单题分数；④ 难度动态调整后，
 分数解释结合当时的难度档位，避免「题目变难分数下降」被误读为能力退步。
+
+### 难点四：计费与防滥用——免费额度、多模型路由与安全边界？
+
+混合计费模式要同时防「白嫖」与「滥用」：短场（不足 5 题）不扣额度防误开损失，
+但开局/结束接口加滑动窗口限流，堵住「开局即结束」循环套取退还、刷官方模型凭据的环路；
+用户自带 Key 用 AES-256-GCM 加密落库，baseUrl 强制 HTTPS 并拒绝内网地址防 SSRF；
+下单与模拟支付走行锁 + 状态条件更新防并发重复入账，资金路径全部登录态鉴权。
 
 ## License
 
