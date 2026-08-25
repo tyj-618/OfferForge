@@ -12,6 +12,7 @@ data/
 
 # 部署与验收过程产物（打包件、日志、截图、一次性脚本）
 *.tar
+*.zip
 *.txt
 verify-*.log
 survey-*.sh
